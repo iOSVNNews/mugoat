@@ -23,6 +23,8 @@ enum Act {
     NavToggle,
 
     Horn,
+    Home,
+    FirstPerson,
 }
 
 #[derive(Clone, Copy)]
@@ -61,10 +63,12 @@ const BUTTONS: &[Spec] = &[
     b(TopRight(84.0, 30.0), 22.0, Some(("COVER", Key("KeyQ"))), Some(("RADIO", Key("KeyQ")))),
     b(TopRight(138.0, 30.0), 22.0, Some(("CROUCH", Key("ControlLeft"))), Some(("LOOK\nBACK", Key("KeyC")))),
     b(TopRight(192.0, 30.0), 22.0, Some(("CAM", Key("KeyV"))), Some(("CAM", Key("KeyV")))),
+    b(TopRight(246.0, 30.0), 22.0, Some(("MENU", Home)), Some(("MENU", Home))),
     b(TopLeft(30.0, 30.0), 22.0, Some(("PAUSE", KeyNav("Escape"))), Some(("PAUSE", KeyNav("Escape")))),
     b(TopLeft(84.0, 30.0), 22.0, Some(("PHONE", KeyNav("ArrowUp"))), Some(("PHONE", KeyNav("ArrowUp")))),
     b(TopLeft(138.0, 30.0), 22.0, Some(("MENU\nKEYS", NavToggle)), Some(("MENU\nKEYS", NavToggle))),
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
+    b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
     b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
     n(-135.0, "◀", "ArrowLeft"),
     n(-87.0, "▲", "ArrowUp"),
@@ -89,10 +93,24 @@ static AIM_SENS_BITS: AtomicU64 = AtomicU64::new(0.8f64.to_bits());
 static HOLD_AIM_FLAG: AtomicBool = AtomicBool::new(false);
 static FIRE_AIM_FLAG: AtomicBool = AtomicBool::new(true);
 
+static BUTTON_SCALE_BITS: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
+static BUTTON_OFFSET_X_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
+static BUTTON_OFFSET_Y_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
+static BUTTON_OPACITY_BITS: AtomicU64 = AtomicU64::new(0.22f64.to_bits());
+static STICK_OFFSET_X_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
+static STICK_OFFSET_Y_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
+
 pub fn touch_sensitivity() -> f64 { f64::from_bits(TOUCH_SENS_BITS.load(Ordering::Relaxed)) }
 pub fn aim_sensitivity() -> f64 { f64::from_bits(AIM_SENS_BITS.load(Ordering::Relaxed)) }
 pub fn hold_aim() -> bool { HOLD_AIM_FLAG.load(Ordering::Relaxed) }
 pub fn fire_aim() -> bool { FIRE_AIM_FLAG.load(Ordering::Relaxed) }
+
+pub fn button_scale() -> f64 { f64::from_bits(BUTTON_SCALE_BITS.load(Ordering::Relaxed)) }
+pub fn button_offset_x() -> f64 { f64::from_bits(BUTTON_OFFSET_X_BITS.load(Ordering::Relaxed)) }
+pub fn button_offset_y() -> f64 { f64::from_bits(BUTTON_OFFSET_Y_BITS.load(Ordering::Relaxed)) }
+pub fn button_opacity() -> f64 { f64::from_bits(BUTTON_OPACITY_BITS.load(Ordering::Relaxed)) }
+pub fn stick_offset_x() -> f64 { f64::from_bits(STICK_OFFSET_X_BITS.load(Ordering::Relaxed)) }
+pub fn stick_offset_y() -> f64 { f64::from_bits(STICK_OFFSET_Y_BITS.load(Ordering::Relaxed)) }
 
 pub fn update_settings_from_env() {
     if let Some(v) = std::env::var("MUGUET_TOUCH_SENS").ok().and_then(|v| v.parse::<f64>().ok()) {
@@ -107,6 +125,25 @@ pub fn update_settings_from_env() {
     if let Ok(v) = std::env::var("MUGUET_FIRE_AIM") {
         FIRE_AIM_FLAG.store(v != "0", Ordering::Relaxed);
     }
+    if let Some(v) = std::env::var("MUGUET_BUTTON_SCALE").ok().and_then(|v| v.parse::<f64>().ok()) {
+        BUTTON_SCALE_BITS.store(v.clamp(0.6, 2.0).to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_BUTTON_OFFSET_X").ok().and_then(|v| v.parse::<f64>().ok()) {
+        BUTTON_OFFSET_X_BITS.store(v.clamp(-150.0, 150.0).to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_BUTTON_OFFSET_Y").ok().and_then(|v| v.parse::<f64>().ok()) {
+        BUTTON_OFFSET_Y_BITS.store(v.clamp(-150.0, 150.0).to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_BUTTON_OPACITY").ok().and_then(|v| v.parse::<f64>().ok()) {
+        BUTTON_OPACITY_BITS.store(v.clamp(0.1, 0.9).to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_STICK_OFFSET_X").ok().and_then(|v| v.parse::<f64>().ok()) {
+        STICK_OFFSET_X_BITS.store(v.clamp(-100.0, 150.0).to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_STICK_OFFSET_Y").ok().and_then(|v| v.parse::<f64>().ok()) {
+        STICK_OFFSET_Y_BITS.store(v.clamp(-100.0, 150.0).to_bits(), Ordering::Relaxed);
+    }
+    OVERLAY.with(|cell| if let Some(o) = cell.borrow_mut().as_mut() { o.apply_layout(); });
 }
 
 const MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(120);
@@ -226,24 +263,30 @@ pub fn install(window: &Window) {
         v
     };
     let (sx, sy, sw, sh) = safe;
+    let b_scale = button_scale();
+    let (b_ox, b_oy) = (button_offset_x(), button_offset_y());
+    let (s_ox, s_oy) = (stick_offset_x(), stick_offset_y());
     let place = |a: Anchor| match a {
-        BottomRight(dx, dy) => (sx + sw - dx, sy + sh - dy),
-        TopLeft(dx, dy) => (sx + dx, sy + dy),
-        TopRight(dx, dy) => (sx + sw - dx, sy + dy),
-        Nav(dx, dy) => (sx + sw / 2.0 + dx, sy + 30.0 + dy),
+        BottomRight(dx, dy) => (sx + sw - dx * b_scale - b_ox, sy + sh - dy * b_scale - b_oy),
+        TopLeft(dx, dy) => (sx + dx * b_scale, sy + dy * b_scale),
+        TopRight(dx, dy) => (sx + sw - dx * b_scale, sy + dy * b_scale),
+        Nav(dx, dy) => (sx + sw / 2.0 + dx * b_scale, sy + 30.0 * b_scale + dy),
     };
     let buttons = BUTTONS
         .iter()
         .map(|s| {
+            let r = s.radius * b_scale;
             let center = place(s.anchor);
-            let view = circle(&root, center, s.radius, 1.0, 0.18);
-            let label = label(&view, s.radius);
-            Btn { view, label, center, radius: s.radius }
+            let view = circle(&root, center, r, 1.0, button_opacity());
+            let label = label(&view, r);
+            Btn { view, label, center, radius: r }
         })
         .collect();
-    let stick_home = (sx + 40.0 + STICK_RADIUS, sy + sh - 30.0 - STICK_RADIUS);
-    let stick_base = circle(&root, stick_home, STICK_RADIUS, 1.0, 0.12);
-    let stick_knob = circle(&root, stick_home, KNOB_RADIUS, 1.0, 0.3);
+    let stick_radius = STICK_RADIUS * b_scale;
+    let knob_radius = KNOB_RADIUS * b_scale;
+    let stick_home = (sx + 40.0 + stick_radius + s_ox, sy + sh - 30.0 - stick_radius - s_oy);
+    let stick_base = circle(&root, stick_home, stick_radius, 1.0, 0.12);
+    let stick_knob = circle(&root, stick_home, knob_radius, 1.0, 0.3);
     let loading_label = label(&root, 150.0);
     let network_label = label(&root, 150.0);
     unsafe {
@@ -293,12 +336,53 @@ impl Overlay {
         self.restyle();
     }
 
+    fn apply_layout(&mut self) {
+        let (sx, sy, sw, sh) = self.safe;
+        let b_scale = button_scale();
+        let (b_ox, b_oy) = (button_offset_x(), button_offset_y());
+        let (s_ox, s_oy) = (stick_offset_x(), stick_offset_y());
+
+        let place = |a: Anchor| match a {
+            BottomRight(dx, dy) => (sx + sw - dx * b_scale - b_ox, sy + sh - dy * b_scale - b_oy),
+            TopLeft(dx, dy) => (sx + dx * b_scale, sy + dy * b_scale),
+            TopRight(dx, dy) => (sx + sw - dx * b_scale, sy + dy * b_scale),
+            Nav(dx, dy) => (sx + sw / 2.0 + dx * b_scale, sy + 30.0 * b_scale + dy),
+        };
+
+        for (i, b) in self.buttons.iter_mut().enumerate() {
+            let s = &BUTTONS[i];
+            b.radius = s.radius * b_scale;
+            b.center = place(s.anchor);
+            unsafe {
+                let _: () = msg_send![&*b.view, setFrame: rect(b.center.0 - b.radius, b.center.1 - b.radius, b.radius * 2.0, b.radius * 2.0)];
+                let layer: Retained<AnyObject> = msg_send![&*b.view, layer];
+                let _: () = msg_send![&*layer, setCornerRadius: b.radius];
+                let _: () = msg_send![&*b.label, setFrame: rect(0.0, 0.0, b.radius * 2.0, b.radius * 2.0)];
+            }
+        }
+
+        let stick_radius = STICK_RADIUS * b_scale;
+        let knob_radius = KNOB_RADIUS * b_scale;
+        self.stick_home = (sx + 40.0 + stick_radius + s_ox, sy + sh - 30.0 - stick_radius - s_oy);
+        unsafe {
+            let _: () = msg_send![&*self.stick_base, setFrame: rect(self.stick_home.0 - stick_radius, self.stick_home.1 - stick_radius, stick_radius * 2.0, stick_radius * 2.0)];
+            let layer: Retained<AnyObject> = msg_send![&*self.stick_base, layer];
+            let _: () = msg_send![&*layer, setCornerRadius: stick_radius];
+
+            let _: () = msg_send![&*self.stick_knob, setFrame: rect(self.stick_home.0 - knob_radius, self.stick_home.1 - knob_radius, knob_radius * 2.0, knob_radius * 2.0)];
+            let layer_k: Retained<AnyObject> = msg_send![&*self.stick_knob, layer];
+            let _: () = msg_send![&*layer_k, setCornerRadius: knob_radius];
+        }
+        self.restyle();
+    }
+
     fn restyle(&self) {
+        let base_alpha = button_opacity();
         let pressed: HashSet<usize> = self.grips.values().filter_map(|g| if let Grip::Button { idx, .. } = g { Some(*idx) } else { None }).collect();
         for (i, b) in self.buttons.iter().enumerate() {
             let latched = self.aim_latched && matches!(self.spec_act(i), Some((_, AimToggle)))
                 || self.nav && matches!(self.spec_act(i), Some((_, NavToggle)));
-            set_alpha_bg(&b.view, if pressed.contains(&i) { 0.45 } else if latched { 0.35 } else { 0.18 });
+            set_alpha_bg(&b.view, if pressed.contains(&i) { (base_alpha + 0.25).min(0.95) } else if latched { (base_alpha + 0.15).min(0.9) } else { base_alpha });
         }
     }
 
@@ -312,7 +396,9 @@ impl Overlay {
 
     fn in_stick_zone(&self, p: (f64, f64)) -> bool {
         let (sx, sy, sw, _) = self.safe;
-        p.0 < sx + sw * 0.4 && p.1 > sy + 70.0
+        let s_ox = stick_offset_x();
+        let s_oy = stick_offset_y();
+        p.0 < sx + sw * 0.45 + s_ox && p.1 > sy + 60.0 - s_oy
     }
 
     fn touch(&mut self, t: &Touch) {
@@ -325,6 +411,17 @@ impl Overlay {
                         Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
                         Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
+                        Some(Home) => {
+                            #[cfg(target_os = "ios")]
+                            {
+                                extern "C" { fn muguet_open_menu(); }
+                                unsafe { muguet_open_menu(); }
+                            }
+                        }
+                        Some(FirstPerson) => {
+                            crate::mp::request_toggle_first_person();
+                            input::key("KeyV", true, false, None, false);
+                        }
                         _ => {}
                     }
                 } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
@@ -383,12 +480,13 @@ impl Overlay {
             }
         }
         if let Some((o, at)) = stick {
+            let sr = STICK_RADIUS * button_scale();
             let (mut dx, mut dy) = (at.0 - o.0, at.1 - o.1);
             let len = (dx * dx + dy * dy).sqrt();
-            let k = if len > STICK_RADIUS { STICK_RADIUS / len } else { 1.0 };
+            let k = if len > sr { sr / len } else { 1.0 };
             dx *= k;
             dy *= k;
-            let (nx, ny) = (dx / STICK_RADIUS, dy / STICK_RADIUS);
+            let (nx, ny) = (dx / sr, dy / sr);
             if nx < -0.35 { keys.insert("KeyA"); }
             if nx > 0.35 { keys.insert("KeyD"); }
             if self.in_car {
@@ -398,7 +496,7 @@ impl Overlay {
                 if ny < -0.35 { keys.insert("KeyW"); }
                 if ny > 0.35 { keys.insert("KeyS"); }
             }
-            let sprint = !self.in_car && len > STICK_RADIUS * SPRINT_REACH;
+            let sprint = !self.in_car && len > sr * SPRINT_REACH;
             if sprint { keys.insert("ShiftLeft"); }
             set_alpha_bg(&self.stick_knob, if sprint { 0.65 } else { 0.3 });
             move_to(&self.stick_base, o);

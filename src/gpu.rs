@@ -3172,7 +3172,20 @@ impl Gpu {
             }
         }
         let delay = self.frame_pacer.delay(now, fps);
-        if !delay.is_zero() { std::thread::sleep(delay); }
+        #[cfg(target_os = "ios")]
+        {
+            if crate::performance::promotion_sync_enabled() {
+                extern "C" { fn muguet_wait_vsync(timeout_ms: u32) -> bool; }
+                let timeout = if fps >= 120 { 12 } else { 20 };
+                unsafe { muguet_wait_vsync(timeout); };
+            } else if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            if !delay.is_zero() { std::thread::sleep(delay); }
+        }
         self.materialize_clears(id);
         let visible = !OCCLUDED.load(Ordering::Relaxed);
         if let (Some(t), Some(_), true) = (self.tex(id), self.surface.as_ref(), visible) {

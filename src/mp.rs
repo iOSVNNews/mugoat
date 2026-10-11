@@ -201,6 +201,29 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("AddBlipForEntity", "hud_commands::AddBlipForEntity(int)"),
     ("RemoveBlip", "hud_commands::CommandRemoveBlip(int&)"),
     ("ShowHeadingIndicatorOnBlip", "hud_commands::CommandShowHeadingIndicatorOnBlip(int, bool)"),
+    ("AddBlipForCoord", "hud_commands::AddBlipForCoord(rage::scrVector const&)"),
+    ("AddBlipForCoord2", "hud_commands::CommandAddBlipForCoord(rage::scrVector const&)"),
+    ("SetBlipSprite", "hud_commands::CommandSetBlipSprite(int, int)"),
+    ("SetBlipSprite2", "hud_commands::SetBlipSprite(int, int)"),
+    ("SetBlipColour", "hud_commands::CommandSetBlipColour(int, int)"),
+    ("SetBlipColour2", "hud_commands::SetBlipColour(int, int)"),
+    ("SetBlipScale", "hud_commands::CommandSetBlipScale(int, float)"),
+    ("SetBlipScale2", "hud_commands::SetBlipScale(int, float)"),
+    ("SetBlipAsShortRange", "hud_commands::CommandSetBlipAsShortRange(int, bool)"),
+    ("SetBlipAsShortRange2", "hud_commands::SetBlipAsShortRange(int, bool)"),
+    ("SetFollowPedCamViewMode", "camera_commands::CommandSetFollowPedCamViewMode(int)"),
+    ("SetFollowPedCamViewMode2", "camera_commands::SetFollowPedCamViewMode(int)"),
+    ("GetFollowPedCamViewMode", "camera_commands::CommandGetFollowPedCamViewMode()"),
+    ("GetFollowPedCamViewMode2", "camera_commands::GetFollowPedCamViewMode()"),
+    ("SetFollowVehicleCamViewMode", "camera_commands::CommandSetFollowVehicleCamViewMode(int)"),
+    ("SetFollowVehicleCamViewMode2", "camera_commands::SetFollowVehicleCamViewMode(int)"),
+    ("GetFollowVehicleCamViewMode", "camera_commands::CommandGetFollowVehicleCamViewMode()"),
+    ("GetFollowVehicleCamViewMode2", "camera_commands::GetFollowVehicleCamViewMode()"),
+    ("RequestScript", "script_commands::CommandRequestScript(char const*)"),
+    ("RequestScript2", "script_commands::RequestScript(char const*)"),
+    ("HasScriptLoaded", "script_commands::HasScriptLoaded(char const*)"),
+    ("StartNewScript", "script_commands::CommandStartNewScript(char const*, int)"),
+    ("StartNewScript2", "script_commands::StartNewScript(char const*, int)"),
 ];
 
 const ACTIVE_THREAD_TLS: u64 = 3088;
@@ -257,6 +280,9 @@ impl Peer {
 }
 
 fn pvp_enabled() -> bool {
+    let raw = std::env::var("MUGUET_ROOM").unwrap_or_default().to_lowercase();
+    if raw.contains("-pvp-") || raw.contains("-pvp") { return true; }
+    if raw.contains("-peace-") || raw.contains("-peace") { return false; }
     std::env::var("MUGUET_PVP").map(|v| v != "0").unwrap_or(false)
 }
 
@@ -424,7 +450,7 @@ fn net() -> Option<&'static Net> {
             std::thread::Builder::new()
                 .name("mp-server".into())
                 .spawn(|| {
-                    if let Err(e) = crate::server::run(proto::DEFAULT_PORT, 8) {
+                    if let Err(e) = crate::server::run(proto::DEFAULT_PORT, 32) {
                         eprintln!("[mp] cannot host on port {}: {e}", proto::DEFAULT_PORT);
                     }
                 })
@@ -435,7 +461,11 @@ fn net() -> Option<&'static Net> {
         let name = std::env::var("MUGUET_NAME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "Player".into()));
         let mode = std::env::var("MUGUET_MODE").unwrap_or_else(|_| "sandbox".into());
         let raw_room = std::env::var("MUGUET_ROOM").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "default".into());
-        let room = format!("{mode}-{raw_room}");
+        let room = if raw_room.starts_with("story-") || raw_room.starts_with("sandbox-") {
+            raw_room
+        } else {
+            format!("{mode}-{raw_room}")
+        };
         let sock = match UdpSocket::bind("0.0.0.0:0").and_then(|s| s.connect(&server).map(|_| s)) {
             Ok(s) => s,
             Err(e) => {
@@ -845,6 +875,122 @@ struct Game {
     spawn_shield: Option<Instant>,
 }
 
+struct ShopBlip {
+    pos: [f32; 3],
+    sprite: i32,
+    colour: i32,
+}
+
+const WORLD_SHOPS: &[ShopBlip] = &[
+    // Ammu-Nation (Vũ khí / Súng đạn)
+    ShopBlip { pos: [16.9, -1107.8, 29.8], sprite: 110, colour: 2 },
+    ShopBlip { pos: [253.9, -50.0, 69.9], sprite: 110, colour: 2 },
+    ShopBlip { pos: [-1305.4, -393.4, 36.7], sprite: 110, colour: 2 },
+    ShopBlip { pos: [-662.3, -935.3, 21.8], sprite: 110, colour: 2 },
+    ShopBlip { pos: [842.4, -1033.4, 28.2], sprite: 110, colour: 2 },
+    ShopBlip { pos: [810.2, -2157.6, 29.6], sprite: 110, colour: 2 },
+    ShopBlip { pos: [1693.4, 3759.5, 34.7], sprite: 110, colour: 2 },
+    ShopBlip { pos: [-330.2, 6083.9, 31.5], sprite: 110, colour: 2 },
+    ShopBlip { pos: [-3171.5, 1087.9, 20.8], sprite: 110, colour: 2 },
+    ShopBlip { pos: [252.3, 259.7, 105.7], sprite: 110, colour: 2 },
+
+    // Los Santos Customs (Sửa xe / Độ xe)
+    ShopBlip { pos: [-1155.5, -2005.4, 13.2], sprite: 72, colour: 0 },
+    ShopBlip { pos: [-365.1, -131.8, 38.7], sprite: 72, colour: 0 },
+    ShopBlip { pos: [731.8, -1088.8, 22.2], sprite: 72, colour: 0 },
+    ShopBlip { pos: [1175.0, 2640.0, 37.8], sprite: 72, colour: 0 },
+    ShopBlip { pos: [108.8, 6626.3, 31.8], sprite: 72, colour: 0 },
+
+    // Bệnh viện (Hospitals)
+    ShopBlip { pos: [340.5, -1396.8, 32.5], sprite: 61, colour: 1 },
+    ShopBlip { pos: [-449.6, -340.8, 34.5], sprite: 61, colour: 1 },
+    ShopBlip { pos: [1839.2, 3672.9, 34.3], sprite: 61, colour: 1 },
+
+    // Đồn Cảnh Sát (Police)
+    ShopBlip { pos: [426.0, -981.8, 30.7], sprite: 60, colour: 38 },
+    ShopBlip { pos: [638.5, 1.5, 44.7], sprite: 60, colour: 38 },
+    ShopBlip { pos: [1848.7, 3689.9, 34.3], sprite: 60, colour: 38 },
+    ShopBlip { pos: [-442.2, 6012.3, 31.7], sprite: 60, colour: 38 },
+
+    // Cửa hàng Quần Áo (Clothes)
+    ShopBlip { pos: [125.8, -223.8, 54.6], sprite: 73, colour: 0 },
+    ShopBlip { pos: [-709.8, -153.1, 37.4], sprite: 73, colour: 0 },
+    ShopBlip { pos: [-1192.8, -768.4, 17.3], sprite: 73, colour: 0 },
+    ShopBlip { pos: [75.3, -1392.7, 29.4], sprite: 73, colour: 0 },
+    ShopBlip { pos: [1693.8, 3760.1, 34.7], sprite: 73, colour: 0 },
+
+    // Tiệm Cắt Tóc (Barber)
+    ShopBlip { pos: [-32.9, -152.3, 57.1], sprite: 71, colour: 0 },
+    ShopBlip { pos: [-814.3, -183.8, 37.6], sprite: 71, colour: 0 },
+    ShopBlip { pos: [136.8, -1708.4, 29.3], sprite: 71, colour: 0 },
+    ShopBlip { pos: [1931.5, 3729.7, 32.8], sprite: 71, colour: 0 },
+
+    // Cửa Hàng Tiện Lợi 24/7 (Stores)
+    ShopBlip { pos: [373.9, 325.8, 103.6], sprite: 52, colour: 2 },
+    ShopBlip { pos: [-48.5, -1757.5, 29.4], sprite: 52, colour: 2 },
+    ShopBlip { pos: [-707.5, -914.3, 19.2], sprite: 52, colour: 2 },
+    ShopBlip { pos: [1961.5, 3740.7, 32.3], sprite: 52, colour: 2 },
+];
+
+static WORLD_BLIPS_DONE: AtomicBool = AtomicBool::new(false);
+pub static TOGGLE_FP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn request_toggle_first_person() {
+    TOGGLE_FP_REQUESTED.store(true, Ordering::Relaxed);
+}
+
+#[no_mangle]
+pub extern "C" fn muguet_toggle_first_person() {
+    request_toggle_first_person();
+}
+
+fn init_world_blips_once(c: &mut Cmd<'_, '_>) {
+    let ped = c.i("PlayerPedId", &[]);
+    if ped == 0 || !c.exists(ped) { return; }
+    if WORLD_BLIPS_DONE.swap(true, Ordering::Relaxed) { return; }
+
+    c.c_str(S_NAME, "shop_controller");
+    let name_arg = c.ptr(S_NAME);
+    if c.i("DoesScriptExist", &[name_arg]) != 0 {
+        let _ = c.i("RequestScript", &[name_arg]);
+        let _ = c.i("RequestScript2", &[name_arg]);
+        if c.i("HasScriptLoaded", &[name_arg]) != 0 {
+            let _ = c.i("StartNewScript", &[name_arg, i(1424)]);
+            let _ = c.i("StartNewScript2", &[name_arg, i(1424)]);
+        }
+    }
+
+    for shop in WORLD_SHOPS {
+        let coord_arg = c.vec_arg(0, shop.pos);
+        let mut blip = c.i("AddBlipForCoord", &[coord_arg]);
+        if blip == 0 { blip = c.i("AddBlipForCoord2", &[coord_arg]); }
+        if blip != 0 {
+            let _ = c.i("SetBlipSprite", &[i(blip), i(shop.sprite)]);
+            let _ = c.i("SetBlipSprite2", &[i(blip), i(shop.sprite)]);
+            let _ = c.i("SetBlipColour", &[i(blip), i(shop.colour)]);
+            let _ = c.i("SetBlipColour2", &[i(blip), i(shop.colour)]);
+            let _ = c.i("SetBlipScale", &[i(blip), f(0.75)]);
+            let _ = c.i("SetBlipScale2", &[i(blip), f(0.75)]);
+            let _ = c.i("SetBlipAsShortRange", &[i(blip), b(true)]);
+            let _ = c.i("SetBlipAsShortRange2", &[i(blip), b(true)]);
+        }
+    }
+    eprintln!("[blips] initialized {} world shop blips on minimap", WORLD_SHOPS.len());
+}
+
+fn update_camera_mode(c: &mut Cmd<'_, '_>) {
+    if TOGGLE_FP_REQUESTED.swap(false, Ordering::Relaxed) {
+        let mut cur = c.i("GetFollowPedCamViewMode", &[]);
+        if cur == 0 { cur = c.i("GetFollowPedCamViewMode2", &[]); }
+        let target = if cur == 4 { 1 } else { 4 };
+        let _ = c.i("SetFollowPedCamViewMode", &[i(target)]);
+        let _ = c.i("SetFollowPedCamViewMode2", &[i(target)]);
+        let _ = c.i("SetFollowVehicleCamViewMode", &[i(target)]);
+        let _ = c.i("SetFollowVehicleCamViewMode2", &[i(target)]);
+        eprintln!("[camera] view mode toggled: {cur} -> {target}");
+    }
+}
+
 static GAME: Mutex<Option<Game>> = Mutex::new(None);
 
 const PREFERRED_SCRIPTS: &[&str] = &["main_persistent", "standard_global_reg", "main", "sandbox", "freemode"];
@@ -912,6 +1058,9 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
     let scratch = call(caller, "_emscripten_stack_alloc", &[Val::I64(SCRATCH)]).map(|v| v.unwrap_i64() as u64).unwrap_or(0);
     if scratch != 0 {
         let mut c = Cmd { caller, scratch };
+        init_world_blips_once(&mut c);
+        update_camera_mode(&mut c);
+
         if WANT_BULLETS.swap(false, Ordering::Relaxed) {
             more_bullets(&mut c);
         }

@@ -202,3 +202,48 @@ fn mouse_delta(dx_: i32, dy_: i32) {
 pub fn wheel(notches: i32) {
     if notches != 0 { if let Some(z) = word(DZ) { z.fetch_add(notches, Ordering::SeqCst); } }
 }
+
+pub fn apply_cheat(code: &str) {
+    if std::env::var("MUGUET_SERVER").is_ok() || std::env::var("MUGUET_HOST").is_ok() {
+        eprintln!("[cheat] blocked in multiplayer mode");
+        return;
+    }
+    let code = code.trim().to_uppercase();
+    if code.is_empty() { return; }
+    eprintln!("[cheat] applying offline cheat: {code}");
+    std::thread::spawn(move || {
+        // Toggle GTA V cheat console: Backquote
+        key("Backquote", true, false, Some("`"), false);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        key("Backquote", false, false, None, false);
+        std::thread::sleep(std::time::Duration::from_millis(120));
+
+        // Type characters
+        for c in code.chars() {
+            let s = c.to_string();
+            let key_name = format!("Key{}", c);
+            key(&key_name, true, false, Some(&s), false);
+            std::thread::sleep(std::time::Duration::from_millis(45));
+            key(&key_name, false, false, None, false);
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+
+        // Enter to execute
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        key("Enter", true, false, Some("\r"), false);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        key("Enter", false, false, None, false);
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn muguet_apply_cheat(code: *const std::ffi::c_char) {
+    if code.is_null() { return; }
+    let s = unsafe { std::ffi::CStr::from_ptr(code) }.to_string_lossy();
+    apply_cheat(&s);
+}
+
+#[no_mangle]
+pub extern "C" fn muguet_is_multiplayer() -> bool {
+    std::env::var("MUGUET_SERVER").is_ok() || std::env::var("MUGUET_HOST").is_ok()
+}

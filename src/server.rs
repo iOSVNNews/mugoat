@@ -14,7 +14,7 @@ struct Player {
 }
 
 pub fn run(port: u16, max: usize) -> std::io::Result<()> {
-    let max = max.clamp(2, 32);
+    let max = max.clamp(2, 64);
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_read_timeout(Some(Duration::from_millis(500)))?;
     println!("[server] listening on UDP port {port} (up to {max} players per room)");

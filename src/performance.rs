@@ -5,6 +5,15 @@ pub const MIB: u64 = 1 << 20;
 pub const HEAP_CEILING: u64 = 16 << 30;
 pub static MEMORY_PRESSURE: AtomicBool = AtomicBool::new(false);
 static FRAME_LIMIT: AtomicU32 = AtomicU32::new(60);
+static PROMOTION_SYNC: AtomicBool = AtomicBool::new(true);
+
+pub fn set_promotion_sync(enabled: bool) {
+    PROMOTION_SYNC.store(enabled, Ordering::Relaxed);
+}
+
+pub fn promotion_sync_enabled() -> bool {
+    PROMOTION_SYNC.load(Ordering::Relaxed)
+}
 
 pub fn set_frame_limit(fps: f64) {
     let fps = if !fps.is_finite() { 60 } else if fps <= 0.0 { 0 }
