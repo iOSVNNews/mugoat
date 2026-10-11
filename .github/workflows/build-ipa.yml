@@ -1,0 +1,103 @@
+name: Build Muguet IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: muguet-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TERM_COLOR: never
+      BUNDLE_ID: vn.iosvn.muguet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Xcode and Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          xcode_major=$(xcodebuild -version | awk '/^Xcode / {split($2,v,"."); print v[1]}')
+          test "$xcode_major" -ge 26
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install 1.98.1 --profile minimal --target aarch64-apple-ios
+          rustup default 1.98.1
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          rustc --version
+          xcodegen --version
+
+      - name: Restore Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/ios
+          key: muguet-ios-arm64-rust-1.98.1-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'build.rs', 'src/**', 'ios/Launcher.swift', 'vendor/**') }}
+          restore-keys: |
+            muguet-ios-arm64-rust-1.98.1-
+
+      - name: Build IPA without game code
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ./make-ios.sh --ipa
+
+      - name: Validate and describe IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=target/ios-xcode/Build/Products/Release-iphoneos/Muguet.app
+          codesign --verify --deep --strict "$app"
+          plutil -lint "$app/Info.plist"
+          file "$app/muguet"
+          lipo -archs "$app/muguet" | grep -w arm64
+          unzip -t build/Muguet.ipa
+          test -s "$app/muguet"
+          test ! -f "$app/embedded.mobileprovision"
+          shasum -a 256 build/Muguet.ipa > build/Muguet.ipa.sha256
+          cp LICENSE build/LICENSE.txt
+          {
+            echo "Muguet iOS build"
+            echo "Source: https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA"
+            echo "Upstream: https://github.com/c22dev/muguet"
+            echo "Commit: $GITHUB_SHA"
+            echo "Bundle ID: $BUNDLE_ID"
+            echo "Architecture: arm64; minimum iOS: 15.0"
+            echo "Ad-hoc signed for re-signing with AltStore; no Apple provisioning profile."
+            echo "Game code: NOT INCLUDED. The launcher opens but GTA V cannot run."
+            echo "To enable gameplay, rebuild with your own game.zip/game.wasm."
+            xcodebuild -version
+            rustc --version
+          } > build/BUILD-INFO.txt
+          {
+            echo "### Muguet IPA"
+            echo "Built from commit $GITHUB_SHA."
+            echo "Ad-hoc signed arm64 IPA, ready for re-signing with AltStore."
+            echo "**No game.wasm was supplied: this build opens the launcher only.**"
+            echo ""
+            cat build/Muguet.ipa.sha256
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Muguet-IPA
+          path: |
+            build/Muguet.ipa
+            build/Muguet.ipa.sha256
+            build/BUILD-INFO.txt
+            build/LICENSE.txt
+          if-no-files-found: error
+          retention-days: 30
