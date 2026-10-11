@@ -394,13 +394,13 @@ impl Overlay {
         if self.in_car { s.in_car } else { s.on_foot }
     }
 
-    fn send_mouse_pos(&self, p: (f64, f64)) {
-        let (w, h) = input::size();
-        let (sx, sy, sw, sh) = self.safe;
-        let ex = ((p.0 - sx).max(0.0) / sw * w as f64).clamp(0.0, (w - 1) as f64) as i32;
-        let ey = ((p.1 - sy).max(0.0) / sh * h as f64).clamp(0.0, (h - 1) as f64) as i32;
-        input::mouse_pos(ex, ey);
-    }
+fn send_mouse_pos(safe: (f64, f64, f64, f64), p: (f64, f64)) {
+    let (w, h) = input::size();
+    let (sx, sy, sw, sh) = safe;
+    let ex = ((p.0 - sx).max(0.0) / sw * w as f64).clamp(0.0, (w - 1) as f64) as i32;
+    let ey = ((p.1 - sy).max(0.0) / sh * h as f64).clamp(0.0, (h - 1) as f64) as i32;
+    input::mouse_pos(ex, ey);
+}
 
     fn relabel(&mut self) {
         for i in 0..self.buttons.len() {
@@ -490,6 +490,7 @@ impl Overlay {
     }
 
     fn touch(&mut self, t: &Touch) {
+        let safe = self.safe;
         let p = (t.location.x / self.scale, t.location.y / self.scale);
         match t.phase {
             TouchPhase::Started => {
@@ -520,7 +521,7 @@ impl Overlay {
                         _ => {}
                     }
                 } else if self.nav {
-                    self.send_mouse_pos(p);
+                    send_mouse_pos(safe, p);
                     self.grips.insert(t.id, Grip::NavTouch { start: p, last: p, dragging: false });
                 } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
                     self.grips.insert(t.id, Grip::Stick { origin: p, at: p });
@@ -562,7 +563,7 @@ impl Overlay {
                         *last = p;
                         let dx = p.0 - start.0;
                         let dy = p.1 - start.1;
-                        self.send_mouse_pos(p);
+                        send_mouse_pos(safe, p);
                         if dx * dx + dy * dy > 36.0 {
                             if !*dragging {
                                 *dragging = true;
@@ -594,7 +595,7 @@ impl Overlay {
                         let dx = last.0 - start.0;
                         let dy = last.1 - start.1;
                         if dx * dx + dy * dy <= 36.0 {
-                            self.send_mouse_pos(*last);
+                            send_mouse_pos(safe, *last);
                             input::button(0, true);
                             std::thread::spawn(|| {
                                 std::thread::sleep(std::time::Duration::from_millis(50));
