@@ -433,7 +433,9 @@ fn net() -> Option<&'static Net> {
         let server = std::env::var("MUGUET_SERVER").ok().filter(|s| !s.trim().is_empty()).or(host.then(|| "127.0.0.1".to_string()))?;
         let server = if server.contains(':') { server } else { format!("{server}:{}", proto::DEFAULT_PORT) };
         let name = std::env::var("MUGUET_NAME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "Player".into()));
-        let room = std::env::var("MUGUET_ROOM").ok().filter(|s| !s.trim().is_empty()).unwrap_or_default();
+        let mode = std::env::var("MUGUET_MODE").unwrap_or_else(|_| "sandbox".into());
+        let raw_room = std::env::var("MUGUET_ROOM").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "default".into());
+        let room = format!("{mode}-{raw_room}");
         let sock = match UdpSocket::bind("0.0.0.0:0").and_then(|s| s.connect(&server).map(|_| s)) {
             Ok(s) => s,
             Err(e) => {

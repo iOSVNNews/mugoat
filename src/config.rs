@@ -134,7 +134,7 @@ fn locate() -> anyhow::Result<PathBuf> {
     Ok(build)
 }
 
-const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_ROOM", "MUGUET_NAME", "MUGUET_PVP"];
+const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_ROOM", "MUGUET_NAME", "MUGUET_PVP", "MUGUET_MODE"];
 
 #[cfg(target_os = "ios")]
 pub fn reload() -> Vec<String> {
@@ -187,6 +187,8 @@ fn settings(cfg_path: &Path) -> Vec<String> {
 
     let start_mode = std::env::var("MUGUET_START").ok().and_then(|v| v.parse::<f64>().ok()).or_else(|| num("start_mode")).unwrap_or(2.0) as i64;
     let start_mode = if (1..=2).contains(&start_mode) { start_mode } else { 2 };
+    let mode_name = if start_mode == 1 { "story" } else { "sandbox" };
+    set_default("MUGUET_MODE", mode_name);
     if !std::env::args().any(|a| a.starts_with("-wasmstartchoice")) {
         engine_args.push(format!("-wasmstartchoice={start_mode}"));
     }

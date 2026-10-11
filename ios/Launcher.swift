@@ -201,6 +201,21 @@ struct LauncherView: View {
                 Section("Chơi Online (Multiplayer)") {
                     Toggle("Bật chế độ Multiplayer", isOn: $s.multiplayer)
                     if s.multiplayer {
+                        HStack {
+                            Text("Phân vùng máy chủ:")
+                                .font(.callout)
+                            Spacer()
+                            Text(s.mode == 1 ? "Story Mode Server" : "Sandbox Server")
+                                .font(.caption.weight(.bold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(s.mode == 1 ? Color.orange.opacity(0.2) : Color.cyan.opacity(0.2))
+                                .foregroundStyle(s.mode == 1 ? Color.orange : Color.cyan)
+                                .clipShape(Capsule())
+                        }
+                        Text("Máy chủ tự động phân chia độc lập giữa Story và Sandbox: Người chơi ở 2 chế độ này sẽ không thể vào chung phòng.")
+                            .font(.caption2).foregroundStyle(.secondary)
+
                         Picker("Loại phòng", selection: $s.roomMode) {
                             Text("Tạo phòng").tag("create")
                             Text("Vào phòng").tag("join")
