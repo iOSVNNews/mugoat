@@ -70,12 +70,18 @@ This fork adds mobile-first controls, UI customizations, touch map navigation, a
 
 ## Installation & Sideloading
 
-Precompiled IPA packages are available under [Releases on iOSVNNews/muguet-ios-build](https://github.com/iOSVNNews/muguet-ios-build/releases).
+Direct downloads for precompiled IPA binaries are available on the [Releases page](https://github.com/iOSVNNews/muguet/releases/tag/iosvn-runtime8.1-20261012):
+
+- **Build 8.1 IPA:** [Muguet-v8.1.ipa](https://github.com/iOSVNNews/muguet/releases/download/iosvn-runtime8.1-20261012/Muguet-v8.1.ipa) *(or [Muguet.ipa](https://github.com/iOSVNNews/muguet/releases/download/iosvn-runtime8.1-20261012/Muguet.ipa))*
+- **Build Revision:** 8.1 (Native Mach-O ARM64 `__GAME` executable segment, precompiled game bytecode)
+- **SHA-256:** `51dcbc1098efe5164f740d248c2a52b5b45f68c269638412353636b8c630904d`
+
+Mirror release repository: [iOSVNNews/muguet-ios-build Releases](https://github.com/iOSVNNews/muguet-ios-build/releases).
 
 ### Sideloading Methods:
 - **TrollStore (Recommended)**: Grants unrestricted memory limits without expiration or developer certificate revokes.
-- **AltStore / SideStore**: Requires 7-day resigning. Enable the `com.apple.developer.kernel.increased-memory-limit` entitlement in your signing options if available.
-- **Feather / Scarlet / Sideloadly / Esign**: Sign using your developer or enterprise certificate.
+- **AltStore / SideStore**: Requires 7-day resigning. Standard profile signing supported.
+- **Feather / Scarlet / Sideloadly / Esign**: Sign using your personal, developer, or enterprise certificate. The IPA package includes standard `Payload/Muguet.app` root hierarchy for zero-configuration signing.
 - **Xcode**: Build and deploy directly using your personal or paid Apple Developer team ID.
 
 ---
