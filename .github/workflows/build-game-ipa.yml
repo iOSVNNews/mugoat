@@ -147,8 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd build && zip -0q Muguet-game-code-bundle.zip Muguet-game-code.ipa Muguet-game-code.ipa.sha256 BUILD-INFO.txt MUGUET-LICENSE.txt)
-          node ../ci/tools/ipa-artifact.cjs encrypt build/Muguet-game-code-bundle.zip build/Muguet-game-code.enc
+          node ../ci/tools/ipa-artifact.cjs encrypt build/Muguet-game-code.ipa build/Muguet-game-code.enc
           shasum -a 256 build/Muguet-game-code.enc > build/Muguet-game-code.enc.sha256
 
       - name: Upload encrypted IPA artifact

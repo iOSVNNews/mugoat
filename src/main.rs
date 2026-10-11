@@ -319,10 +319,10 @@ fn heap_type(mt: MemoryType) -> Result<MemoryType> {
         return Ok(mt);
     }
     let page = 1u64 << mt.page_size_log2();
-    let budget = performance::heap_budget(performance::physical_memory(), performance::available_memory(), 0);
-    let cap = budget.min(IOS_HEAP_MAX) / page;
-    anyhow::ensure!(cap >= mt.minimum(), "Insufficient iOS memory budget: game needs at least {} MB, available heap budget {} MB. Use Normal textures and lower resolution; an increased-memory profile may be required.", mt.minimum() * page >> 20, budget >> 20);
-    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap);
+    let min_bytes = mt.minimum() * page;
+    let budget = performance::heap_budget(performance::physical_memory(), performance::available_memory(), min_bytes);
+    let cap = (budget.min(IOS_HEAP_MAX) / page).max(mt.minimum());
+    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum());
     eprintln!("[host] adaptive game heap limit {} MB (16 GB ceiling)", max * page >> 20);
     MemoryTypeBuilder::new()
         .min(mt.minimum())
