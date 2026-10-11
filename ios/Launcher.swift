@@ -13,8 +13,8 @@ final class Settings: ObservableObject {
     @Published var scale = 0.5
     @Published var fps = 60
     @Published var textures = 0
-    @Published var touch = 1.0
-    @Published var aimSensitivity = 0.4
+    @Published var touch = 1.5
+    @Published var aimSensitivity = 0.8
     @Published var aimMode = "toggle"
     @Published var fireAim = true
     @Published var mute = false
@@ -33,8 +33,8 @@ final class Settings: ObservableObject {
         if let v = json["fps_limit"] as? Int, [30, 60, 120].contains(v) { fps = v }
         if fps > UIScreen.main.maximumFramesPerSecond { fps = 60 }
         if let v = json["texture_quality"] as? Int, (0...2).contains(v) { textures = v }
-        if let v = json["touch_sensitivity"] as? Double { touch = v }
-        if let v = json["aim_sensitivity"] as? Double { aimSensitivity = min(1.0, max(0.15, v)) }
+        if let v = json["touch_sensitivity"] as? Double { touch = max(0.1, min(10.0, v)) }
+        if let v = json["aim_sensitivity"] as? Double { aimSensitivity = max(0.1, min(5.0, v)) }
         if let v = json["aim_mode"] as? String, ["toggle", "hold"].contains(v) { aimMode = v }
         if let v = json["fire_aim"] as? Bool { fireAim = v }
         if let v = json["mute"] as? Bool { mute = v }
@@ -51,7 +51,7 @@ final class Settings: ObservableObject {
         json["fps_limit"] = fps
         json["texture_quality"] = textures
         json["touch_sensitivity"] = (touch * 100).rounded() / 100
-        json["aim_sensitivity"] = aimSensitivity
+        json["aim_sensitivity"] = (aimSensitivity * 100).rounded() / 100
         json["aim_mode"] = aimMode
         json["fire_aim"] = fireAim
         json["mute"] = mute
@@ -155,8 +155,8 @@ struct LauncherView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Look sensitivity")
-                    Slider(value: $s.touch, in: 0.25...3, step: 0.25)
-                    Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 50, alignment: .trailing)
+                    Slider(value: $s.touch, in: 0.25...6.0, step: 0.25)
+                    Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 55, alignment: .trailing)
                 }
                 Section("Aiming") {
                     Picker("Aim button", selection: $s.aimMode) {
@@ -166,8 +166,8 @@ struct LauncherView: View {
                     Toggle("Aim while firing", isOn: $s.fireAim)
                     HStack {
                         Text("Aim sensitivity")
-                        Slider(value: $s.aimSensitivity, in: 0.15...1.0, step: 0.05)
-                        Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit()
+                        Slider(value: $s.aimSensitivity, in: 0.1...3.0, step: 0.1)
+                        Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit().frame(width: 55, alignment: .trailing)
                     }
                     Text("Drag on the right FIRE button to adjust aim while shooting. The left FIRE button frees your right thumb to aim.")
                         .font(.caption).foregroundStyle(.secondary)

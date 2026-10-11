@@ -17,7 +17,11 @@ impl DragLook {
 }
 
 pub fn scale_delta(delta: (f64, f64), sensitivity: f64, aimed: bool, aim_scale: f64) -> (f64, f64) {
-    let gain = sensitivity.clamp(0.1, 3.0) * if aimed { aim_scale.clamp(0.15, 1.0) } else { 1.0 };
+    let speed = delta.0.hypot(delta.1);
+    let accel = if aimed { 1.0 } else { 1.0 + (speed / 10.0).min(1.5) };
+    let sens = sensitivity.clamp(0.1, 30.0);
+    let aim = if aimed { aim_scale.clamp(0.05, 10.0) } else { 1.0 };
+    let gain = sens * aim * accel;
     (delta.0 * gain, delta.1 * gain * 0.85)
 }
 

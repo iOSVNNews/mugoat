@@ -78,14 +78,36 @@ const STICK_RADIUS: f64 = 58.0;
 const KNOB_RADIUS: f64 = 26.0;
 const SPRINT_REACH: f64 = 1.35;
 
-const LOOK_GAIN: f64 = 1.0;
+const LOOK_GAIN: f64 = 3.0;
 const WHEEL_DEADZONE: f64 = 10.0;
 const WHEEL_FULL: f64 = 45.0;
 const WHEEL_PUSH: f64 = 40.0;
-static TOUCH_SENS: std::sync::LazyLock<f64> = std::sync::LazyLock::new(|| std::env::var("MUGUET_TOUCH_SENS").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0));
-static AIM_SENS: std::sync::LazyLock<f64> = std::sync::LazyLock::new(|| std::env::var("MUGUET_AIM_SENS").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4));
-static HOLD_AIM: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var("MUGUET_AIM_MODE").map(|v| v == "hold").unwrap_or(false));
-static FIRE_AIM: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var("MUGUET_FIRE_AIM").map(|v| v != "0").unwrap_or(true));
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+static TOUCH_SENS_BITS: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
+static AIM_SENS_BITS: AtomicU64 = AtomicU64::new(0.8f64.to_bits());
+static HOLD_AIM_FLAG: AtomicBool = AtomicBool::new(false);
+static FIRE_AIM_FLAG: AtomicBool = AtomicBool::new(true);
+
+pub fn touch_sensitivity() -> f64 { f64::from_bits(TOUCH_SENS_BITS.load(Ordering::Relaxed)) }
+pub fn aim_sensitivity() -> f64 { f64::from_bits(AIM_SENS_BITS.load(Ordering::Relaxed)) }
+pub fn hold_aim() -> bool { HOLD_AIM_FLAG.load(Ordering::Relaxed) }
+pub fn fire_aim() -> bool { FIRE_AIM_FLAG.load(Ordering::Relaxed) }
+
+pub fn update_settings_from_env() {
+    if let Some(v) = std::env::var("MUGUET_TOUCH_SENS").ok().and_then(|v| v.parse::<f64>().ok()) {
+        TOUCH_SENS_BITS.store(v.to_bits(), Ordering::Relaxed);
+    }
+    if let Some(v) = std::env::var("MUGUET_AIM_SENS").ok().and_then(|v| v.parse::<f64>().ok()) {
+        AIM_SENS_BITS.store(v.to_bits(), Ordering::Relaxed);
+    }
+    if let Ok(v) = std::env::var("MUGUET_AIM_MODE") {
+        HOLD_AIM_FLAG.store(v == "hold", Ordering::Relaxed);
+    }
+    if let Ok(v) = std::env::var("MUGUET_FIRE_AIM") {
+        FIRE_AIM_FLAG.store(v != "0", Ordering::Relaxed);
+    }
+}
 
 const MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(120);
 const MOUSE_HOLD: std::time::Duration = std::time::Duration::from_millis(25);
@@ -184,6 +206,7 @@ fn move_to(v: &AnyObject, c: (f64, f64)) {
 }
 
 pub fn install(window: &Window) {
+    update_settings_from_env();
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let Ok(handle) = window.window_handle() else { return };
     let RawWindowHandle::UiKit(h) = handle.as_raw() else { return };
@@ -299,7 +322,7 @@ impl Overlay {
                 if let Some(idx) = self.button_at(p) {
                     self.grips.insert(t.id, Grip::Button { idx, start: p, last: p, motion: crate::aim::DragLook::new(p) });
                     match self.spec_act(idx).map(|(_, a)| a) {
-                        Some(AimToggle) if !*HOLD_AIM => self.aim_latched = !self.aim_latched,
+                        Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
                         Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
                         _ => {}
@@ -320,13 +343,13 @@ impl Overlay {
                     Some(Grip::Button { last, .. }) if wheel => *last = p,
                     Some(Grip::Look { motion }) => {
                         let delta = motion.move_to(p);
-                        let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * *TOUCH_SENS, aimed, *AIM_SENS);
+                        let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
                         input::mouse_delta_f(dx, dy);
                     }
                     Some(Grip::Button { last, motion, .. }) => {
                         *last = p;
                         if camera_button {
-                            let (dx, dy) = crate::aim::scale_delta(motion.move_to(p), LOOK_GAIN * *TOUCH_SENS, aimed, *AIM_SENS);
+                            let (dx, dy) = crate::aim::scale_delta(motion.move_to(p), LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
                             input::mouse_delta_f(dx, dy);
                         }
                     }
@@ -350,9 +373,9 @@ impl Overlay {
                     Some(Key(k)) | Some(KeyNav(k)) => { keys.insert(k); }
                     Some(Mouse(bit)) => {
                         mouse |= bit;
-                        if bit == 1 && *FIRE_AIM && !self.in_car { mouse |= 2; }
+                        if bit == 1 && fire_aim() && !self.in_car { mouse |= 2; }
                     }
-                    Some(AimToggle) if *HOLD_AIM => mouse |= 2,
+                    Some(AimToggle) if hold_aim() => mouse |= 2,
                     Some(Horn) => horn = true,
                     _ => {}
                 },

@@ -113,6 +113,8 @@ pub fn setup() -> anyhow::Result<Startup> {
         std::fs::write(&cfg_path, DEFAULT_CONFIG)?;
     }
     let engine_args = settings(&cfg_path);
+    #[cfg(target_os = "ios")]
+    crate::touch::update_settings_from_env();
 
     set_default("MUGUET_FSROOT", support.join("saves"));
     let build = locate();
@@ -141,6 +143,7 @@ pub fn reload() -> Vec<String> {
     if let Err(e) = locate() {
         eprintln!("[config] {e:#}");
     }
+    crate::touch::update_settings_from_env();
     eprintln!("[config] launcher settings applied: {}", args.join(" "));
     args
 }
@@ -156,7 +159,7 @@ fn settings(cfg_path: &Path) -> Vec<String> {
     if let Some(v) = num("scale") { set_default("MUGUET_SCALE", v.to_string()); }
     if let Some(v) = num("mouse_sensitivity") { set_default("MUGUET_MOUSE_SENS", v.to_string()); }
     if let Some(v) = num("touch_sensitivity") { set_default("MUGUET_TOUCH_SENS", v.to_string()); }
-    set_default("MUGUET_AIM_SENS", num("aim_sensitivity").unwrap_or(0.4).clamp(0.15, 1.0).to_string());
+    set_default("MUGUET_AIM_SENS", num("aim_sensitivity").unwrap_or(0.8).clamp(0.1, 5.0).to_string());
     set_default("MUGUET_AIM_MODE", cfg.get("aim_mode").and_then(|v| v.as_str()).unwrap_or("toggle"));
     set_default("MUGUET_FIRE_AIM", if cfg.get("fire_aim").and_then(|v| v.as_bool()).unwrap_or(true) { "1" } else { "0" });
     if let Some(r) = cfg.get("resolution").and_then(|v| v.as_str()) { set_default("MUGUET_RES", r); }
