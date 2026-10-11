@@ -61,16 +61,14 @@ fn build_dir(root: &Path) -> Option<PathBuf> {
 pub fn validate_game_files() -> anyhow::Result<()> {
     use anyhow::Context;
     let root = game_dir();
-    let manifest = crate::game_data::load_manifest(&root.join("data"))?;
-    let files = manifest.get("files").and_then(|v| v.as_array()).context("Game manifest has no files list")?;
-    anyhow::ensure!(!files.is_empty(), "Game data is empty. Import a complete compatible game.zip");
+    let data_manifest = root.join("data/manifest.json");
+    anyhow::ensure!(data_manifest.is_file(), "Game data is missing. Import a complete compatible game.zip");
     let build = build_dir(&root).context("Missing shader pack")?;
     let index = build.join("shaders/index.json");
     anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");
     let shaders: serde_json::Value = serde_json::from_slice(&std::fs::read(index)?).context("Invalid shader index")?;
     anyhow::ensure!(shaders.as_object().is_some_and(|o| !o.is_empty()), "Shader pack is empty");
-    let _ = crate::game_data::RUNTIME_MANIFEST.set(serde_json::to_vec(&manifest)?.into());
-    eprintln!("[config] validated {} game files and shader index", files.len());
+    eprintln!("[config] verified game manifest and shader pack");
     Ok(())
 }
 

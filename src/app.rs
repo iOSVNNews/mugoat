@@ -22,7 +22,6 @@ struct App {
     window: Option<Arc<Window>>,
     started: bool,
     runtime_rx: Option<std::sync::mpsc::Receiver<Result<Arc<Runtime>, String>>>,
-    loading_since: Option<std::time::Instant>,
 
     #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     launcher_shown: bool,
@@ -162,7 +161,6 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         if let Some(message) = ENGINE_ERROR.lock().unwrap().take() {
-            self.loading_since = None;
             gpu::SUSPENDED.store(true, std::sync::atomic::Ordering::Relaxed);
             input::set_focus(false);
             #[cfg(target_os = "ios")]
@@ -172,40 +170,29 @@ impl ApplicationHandler for App {
             match rx.try_recv() {
                 Ok(Ok(rt)) => {
                     self.runtime_rx = None;
+                    #[cfg(target_os = "ios")]
+                    crate::touch::loading(None);
                     self.rt = Some(rt.clone());
                     self.launch_engine(rt);
                 }
                 Ok(Err(message)) => {
                     self.runtime_rx = None;
-                    self.loading_since = None;
                     eprintln!("[host] startup failed: {message}");
                     #[cfg(target_os = "ios")]
                     crate::touch::loading(Some(&format!("Could not start game\n{message}\nDetails: Files → Muguet → muguet-runtime.log")));
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.runtime_rx = None;
-                    self.loading_since = None;
                     #[cfg(target_os = "ios")]
                     crate::touch::loading(Some("Runtime preparation failed. Reopen Muguet and share its diagnostic log."));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
-        #[cfg(target_os = "ios")]
-        if let Some(since) = self.loading_since {
-            if gpu::PRESENTS.load(std::sync::atomic::Ordering::Relaxed) >= 20 {
-                crate::touch::loading(None);
-                self.loading_since = None;
-            } else {
-                let phase = if self.runtime_rx.is_some() { "Preparing native game" } else { "Loading game data and shaders" };
-                crate::touch::loading(Some(&format!("{phase}… {} s\nKeep Muguet open. First launch can take longer.", since.elapsed().as_secs())));
-            }
-        }
         #[allow(unused_mut)]
         let mut wait = if crate::pad::poll() { 8 } else if cfg!(target_os = "ios") { 250 } else { 1000 };
         #[cfg(target_os = "ios")]
         if crate::touch::refresh() { wait = 8; }
-        if self.loading_since.is_some() { wait = 100; }
         #[cfg(target_os = "ios")]
         if !self.started {
             self.launcher();
@@ -231,9 +218,7 @@ impl App {
         if self.window.is_none() { return; }
         if self.started { return; }
         self.started = true;
-        self.loading_since = Some(std::time::Instant::now());
         #[cfg(target_os = "ios")]
-        crate::touch::loading(Some("Preparing native game…"));
         if let Some(rt) = self.rt.clone() { self.launch_engine(rt); return; }
         let startup = crate::config::Startup {
             wasm_path: self.startup.wasm_path.clone(), cache_dir: self.startup.cache_dir.clone(),
@@ -247,7 +232,6 @@ impl App {
         });
         if let Err(e) = result {
             self.runtime_rx = None;
-            self.loading_since = None;
             eprintln!("[host] cannot prepare runtime: {e}");
             #[cfg(target_os = "ios")]
             crate::touch::loading(Some("Unable to prepare runtime. Reopen Muguet and use lower graphics settings."));
@@ -327,7 +311,7 @@ impl App {
 pub fn run(rt: Option<Arc<Runtime>>, startup: crate::config::Startup, args: Vec<String>) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, loading_since: None, launcher_shown: false, locked: false, mods: ModifiersState::empty(), wheel_accum: 0.0 };
+    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, launcher_shown: false, locked: false, mods: ModifiersState::empty(), wheel_accum: 0.0 };
     event_loop.run_app(&mut app)?;
     Ok(())
 }

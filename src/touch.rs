@@ -293,7 +293,6 @@ impl Overlay {
     }
 
     fn touch(&mut self, t: &Touch) {
-        if self.loading { return; }
         let p = (t.location.x / self.scale, t.location.y / self.scale);
         match t.phase {
             TouchPhase::Started => {
