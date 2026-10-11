@@ -31,6 +31,7 @@ The original `proudly made by c22dev` credit is preserved, with `Rebuild: iOSVN`
 added beneath it. The rebuild adds a 120 FPS option on ProMotion devices, a real
 render pacer and refresh-rate hint; hardware, temperature and system policy still
 determine the achieved frame rate.
+The native launch screen also shows both credits while iOS opens the executable.
 
 Touch aiming uses a linear response with an independent aim sensitivity, tap/hold
 aim modes, optional aim while firing, a left fire button and drag-to-aim on the

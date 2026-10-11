@@ -11,6 +11,7 @@ targets:
     platform: iOS
     sources:
       - path: stub.c
+      - path: LaunchScreen.storyboard
       - path: ../assets/muguet.icon
     settings:
       base:
