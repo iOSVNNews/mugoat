@@ -67,6 +67,7 @@ pub fn set_focus(focused: bool) {
     if !focused { release_all(); }
 }
 pub fn set_locked(locked: bool) {
+    let locked = if cfg!(target_os = "ios") { true } else { locked };
     if let Some(l) = word(LOCKED) { l.store(locked as i32, Ordering::SeqCst); }
 }
 fn release_all() {

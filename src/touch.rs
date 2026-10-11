@@ -48,38 +48,34 @@ const fn b(anchor: Anchor, radius: f64, on_foot: Option<(&'static str, Act)>, in
     Spec { anchor, radius, on_foot, in_car, nav: false }
 }
 const fn n(x: f64, label: &'static str, key: &'static str) -> Spec {
-    Spec { anchor: Anchor::Nav(x, 0.0), radius: 20.0, on_foot: Some((label, Act::Key(key))), in_car: Some((label, Act::Key(key))), nav: true }
+    Spec { anchor: Anchor::Nav(x, 0.0), radius: 21.0, on_foot: Some((label, Act::Key(key))), in_car: Some((label, Act::Key(key))), nav: true }
 }
 
 use Act::*;
 use Anchor::*;
 const BUTTONS: &[Spec] = &[
-    b(BottomRight(62.0, 68.0), 44.0, Some(("💥", Mouse(1))), Some(("⚡", Key("KeyW")))),
-    b(BottomRight(158.0, 46.0), 31.0, Some(("🎯", AimToggle)), Some(("🛑", Key("KeyS")))),
-    b(BottomRight(58.0, 168.0), 28.0, Some(("⏫", Key("Space"))), Some(("🅿", Key("Space")))),
-    b(BottomRight(140.0, 132.0), 26.0, Some(("🚗", Key("KeyF"))), Some(("🚪", Key("KeyF")))),
-    b(BottomRight(222.0, 98.0), 24.0, Some(("🔄", Key("KeyR"))), Some(("📢", Horn))),
-    b(TopRight(30.0, 30.0), 22.0, Some(("🔫", Key("Tab"))), Some(("🔫", Key("Tab")))),
-    b(TopRight(84.0, 30.0), 22.0, Some(("🛡️", Key("KeyQ"))), Some(("📻", Key("KeyQ")))),
-    b(TopRight(138.0, 30.0), 22.0, Some(("🧎", Key("ControlLeft"))), Some(("👀", Key("KeyC")))),
-    b(TopRight(192.0, 30.0), 22.0, Some(("📷", Key("KeyV"))), Some(("📷", Key("KeyV")))),
-    b(TopRight(246.0, 30.0), 22.0, Some(("☰", Home)), Some(("☰", Home))),
-    b(TopLeft(30.0, 30.0), 22.0, Some(("⏸", KeyNav("Escape"))), Some(("⏸", KeyNav("Escape")))),
-    b(TopLeft(84.0, 30.0), 22.0, Some(("📱", KeyNav("ArrowUp"))), Some(("📱", KeyNav("ArrowUp")))),
-    b(TopLeft(138.0, 30.0), 22.0, Some(("⌨️", NavToggle)), Some(("⌨️", NavToggle))),
-    b(TopLeft(192.0, 30.0), 22.0, Some(("👥", Key("AltLeft"))), Some(("👥", Key("AltLeft")))),
-    b(TopLeft(246.0, 30.0), 22.0, Some(("👁️", FirstPerson)), Some(("👁️", FirstPerson))),
-    b(TopLeft(45.0, 112.0), 29.0, Some(("💥", Mouse(1))), None),
-    n(-175.0, "⇤", "KeyQ"),
-    n(-135.0, "⇥", "KeyE"),
-    n(-95.0, "◀", "ArrowLeft"),
-    n(-55.0, "▲", "ArrowUp"),
-    n(-15.0, "▼", "ArrowDown"),
-    n(25.0, "▶", "ArrowRight"),
-    n(65.0, "➕", "PageUp"),
-    n(105.0, "➖", "PageDown"),
-    n(145.0, "OK", "Enter"),
-    n(185.0, "BACK", "Backspace"),
+    b(BottomRight(62.0, 68.0), 44.0, Some(("FIRE", Mouse(1))), Some(("GAS", Key("KeyW")))),
+    b(BottomRight(158.0, 46.0), 31.0, Some(("AIM", AimToggle)), Some(("BRAKE", Key("KeyS")))),
+    b(BottomRight(58.0, 168.0), 28.0, Some(("JUMP", Key("Space"))), Some(("H.BRAKE", Key("Space")))),
+    b(BottomRight(140.0, 132.0), 26.0, Some(("ENTER", Key("KeyF"))), Some(("EXIT", Key("KeyF")))),
+    b(BottomRight(222.0, 98.0), 24.0, Some(("RELOAD", Key("KeyR"))), Some(("HORN", Horn))),
+    b(TopRight(30.0, 30.0), 22.0, Some(("WEAPON", Key("Tab"))), Some(("WEAPON", Key("Tab")))),
+    b(TopRight(84.0, 30.0), 22.0, Some(("COVER", Key("KeyQ"))), Some(("RADIO", Key("KeyQ")))),
+    b(TopRight(138.0, 30.0), 22.0, Some(("CROUCH", Key("ControlLeft"))), Some(("LOOK\nBACK", Key("KeyC")))),
+    b(TopRight(192.0, 30.0), 22.0, Some(("CAM", Key("KeyV"))), Some(("CAM", Key("KeyV")))),
+    b(TopRight(246.0, 30.0), 22.0, Some(("MENU", Home)), Some(("MENU", Home))),
+    b(TopLeft(30.0, 30.0), 22.0, Some(("PAUSE", KeyNav("Escape"))), Some(("PAUSE", KeyNav("Escape")))),
+    b(TopLeft(84.0, 30.0), 22.0, Some(("PHONE", KeyNav("ArrowUp"))), Some(("PHONE", KeyNav("ArrowUp")))),
+    b(TopLeft(138.0, 30.0), 22.0, Some(("MENU\nKEYS", NavToggle)), Some(("MENU\nKEYS", NavToggle))),
+    b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
+    b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
+    b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
+    n(-135.0, "◀", "ArrowLeft"),
+    n(-87.0, "▲", "ArrowUp"),
+    n(-39.0, "▼", "ArrowDown"),
+    n(9.0, "▶", "ArrowRight"),
+    n(63.0, "OK", "Enter"),
+    n(117.0, "BACK", "Backspace"),
 ];
 
 const STICK_RADIUS: f64 = 58.0;
@@ -91,7 +87,7 @@ const WHEEL_DEADZONE: f64 = 10.0;
 const WHEEL_FULL: f64 = 45.0;
 const WHEEL_PUSH: f64 = 40.0;
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static TOUCH_SENS_BITS: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
 static AIM_SENS_BITS: AtomicU64 = AtomicU64::new(0.8f64.to_bits());
 static HOLD_AIM_FLAG: AtomicBool = AtomicBool::new(false);
@@ -104,29 +100,35 @@ static BUTTON_OPACITY_BITS: AtomicU64 = AtomicU64::new(0.22f64.to_bits());
 static STICK_OFFSET_X_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
 static STICK_OFFSET_Y_BITS: AtomicU64 = AtomicU64::new(0.0f64.to_bits());
 
-const ZERO_I32: AtomicI32 = AtomicI32::new(0);
+use std::sync::atomic::{AtomicI32, AtomicU32};
 static CUSTOM_X: [AtomicI32; 17] = [
-    ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32,
-    ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0),
 ];
 static CUSTOM_Y: [AtomicI32; 17] = [
-    ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32,
-    ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32, ZERO_I32
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0),
+    AtomicI32::new(0),
 ];
-
-const HUNDRED_U32: AtomicU32 = AtomicU32::new(100);
 static CUSTOM_SCALE: [AtomicU32; 17] = [
-    HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32,
-    HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32, HUNDRED_U32
+    AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100),
+    AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100),
+    AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100),
+    AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100), AtomicU32::new(100),
+    AtomicU32::new(100),
 ];
 
-pub fn custom_button_layout(idx: usize) -> (f64, f64, f64) {
+fn custom_button_layout(idx: usize) -> (f64, f64, f64) {
     if idx < 17 {
         let dx = CUSTOM_X[idx].load(Ordering::Relaxed) as f64;
         let dy = CUSTOM_Y[idx].load(Ordering::Relaxed) as f64;
-        let s = (CUSTOM_SCALE[idx].load(Ordering::Relaxed) as f64) / 100.0;
-        let s = if s < 0.2 { 1.0 } else { s };
-        (dx, dy, s)
+        let scale = CUSTOM_SCALE[idx].load(Ordering::Relaxed) as f64 / 100.0;
+        (dx, dy, scale.clamp(0.4, 2.5))
     } else {
         (0.0, 0.0, 1.0)
     }
@@ -208,7 +210,6 @@ enum Grip {
     Stick { origin: (f64, f64), at: (f64, f64) },
     Look { motion: crate::aim::DragLook },
     Button { idx: usize, start: (f64, f64), last: (f64, f64), motion: crate::aim::DragLook },
-    NavTouch { start: (f64, f64), last: (f64, f64), dragging: bool },
 }
 
 struct Btn {
@@ -242,7 +243,6 @@ struct Overlay {
     nav: bool,
     in_car: bool,
     hidden: bool,
-    pinch_dist: Option<f64>,
 }
 
 thread_local! {
@@ -297,14 +297,6 @@ fn set_alpha_bg(v: &AnyObject, alpha: f64) {
 }
 fn move_to(v: &AnyObject, c: (f64, f64)) {
     unsafe { let _: () = msg_send![v, setCenter: CGPoint { x: c.0, y: c.1 }]; }
-}
-
-fn send_mouse_pos(safe: (f64, f64, f64, f64), p: (f64, f64)) {
-    let (w, h) = input::size();
-    let (sx, sy, sw, sh) = safe;
-    let ex = ((p.0 - sx).max(0.0) / sw * w as f64).clamp(0.0, (w - 1) as f64) as i32;
-    let ey = ((p.1 - sy).max(0.0) / sh * h as f64).clamp(0.0, (h - 1) as f64) as i32;
-    input::mouse_pos(ex, ey);
 }
 
 pub fn install(window: &Window) {
@@ -374,7 +366,7 @@ pub fn install(window: &Window) {
         root, buttons, stick_base, stick_knob, stick_home, loading_label, network_label, loading: false, safe, scale,
         grips: HashMap::new(), held: HashSet::new(), since: HashMap::new(),
         mouse_since: [std::time::Instant::now(); 2], lingering: false, mouse: 0, aim_latched: false,
-        nav: false, in_car: false, hidden: false, pinch_dist: None,
+        nav: false, in_car: false, hidden: false,
     };
     o.relabel();
     eprintln!("[touch] overlay ready ({:.0}x{:.0} pt, safe area {:.0},{:.0} {:.0}x{:.0})", full.width, full.height, sx, sy, sw, sh);
@@ -393,12 +385,6 @@ impl Overlay {
     fn spec_act(&self, idx: usize) -> Option<(&'static str, Act)> {
         let s = &BUTTONS[idx];
         if s.nav && !self.nav { return None; }
-        if self.nav && !s.nav {
-            if matches!(s.on_foot, Some((_, KeyNav("Escape"))) | Some((_, Home))) {
-                return s.on_foot;
-            }
-            return None;
-        }
         if self.in_car { s.in_car } else { s.on_foot }
     }
 
@@ -409,8 +395,6 @@ impl Overlay {
             set_hidden(&b.view, act.is_none());
             if let Some((text, _)) = act { set_text(&b.label, text); }
         }
-        set_hidden(&self.stick_base, self.nav);
-        set_hidden(&self.stick_knob, self.nav);
         self.restyle();
     }
 
@@ -478,7 +462,6 @@ impl Overlay {
     }
 
     fn in_stick_zone(&self, p: (f64, f64)) -> bool {
-        if self.nav { return false; }
         let (sx, sy, sw, _) = self.safe;
         let s_ox = stick_offset_x();
         let s_oy = stick_offset_y();
@@ -490,7 +473,6 @@ impl Overlay {
     }
 
     fn touch(&mut self, t: &Touch) {
-        let safe = self.safe;
         let p = (t.location.x / self.scale, t.location.y / self.scale);
         match t.phase {
             TouchPhase::Started => {
@@ -499,14 +481,7 @@ impl Overlay {
                     match self.spec_act(idx).map(|(_, a)| a) {
                         Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
-                        Some(KeyNav("Escape")) => {
-                            self.nav = !self.nav;
-                            self.relabel();
-                        }
-                        Some(KeyNav(_)) if !self.nav => {
-                            self.nav = true;
-                            self.relabel();
-                        }
+                        Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
                         Some(Home) => {
                             #[cfg(target_os = "ios")]
                             {
@@ -520,9 +495,6 @@ impl Overlay {
                         }
                         _ => {}
                     }
-                } else if self.nav {
-                    send_mouse_pos(safe, p);
-                    self.grips.insert(t.id, Grip::NavTouch { start: p, last: p, dragging: false });
                 } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
                     self.grips.insert(t.id, Grip::Stick { origin: p, at: p });
                 } else {
@@ -530,27 +502,6 @@ impl Overlay {
                 }
             }
             TouchPhase::Moved => {
-                if self.nav {
-                    let nav_touches: Vec<(f64, f64)> = self.grips.values().filter_map(|g| match g {
-                        Grip::NavTouch { last, .. } => Some(*last),
-                        _ => None,
-                    }).collect();
-                    if nav_touches.len() >= 2 {
-                        let d = ((nav_touches[0].0 - nav_touches[1].0).powi(2) + (nav_touches[0].1 - nav_touches[1].1).powi(2)).sqrt();
-                        if let Some(prev_d) = self.pinch_dist {
-                            if d - prev_d > 16.0 {
-                                input::wheel(1);
-                                self.pinch_dist = Some(d);
-                            } else if prev_d - d > 16.0 {
-                                input::wheel(-1);
-                                self.pinch_dist = Some(d);
-                            }
-                        } else {
-                            self.pinch_dist = Some(d);
-                        }
-                    }
-                }
-
                 let wheel = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. }) if self.is_wheel(*idx));
                 let aimed = self.mouse & 2 != 0;
                 let camera_button = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. })
@@ -558,20 +509,6 @@ impl Overlay {
                 match self.grips.get_mut(&t.id) {
                     Some(Grip::Stick { at, .. }) => *at = p,
                     Some(Grip::Button { last, .. }) if wheel => *last = p,
-                    Some(Grip::NavTouch { start, last, dragging }) => {
-                        let prev = *last;
-                        *last = p;
-                        let dx = p.0 - start.0;
-                        let dy = p.1 - start.1;
-                        send_mouse_pos(safe, p);
-                        if dx * dx + dy * dy > 36.0 {
-                            if !*dragging {
-                                *dragging = true;
-                                input::button(0, true);
-                            }
-                            input::mouse_delta_f((p.0 - prev.0) * 2.0, (p.1 - prev.1) * 2.0);
-                        }
-                    }
                     Some(Grip::Look { motion }) => {
                         let delta = motion.move_to(p);
                         let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
@@ -587,28 +524,7 @@ impl Overlay {
                     None => {}
                 }
             }
-            TouchPhase::Ended | TouchPhase::Cancelled => {
-                if let Some(Grip::NavTouch { start, last, dragging }) = self.grips.get(&t.id) {
-                    if *dragging {
-                        input::button(0, false);
-                    } else {
-                        let dx = last.0 - start.0;
-                        let dy = last.1 - start.1;
-                        if dx * dx + dy * dy <= 36.0 {
-                            send_mouse_pos(safe, *last);
-                            input::button(0, true);
-                            std::thread::spawn(|| {
-                                std::thread::sleep(std::time::Duration::from_millis(50));
-                                input::button(0, false);
-                            });
-                        }
-                    }
-                }
-                self.grips.remove(&t.id);
-                if self.grips.values().filter(|g| matches!(g, Grip::NavTouch { .. })).count() < 2 {
-                    self.pinch_dist = None;
-                }
-            }
+            TouchPhase::Ended | TouchPhase::Cancelled => { self.grips.remove(&t.id); }
         }
         self.apply();
     }
@@ -632,7 +548,6 @@ impl Overlay {
                     _ => {}
                 },
                 Grip::Look { .. } => {}
-                Grip::NavTouch { .. } => {}
             }
         }
         if let Some((o, at)) = stick {

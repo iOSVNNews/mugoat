@@ -128,7 +128,9 @@ impl ApplicationHandler for App {
                         }
                         return;
                     }
-                    if event.state == ElementState::Pressed { self.unlock(&window); }
+                    if event.state == ElementState::Pressed {
+                        if !cfg!(target_os = "ios") { self.unlock(&window); }
+                    }
                     return;
                 }
                 if let PhysicalKey::Code(code) = event.physical_key {
@@ -300,6 +302,7 @@ impl App {
         input::set_locked(ok);
     }
     fn unlock(&mut self, window: &Window) {
+        if cfg!(target_os = "ios") { return; }
         if !self.locked { return; }
         let _ = window.set_cursor_grab(CursorGrabMode::None);
         window.set_cursor_visible(true);

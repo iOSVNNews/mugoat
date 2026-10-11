@@ -380,7 +380,7 @@ struct CheatMenuView: View {
 struct HUDButtonDef: Identifiable {
     let id: Int
     let name: String
-    let icon: String
+    let label: String
     let anchorType: AnchorType
     let baseOffset: CGPoint
     let baseRadius: CGFloat
@@ -394,23 +394,23 @@ enum AnchorType {
 }
 
 let HUD_BUTTON_DEFS: [HUDButtonDef] = [
-    HUDButtonDef(id: 0, name: "Bắn phải / Ga", icon: "💥", anchorType: .bottomRight, baseOffset: CGPoint(x: 62, y: 68), baseRadius: 44),
-    HUDButtonDef(id: 1, name: "Ngắm / Phanh", icon: "🎯", anchorType: .bottomRight, baseOffset: CGPoint(x: 158, y: 46), baseRadius: 31),
-    HUDButtonDef(id: 2, name: "Nhảy / Phanh tay", icon: "⏫", anchorType: .bottomRight, baseOffset: CGPoint(x: 58, y: 168), baseRadius: 28),
-    HUDButtonDef(id: 3, name: "Lên/xuống xe", icon: "🚗", anchorType: .bottomRight, baseOffset: CGPoint(x: 140, y: 132), baseRadius: 26),
-    HUDButtonDef(id: 4, name: "Nạp đạn / Còi", icon: "🔄", anchorType: .bottomRight, baseOffset: CGPoint(x: 222, y: 98), baseRadius: 24),
-    HUDButtonDef(id: 5, name: "Đổi vũ khí", icon: "🔫", anchorType: .topRight, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 6, name: "Núp / Radio", icon: "🛡️", anchorType: .topRight, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 7, name: "Ngồi / Nhìn sau", icon: "🧎", anchorType: .topRight, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 8, name: "Góc camera", icon: "📷", anchorType: .topRight, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 9, name: "Bản đồ / Menu", icon: "☰", anchorType: .topRight, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 10, name: "Tạm dừng (Pause)", icon: "⏸", anchorType: .topLeft, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 11, name: "Điện thoại", icon: "📱", anchorType: .topLeft, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 12, name: "Phím mũi tên", icon: "⌨️", anchorType: .topLeft, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 13, name: "Đổi nhân vật", icon: "👥", anchorType: .topLeft, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 14, name: "Góc nhìn thứ 1", icon: "👁️", anchorType: .topLeft, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
-    HUDButtonDef(id: 15, name: "Bắn trái", icon: "💥", anchorType: .topLeft, baseOffset: CGPoint(x: 45, y: 112), baseRadius: 29),
-    HUDButtonDef(id: 16, name: "Joystick di chuyển", icon: "🕹️", anchorType: .stick, baseOffset: CGPoint(x: 0, y: 0), baseRadius: 55)
+    HUDButtonDef(id: 0, name: "FIRE (Bắn / Ga)", label: "FIRE", anchorType: .bottomRight, baseOffset: CGPoint(x: 62, y: 68), baseRadius: 44),
+    HUDButtonDef(id: 1, name: "AIM (Ngắm / Phanh)", label: "AIM", anchorType: .bottomRight, baseOffset: CGPoint(x: 158, y: 46), baseRadius: 31),
+    HUDButtonDef(id: 2, name: "JUMP (Nhảy / Phanh tay)", label: "JUMP", anchorType: .bottomRight, baseOffset: CGPoint(x: 58, y: 168), baseRadius: 28),
+    HUDButtonDef(id: 3, name: "ENTER (Lên/xuống xe)", label: "ENTER", anchorType: .bottomRight, baseOffset: CGPoint(x: 140, y: 132), baseRadius: 26),
+    HUDButtonDef(id: 4, name: "RELOAD (Nạp đạn / Còi)", label: "RELOAD", anchorType: .bottomRight, baseOffset: CGPoint(x: 222, y: 98), baseRadius: 24),
+    HUDButtonDef(id: 5, name: "WEAPON (Vũ khí)", label: "WEAPON", anchorType: .topRight, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 6, name: "COVER (Núp / Radio)", label: "COVER", anchorType: .topRight, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 7, name: "CROUCH (Ngồi / Nhìn sau)", label: "CROUCH", anchorType: .topRight, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 8, name: "CAM (Góc camera)", label: "CAM", anchorType: .topRight, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 9, name: "MENU (Muguet Menu)", label: "MENU", anchorType: .topRight, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 10, name: "PAUSE (Tạm dừng)", label: "PAUSE", anchorType: .topLeft, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 11, name: "PHONE (Điện thoại)", label: "PHONE", anchorType: .topLeft, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 12, name: "MENU KEYS (Phím mũi tên)", label: "MENU\nKEYS", anchorType: .topLeft, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 13, name: "SWITCH (Đổi nhân vật)", label: "SWITCH", anchorType: .topLeft, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 14, name: "1ST POV (Góc nhìn thứ 1)", label: "1ST\nPOV", anchorType: .topLeft, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 15, name: "FIRE phụ (Bắn trái)", label: "FIRE", anchorType: .topLeft, baseOffset: CGPoint(x: 45, y: 112), baseRadius: 29),
+    HUDButtonDef(id: 16, name: "JOYSTICK (Cần di chuyển)", label: "", anchorType: .stick, baseOffset: CGPoint(x: 0, y: 0), baseRadius: 58)
 ]
 
 struct HUDEditorView: View {
@@ -459,14 +459,14 @@ struct HUDEditorView: View {
                     renderButton(def, in: geo)
                 }
 
-                // Top Control Floating Bar
+                // Bottom Control Floating Bar (leaves top buttons completely visible and unobstructed)
                 VStack(spacing: 6) {
-                    topToolbar
-                    selectedButtonControls
                     Spacer()
+                    selectedButtonControls
+                    bottomToolbar
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.bottom, 8)
 
                 // Toast notification
                 if let msg = toastMessage {
@@ -490,7 +490,7 @@ struct HUDEditorView: View {
         .onAppear(perform: loadLayout)
     }
 
-    private var topToolbar: some View {
+    private var bottomToolbar: some View {
         HStack(spacing: 12) {
             Button("Hủy") {
                 dismiss()
@@ -639,8 +639,6 @@ struct HUDEditorView: View {
                 Circle()
                     .fill(isSelected ? Color.yellow.opacity(0.6) : Color.white.opacity(0.35))
                     .frame(width: diameter * 0.45, height: diameter * 0.45)
-                Text(def.icon)
-                    .font(.system(size: max(14, radius * 0.35)))
             } else {
                 Circle()
                     .stroke(isSelected ? Color.yellow : Color.white.opacity(0.4), lineWidth: isSelected ? 3 : 1.5)
@@ -648,8 +646,10 @@ struct HUDEditorView: View {
                     .frame(width: diameter, height: diameter)
                     .shadow(color: isSelected ? Color.yellow.opacity(0.8) : Color.clear, radius: 8)
 
-                Text(def.icon)
-                    .font(.system(size: max(12, radius * 0.7)))
+                Text(def.label)
+                    .font(.system(size: max(8, radius * 0.38), weight: .bold))
+                    .foregroundColor(.white.opacity(0.95))
+                    .multilineTextAlignment(.center)
             }
         }
         .position(x: pos.x, y: pos.y)
