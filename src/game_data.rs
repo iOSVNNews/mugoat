@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::{Component, Path};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 pub const SKIPPED_DIRS: &[&str] = &["env_test", "verityradio"];
-pub static RUNTIME_MANIFEST: OnceLock<Vec<u8>> = OnceLock::new();
+pub static RUNTIME_MANIFEST: OnceLock<Arc<[u8]>> = OnceLock::new();
 
 fn optional_web_document(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();

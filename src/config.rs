@@ -69,7 +69,7 @@ pub fn validate_game_files() -> anyhow::Result<()> {
     anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");
     let shaders: serde_json::Value = serde_json::from_slice(&std::fs::read(index)?).context("Invalid shader index")?;
     anyhow::ensure!(shaders.as_object().is_some_and(|o| !o.is_empty()), "Shader pack is empty");
-    let _ = crate::game_data::RUNTIME_MANIFEST.set(serde_json::to_vec(&manifest)?);
+    let _ = crate::game_data::RUNTIME_MANIFEST.set(serde_json::to_vec(&manifest)?.into());
     eprintln!("[config] validated {} game files and shader index", files.len());
     Ok(())
 }
