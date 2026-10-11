@@ -2,12 +2,11 @@
 // Constantin Clerc (c22dev) - 0.1
 
 use anyhow::{bail, Context, Result};
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-const SKIPPED_DIRS: &[&str] = &["env_test", "verityradio"];
+use crate::game_data::SKIPPED_DIRS;
 
 pub fn import(zip_path: &Path, dest: &Path, keep_code: bool, mut progress: impl FnMut(u64, u64)) -> Result<()> {
     let file = File::open(zip_path).with_context(|| format!("{}", zip_path.display()))?;
@@ -97,43 +96,9 @@ fn tidy_lists(data: &Path) -> Result<()> {
         std::fs::write(&dlc, kept.join("\n") + "\n")?;
     }
     let manifest_path = data.join("manifest.json");
-    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path)?).context("manifest.json")?;
-    let present: HashSet<PathBuf> = walk(data);
-    if let Some(files) = manifest.get_mut("files").and_then(|f| f.as_array_mut()) {
-        // Only omit the intentionally unsupported packs. Dropping every absent
-        // file silently makes an incomplete archive appear ready to play.
-        files.retain(|f| !f.get(0).and_then(|p| p.as_str()).is_some_and(|p|
-            p.split('/').any(|part| SKIPPED_DIRS.contains(&part.to_ascii_lowercase().as_str()))));
-        for record in files.iter() {
-            let name = record.get(0).and_then(|v| v.as_str()).context("Invalid file in game manifest")?;
-            if !present.contains(&data.join(name)) { bail!("Incomplete game.zip: required data file missing: {name}"); }
-        }
-        for record in files {
-            if record.get(0).and_then(|v| v.as_str()).is_some_and(|p| p.eq_ignore_ascii_case("common/data/dlcList.xml")) {
-                if let Ok(metadata) = std::fs::metadata(&dlc) {
-                    if let Some(size) = record.get_mut(1) { *size = serde_json::Value::from(metadata.len()); }
-                }
-            }
-        }
-    }
+    let manifest = crate::game_data::load_manifest(data)?;
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
     Ok(())
-}
-
-fn walk(dir: &Path) -> HashSet<PathBuf> {
-    let mut out = HashSet::new();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else {
-                out.insert(p);
-            }
-        }
-    }
-    out
 }
 
 #[cfg(target_os = "ios")]

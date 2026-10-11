@@ -62,6 +62,24 @@ physical-device gameplay, RAM-pressure and aiming tests.
 
 ## Build with precompiled game code
 
+### iOSVN rebuild 3: manifest compatibility
+
+The startup validator in rebuild 2 could reject imported packs when optional
+`common/non_final/www/` HTML/CSS/JS documentation differed from its manifest
+size. Rebuild 3 reconciles those entries with actual disk sizes, omits absent
+web documentation, and supplies the reconciled manifest to the engine in memory.
+Previously imported packs do not need to be imported again for this mismatch.
+The original manifest on disk is preserved during startup. Import uses the same
+validation rules, and updates its staged manifest before replacing the old pack.
+Missing or truncated RPF archives and runtime metadata still fail validation.
+Regression checks cover the reported `psomismatch.html` mismatch, omitted web
+documentation, corrupt runtime assets, unsafe paths and preservation of the
+previous pack when an archive is incomplete.
+
+The smaller rebuild 2 IPA uses the same pinned input WASM SHA-256 as the earlier
+82,680,451-byte IPA. Its AOT `__GAME` segment is 183,205,888 bytes versus
+210,976,768 bytes previously, and all original app assets remain present.
+
 The separate **Build encrypted Muguet IPA with game code** workflow downloads a
 WASM input with a pinned SHA-256, precompiles it for arm64 iOS, and verifies that
 the executable contains the `__GAME` segment. Data and shaders still need to be

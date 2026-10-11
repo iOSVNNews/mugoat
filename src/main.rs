@@ -7,6 +7,7 @@ mod audio;
 mod config;
 mod diagnostics;
 mod fs;
+mod game_data;
 mod gpu;
 mod host;
 mod input;

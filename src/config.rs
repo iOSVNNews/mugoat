@@ -61,27 +61,15 @@ fn build_dir(root: &Path) -> Option<PathBuf> {
 pub fn validate_game_files() -> anyhow::Result<()> {
     use anyhow::Context;
     let root = game_dir();
-    let manifest_path = root.join("data/manifest.json");
-    anyhow::ensure!(std::fs::metadata(&manifest_path)?.len() <= 64 << 20, "Game manifest is too large");
-    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest_path)?).context("Invalid game manifest")?;
+    let manifest = crate::game_data::load_manifest(&root.join("data"))?;
     let files = manifest.get("files").and_then(|v| v.as_array()).context("Game manifest has no files list")?;
     anyhow::ensure!(!files.is_empty(), "Game data is empty. Import a complete compatible game.zip");
-    for record in files {
-        let name = record.get(0).and_then(|v| v.as_str()).context("Invalid file in game manifest")?;
-        let size = record.get(1).and_then(|v| v.as_u64()).context("Invalid size in game manifest")?;
-        let relative = Path::new(name);
-        anyhow::ensure!(relative.components().all(|c| matches!(c, std::path::Component::Normal(_))), "Invalid game data path: {name}");
-        let metadata = std::fs::metadata(root.join("data").join(relative)).with_context(|| format!("Game data missing: {name}"))?;
-        // Previous versions trim this XML after extraction without updating its
-        // manifest size. Keep already-imported game packs compatible.
-        let trimmed_dlc = name.eq_ignore_ascii_case("common/data/dlcList.xml");
-        anyhow::ensure!(metadata.is_file() && (metadata.len() == size || trimmed_dlc), "Game data incomplete: {name}. Import the complete game.zip again");
-    }
     let build = build_dir(&root).context("Missing shader pack")?;
     let index = build.join("shaders/index.json");
     anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");
     let shaders: serde_json::Value = serde_json::from_slice(&std::fs::read(index)?).context("Invalid shader index")?;
     anyhow::ensure!(shaders.as_object().is_some_and(|o| !o.is_empty()), "Shader pack is empty");
+    let _ = crate::game_data::RUNTIME_MANIFEST.set(serde_json::to_vec(&manifest)?);
     eprintln!("[config] validated {} game files and shader index", files.len());
     Ok(())
 }

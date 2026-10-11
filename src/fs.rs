@@ -309,7 +309,9 @@ pub fn handle(name: &str, mem: &SharedMemory, p: &[Val], results: &mut [Val]) ->
 pub fn httpfs_manifest(mem: &SharedMemory, p: &[Val], results: &mut [Val]) {
     static MANIFEST: LazyLock<Option<Vec<u8>>> = LazyLock::new(|| {
         let dir = std::env::var("MUGUET_DATA").unwrap_or_default();
-        fs::read(Path::new(&dir).join("manifest.json")).ok()
+        crate::game_data::RUNTIME_MANIFEST.get().cloned().or_else(|| {
+            crate::game_data::load_manifest(Path::new(&dir)).and_then(|m| Ok(serde_json::to_vec(&m)?)).ok()
+        })
     });
     let a = |i: usize| -> i64 { match p.get(i) { Some(Val::I32(x)) => *x as i64, Some(Val::I64(x)) => *x, _ => 0 } };
     let r = match MANIFEST.as_ref() {
