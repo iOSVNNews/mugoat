@@ -24,7 +24,8 @@ const FRAME_SLOTS: usize = 3;
 const ZERO_VB_SIZE: u64 = 4096;
 const OCCLUSION_CAPACITY: u32 = 2048;
 const OCCLUSION_VISIBLE_COUNT: u64 = 65536;
-const BG_LIMIT: usize = 24000;
+const BG_LIMIT: usize = if cfg!(target_os = "ios") { 4096 } else { 24000 };
+const PIPE_LIMIT: usize = 4096;
 
 pub struct SurfaceHandoff {
     pub instance: Instance,
@@ -39,6 +40,10 @@ pub static OCCLUDED: AtomicBool = AtomicBool::new(false);
 pub static SUSPENDED: AtomicBool = AtomicBool::new(false);
 
 pub static PRESENTS: AtomicU64 = AtomicU64::new(0);
+
+pub fn request_memory_cleanup() {
+    crate::performance::MEMORY_PRESSURE.store(true, Ordering::Relaxed);
+}
 
 pub fn start(mem: &SharedMemory, ring: u64, size: u64, dbg: u64) {
     if STARTED.swap(true, Ordering::SeqCst) {
@@ -697,7 +702,7 @@ struct PipeJob {
     multisample: MultisampleState,
     targets: Vec<Option<ColorTargetState>>,
 }
-enum PipeEntry { Pending, Done(Option<Rc<Pl>>) }
+enum PipeEntry { Pending, Done(Option<Rc<Pl>>, u64) }
 
 fn compile_pipeline(device: &Device, job: &PipeJob) -> Option<RenderPipeline> {
     let vbs: Vec<Option<VertexBufferLayout>> = job.vbs.iter().map(|v| v.as_ref().map(|(stride, step, attrs)| VertexBufferLayout { array_stride: *stride, step_mode: *step, attributes: attrs })).collect();
@@ -775,7 +780,7 @@ pub struct Gpu {
     pending_skips: u64,
     pending_skips0: u64,
     compute: HashMap<String, Option<(ComputePipeline, BindGroupLayout, u64, Rc<Program>)>>,
-    bind_groups: HashMap<Vec<u64>, (BindGroup, u64)>,
+    bind_groups: HashMap<Vec<u64>, (BindGroup, u64, u64)>,
     ubo_slots: Vec<Vec<Chunk>>,
     ubo_shared: Vec<(Buffer, u64)>,
     ubo_slot: usize,
@@ -816,6 +821,11 @@ pub struct Gpu {
     fps_t0: Instant,
     fps_n0: u64,
     fps_d0: u64,
+    frame_pacer: crate::performance::FramePacer,
+    last_memory_check: Instant,
+    last_cleanup: Instant,
+    pressure_until: Option<Instant>,
+    requested_refresh: u32,
     errors: Arc<AtomicU64>,
 
     inflight: Arc<AtomicU64>,
@@ -938,7 +948,10 @@ impl Gpu {
             pending_resolve: Vec::new(), pending_events: Vec::new(), pending_maps: Vec::new(), counter_src: None, counter_slot: 0,
             frame_slot_done: (0..FRAME_SLOTS).map(|_| None).collect(), last_submit: None, vb_avail: [0; 16],
             dbg_idx: if dbg != 0 { dbg + 424 } else { 0 },
-            draws: 0, skipped: 0, presents: 0, pipe_creates: 0, fps_t0: Instant::now(), fps_n0: 0, fps_d0: 0, errors, inflight: Arc::new(AtomicU64::new(0)), submits: 0, submits0: 0, passes: 0, passes0: 0,
+            draws: 0, skipped: 0, presents: 0, pipe_creates: 0, fps_t0: Instant::now(), fps_n0: 0, fps_d0: 0,
+            frame_pacer: Default::default(), last_memory_check: Instant::now(), last_cleanup: Instant::now() - Duration::from_secs(60), pressure_until: None,
+            requested_refresh: 0,
+            errors, inflight: Arc::new(AtomicU64::new(0)), submits: 0, submits0: 0, passes: 0, passes0: 0,
         })
     }
 
@@ -1068,9 +1081,10 @@ impl Gpu {
         self.hdr(2).store(1, Ordering::SeqCst);
         log("running");
         loop {
+            self.check_memory();
             if SUSPENDED.load(Ordering::Relaxed) {
                 let _ = self.device.poll(PollType::Wait { submission_index: None, timeout: None });
-                while SUSPENDED.load(Ordering::Relaxed) { std::thread::sleep(Duration::from_millis(50)); }
+                while SUSPENDED.load(Ordering::Relaxed) { self.check_memory(); std::thread::sleep(Duration::from_millis(50)); }
             }
             self.process_maps(false);
             if self.inflight.load(Ordering::SeqCst) > 0 {
@@ -2266,7 +2280,8 @@ impl Gpu {
                 }
             }
         }
-        if let Some((bg, uid)) = self.bind_groups.get(&key) {
+        if let Some((bg, uid, seen)) = self.bind_groups.get_mut(&key) {
+            *seen = self.presents;
             return Some(BgResult { bg: bg.clone(), uid: *uid, dyn_off });
         }
         let wentries: Vec<BindGroupEntry> = entries.iter().map(|(binding, r)| BindGroupEntry {
@@ -2278,9 +2293,9 @@ impl Gpu {
             },
         }).collect();
         let bg = self.scoped(&format!("bind group {}", prog.label), |d| d.create_bind_group(&BindGroupDescriptor { label: None, layout: &bgl.0, entries: &wentries }))?;
-        if self.bind_groups.len() > BG_LIMIT * 3 / 2 { self.bind_groups.clear(); }
+        if self.bind_groups.len() >= BG_LIMIT * 3 / 2 { self.prune_graphics_cache(); }
         let uid = self.uid();
-        self.bind_groups.insert(key, (bg.clone(), uid));
+        self.bind_groups.insert(key, (bg.clone(), uid, self.presents));
         Some(BgResult { bg, uid, dyn_off })
     }
 
@@ -2298,14 +2313,14 @@ impl Gpu {
         for f in &pi.rt_formats { key.push(f.map(|f| format_id(f)).unwrap_or(-1)); }
         key.extend([-7, pi.ds_format.map(format_id).unwrap_or(-1), pi.samples as i64, pi.ro_depth as i64, pi.ro_stencil as i64]);
         let _ = (vs_id, ps_id);
-        match self.pipelines.get(&key) {
-            Some(PipeEntry::Done(p)) => return p.clone(),
+        match self.pipelines.get_mut(&key) {
+            Some(PipeEntry::Done(p, seen)) => { *seen = self.presents; return p.clone(); }
             Some(PipeEntry::Pending) => { self.pending_skips += 1; return None; }
             None => {}
         }
         self.pipe_creates += 1;
         let Some((job, vb_req)) = self.create_pipeline(vs, ps, layout, &strides, topo, strip_fmt, &pi) else {
-            self.pipelines.insert(key, PipeEntry::Done(None));
+            self.pipelines.insert(key, PipeEntry::Done(None, self.presents));
             return None;
         };
         if let Some(tx) = self.pipe_jobs.clone() {
@@ -2317,7 +2332,7 @@ impl Gpu {
             return None;
         }
         let pl = compile_pipeline(&self.device, &job).map(|pipeline| { let uid = self.uid(); Rc::new(Pl { pipeline, uid, vb_req, label: job.label }) });
-        self.pipelines.insert(key, PipeEntry::Done(pl.clone()));
+        self.pipelines.insert(key, PipeEntry::Done(pl.clone(), self.presents));
         pl
     }
 
@@ -2405,7 +2420,7 @@ impl Gpu {
         while let Ok((id, pipeline)) = self.pipe_results.try_recv() {
             let Some((key, vb_req, label)) = self.pipe_pending.remove(&id) else { continue };
             let entry = pipeline.map(|pipeline| { let uid = self.uid(); Rc::new(Pl { pipeline, uid, vb_req, label }) });
-            self.pipelines.insert(key, PipeEntry::Done(entry));
+            self.pipelines.insert(key, PipeEntry::Done(entry, self.presents));
             self.pdirty = true;
         }
     }
@@ -3140,6 +3155,18 @@ impl Gpu {
     }
 
     fn present(&mut self, id: u32) {
+        let now = Instant::now();
+        let fps = if self.pressure_until.is_some_and(|until| now < until) { 30 } else { crate::performance::frame_limit() };
+        if fps != self.requested_refresh {
+            self.requested_refresh = fps;
+            #[cfg(target_os = "ios")]
+            {
+                extern "C" { fn muguet_set_refresh_rate(fps: u32); }
+                unsafe { muguet_set_refresh_rate(fps); }
+            }
+        }
+        let delay = self.frame_pacer.delay(now, fps);
+        if !delay.is_zero() { std::thread::sleep(delay); }
         self.materialize_clears(id);
         let visible = !OCCLUDED.load(Ordering::Relaxed);
         if let (Some(t), Some(_), true) = (self.tex(id), self.surface.as_ref(), visible) {
@@ -3200,6 +3227,7 @@ impl Gpu {
                 }
                 self.flush();
                 self.queue.present(frame);
+                PRESENTS.fetch_add(1, Ordering::Relaxed);
             } else {
                 self.flush();
             }
@@ -3208,7 +3236,7 @@ impl Gpu {
         }
         self.collect_pipelines();
         self.presents += 1;
-        PRESENTS.store(self.presents, Ordering::Relaxed);
+        if cfg!(target_os = "ios") && self.presents % 120 == 0 { self.prune_graphics_cache(); }
         self.log_fps();
 
         self.frame_slot_done[self.ubo_slot] = self.last_submit.clone();
@@ -3221,11 +3249,61 @@ impl Gpu {
         self.process_maps(false);
     }
 
+    fn prune_graphics_cache(&mut self) {
+        let recent = self.presents.saturating_sub(2);
+        let mut groups: Vec<_> = self.bind_groups.iter().filter(|(_, (_, _, seen))| *seen < recent)
+            .map(|(key, (_, _, seen))| (key.clone(), *seen)).collect();
+        groups.sort_unstable_by_key(|(_, seen)| *seen);
+        for (key, _) in groups.into_iter().take(self.bind_groups.len().saturating_sub(BG_LIMIT)) { self.bind_groups.remove(&key); }
+        let mut pipes: Vec<_> = self.pipelines.iter().filter_map(|(key, entry)| match entry {
+            PipeEntry::Done(_, seen) if *seen < recent => Some((key.clone(), *seen)), _ => None,
+        }).collect();
+        pipes.sort_unstable_by_key(|(_, seen)| *seen);
+        for (key, _) in pipes.into_iter().take(self.pipelines.len().saturating_sub(PIPE_LIMIT)) { self.pipelines.remove(&key); }
+    }
+
+    fn check_memory(&mut self) {
+        let now = Instant::now();
+        if now.duration_since(self.last_memory_check) >= Duration::from_secs(1) {
+            self.last_memory_check = now;
+            if crate::performance::available_memory().is_some_and(|a| a < 192 << 20) { request_memory_cleanup(); }
+            crate::diagnostics::trim();
+        }
+        if !crate::performance::MEMORY_PRESSURE.load(Ordering::Relaxed) || now.duration_since(self.last_cleanup) < Duration::from_secs(3) { return; }
+        crate::performance::MEMORY_PRESSURE.store(false, Ordering::Relaxed);
+        self.last_cleanup = now;
+        self.pressure_until = Some(now + Duration::from_secs(30));
+        let before = crate::footprint_mb();
+        self.flush();
+        // Finish already submitted work before recycling uniform storage. Never
+        // destroy a texture or buffer still owned by the game.
+        let _ = self.device.poll(PollType::Wait { submission_index: None, timeout: Some(Duration::from_secs(2)) });
+        self.bind_groups.clear();
+        self.pipelines.retain(|_, p| matches!(p, PipeEntry::Pending));
+        self.compute.clear();
+        self.bgl_cache.clear();
+        self.last_pl = None;
+        self.pdirty = true;
+        for obj in self.objs.iter().flatten() {
+            if let Obj::Shader(s) = obj {
+                if let Some(Some(program)) = &s.program { program.variants.borrow_mut().clear(); }
+            }
+        }
+        for slot in &mut self.ubo_slots { slot.clear(); }
+        self.ubo_shared.clear();
+        self.ubo_chunk = 0;
+        self.ubo_off = 0;
+        self.frame_slot_done.fill(None);
+        let _ = self.device.poll(PollType::Poll);
+        log(&format!("memory cleanup: {before} -> {} MB, remaining {} MB; temporary 30 FPS limit", crate::footprint_mb(), crate::performance::available_memory().unwrap_or(0) >> 20));
+    }
+
     fn log_fps(&mut self) {
         let now = Instant::now();
         let dt = now.duration_since(self.fps_t0).as_secs_f64();
         if dt >= 10.0 {
-            let frames = self.presents - self.fps_n0;
+            let displayed = PRESENTS.load(Ordering::Relaxed);
+            let frames = displayed - self.fps_n0;
             log(&format!(
                 "fps: {:.1} ({} MB memory, game heap {} MB, {} frames, {} clears folded, {} draws/frame, {} draws waiting for a compiling pipeline, {:.1} submits/frame, {:.1} passes/frame, {} skipped total, pipelines {}, bind groups cached {}, validation errors {})",
                 frames as f64 / dt, crate::footprint_mb(), crate::RT.get().map(|r| r.mem.data_size() >> 20).unwrap_or(0), frames, self.clears_folded, (self.draws - self.fps_d0) / frames.max(1), self.pending_skips - self.pending_skips0, (self.submits - self.submits0) as f64 / frames.max(1) as f64,
@@ -3242,7 +3320,7 @@ impl Gpu {
             self.pending_skips0 = self.pending_skips;
             self.passes0 = self.passes;
             self.fps_t0 = now;
-            self.fps_n0 = self.presents;
+            self.fps_n0 = displayed;
             self.fps_d0 = self.draws;
         }
     }

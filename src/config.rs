@@ -52,7 +52,38 @@ pub fn bundled_resources() -> Option<PathBuf> {
 }
 
 fn build_dir(root: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(root.join("b")).ok()?.flatten().map(|e| e.path()).find(|p| p.join("shaders/index.json").exists())
+    let mut builds: Vec<_> = std::fs::read_dir(root.join("b")).ok()?.flatten().map(|e| e.path())
+        .filter(|p| p.join("shaders/index.json").is_file()).collect();
+    builds.sort();
+    builds.into_iter().next()
+}
+
+pub fn validate_game_files() -> anyhow::Result<()> {
+    use anyhow::Context;
+    let root = game_dir();
+    let manifest_path = root.join("data/manifest.json");
+    anyhow::ensure!(std::fs::metadata(&manifest_path)?.len() <= 64 << 20, "Game manifest is too large");
+    let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest_path)?).context("Invalid game manifest")?;
+    let files = manifest.get("files").and_then(|v| v.as_array()).context("Game manifest has no files list")?;
+    anyhow::ensure!(!files.is_empty(), "Game data is empty. Import a complete compatible game.zip");
+    for record in files {
+        let name = record.get(0).and_then(|v| v.as_str()).context("Invalid file in game manifest")?;
+        let size = record.get(1).and_then(|v| v.as_u64()).context("Invalid size in game manifest")?;
+        let relative = Path::new(name);
+        anyhow::ensure!(relative.components().all(|c| matches!(c, std::path::Component::Normal(_))), "Invalid game data path: {name}");
+        let metadata = std::fs::metadata(root.join("data").join(relative)).with_context(|| format!("Game data missing: {name}"))?;
+        // Previous versions trim this XML after extraction without updating its
+        // manifest size. Keep already-imported game packs compatible.
+        let trimmed_dlc = name.eq_ignore_ascii_case("common/data/dlcList.xml");
+        anyhow::ensure!(metadata.is_file() && (metadata.len() == size || trimmed_dlc), "Game data incomplete: {name}. Import the complete game.zip again");
+    }
+    let build = build_dir(&root).context("Missing shader pack")?;
+    let index = build.join("shaders/index.json");
+    anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");
+    let shaders: serde_json::Value = serde_json::from_slice(&std::fs::read(index)?).context("Invalid shader index")?;
+    anyhow::ensure!(shaders.as_object().is_some_and(|o| !o.is_empty()), "Shader pack is empty");
+    eprintln!("[config] validated {} game files and shader index", files.len());
+    Ok(())
 }
 
 fn set_default(key: &str, value: impl AsRef<std::ffi::OsStr>) {
@@ -115,7 +146,7 @@ fn locate() -> anyhow::Result<PathBuf> {
     Ok(build)
 }
 
-const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_NAME"];
+const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_NAME"];
 
 #[cfg(target_os = "ios")]
 pub fn reload() -> Vec<String> {
@@ -139,6 +170,9 @@ fn settings(cfg_path: &Path) -> Vec<String> {
     if let Some(v) = num("scale") { set_default("MUGUET_SCALE", v.to_string()); }
     if let Some(v) = num("mouse_sensitivity") { set_default("MUGUET_MOUSE_SENS", v.to_string()); }
     if let Some(v) = num("touch_sensitivity") { set_default("MUGUET_TOUCH_SENS", v.to_string()); }
+    set_default("MUGUET_AIM_SENS", num("aim_sensitivity").unwrap_or(0.4).clamp(0.15, 1.0).to_string());
+    set_default("MUGUET_AIM_MODE", cfg.get("aim_mode").and_then(|v| v.as_str()).unwrap_or("toggle"));
+    set_default("MUGUET_FIRE_AIM", if cfg.get("fire_aim").and_then(|v| v.as_bool()).unwrap_or(true) { "1" } else { "0" });
     if let Some(r) = cfg.get("resolution").and_then(|v| v.as_str()) { set_default("MUGUET_RES", r); }
     if flag("fullscreen") { set_default("MUGUET_FULLSCREEN", "1"); }
     if flag("mute") { set_default("MUGUET_MUTE", "1"); }
@@ -153,7 +187,8 @@ fn settings(cfg_path: &Path) -> Vec<String> {
     let mut engine_args = Vec::new();
 
     let fps = std::env::var("MUGUET_FPS").ok().and_then(|v| v.parse::<f64>().ok()).or_else(|| num("fps_limit")).unwrap_or(60.0);
-    engine_args.push(format!("-frameLimit={}", if fps <= 0.0 { 0 } else if fps <= 30.0 { 2 } else { 1 }));
+    crate::performance::set_frame_limit(fps);
+    engine_args.push(format!("-frameLimit={}", crate::performance::engine_frame_limit(fps)));
 
     let start_mode = std::env::var("MUGUET_START").ok().and_then(|v| v.parse::<f64>().ok()).or_else(|| num("start_mode")).unwrap_or(2.0) as i64;
     let start_mode = if (1..=2).contains(&start_mode) { start_mode } else { 2 };

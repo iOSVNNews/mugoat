@@ -14,6 +14,9 @@ final class Settings: ObservableObject {
     @Published var fps = 60
     @Published var textures = 0
     @Published var touch = 1.0
+    @Published var aimSensitivity = 0.4
+    @Published var aimMode = "toggle"
+    @Published var fireAim = true
     @Published var mute = false
     @Published var multiplayer = false
     @Published var host = false
@@ -27,9 +30,13 @@ final class Settings: ObservableObject {
         extra = json
         if let v = json["start_mode"] as? Int, (1...2).contains(v) { mode = v }
         if let v = json["scale"] as? Double { scale = v }
-        if let v = json["fps_limit"] as? Int { fps = v == 30 ? 30 : 60 }
+        if let v = json["fps_limit"] as? Int, [30, 60, 120].contains(v) { fps = v }
+        if fps > UIScreen.main.maximumFramesPerSecond { fps = 60 }
         if let v = json["texture_quality"] as? Int, (0...2).contains(v) { textures = v }
         if let v = json["touch_sensitivity"] as? Double { touch = v }
+        if let v = json["aim_sensitivity"] as? Double { aimSensitivity = min(1.0, max(0.15, v)) }
+        if let v = json["aim_mode"] as? String, ["toggle", "hold"].contains(v) { aimMode = v }
+        if let v = json["fire_aim"] as? Bool { fireAim = v }
         if let v = json["mute"] as? Bool { mute = v }
         if let v = json["multiplayer"] as? Bool { multiplayer = v }
         if let v = json["host"] as? Bool { host = v }
@@ -44,6 +51,9 @@ final class Settings: ObservableObject {
         json["fps_limit"] = fps
         json["texture_quality"] = textures
         json["touch_sensitivity"] = (touch * 100).rounded() / 100
+        json["aim_sensitivity"] = aimSensitivity
+        json["aim_mode"] = aimMode
+        json["fire_aim"] = fireAim
         json["mute"] = mute
         json["multiplayer"] = multiplayer
         json["host"] = host
@@ -69,6 +79,7 @@ final class Importer: ObservableObject {
     @Published var ready = muguet_game_ready()
     @Published var progress: Double?
     @Published var error: String?
+    private var lastProgressTime = 0.0
 
     func run(_ url: URL) {
         error = nil
@@ -77,6 +88,9 @@ final class Importer: ObservableObject {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let ok = url.path.withCString { muguet_import($0) { done, total in
+                let now = ProcessInfo.processInfo.systemUptime
+                guard done == total || now - Importer.shared.lastProgressTime >= 0.05 else { return }
+                Importer.shared.lastProgressTime = now
                 let p = total > 0 ? Double(done) / Double(total) : 0
                 DispatchQueue.main.async { Importer.shared.progress = p }
             } }
@@ -112,6 +126,7 @@ struct LauncherView: View {
                     Button("Import other game data…") { picking = true }.font(.caption)
                 }
                 Text("proudly made by c22dev").font(.caption).foregroundStyle(.secondary)
+                Text("Rebuild: iOSVN").font(.caption).foregroundStyle(.secondary)
             }
             .padding(24)
             .frame(maxWidth: .infinity)
@@ -134,11 +149,28 @@ struct LauncherView: View {
                 Picker("Frame limit", selection: $s.fps) {
                     Text("30 fps (cooler)").tag(30)
                     Text("60 fps").tag(60)
+                    if UIScreen.main.maximumFramesPerSecond >= 120 { Text("120 fps (ProMotion)").tag(120) }
                 }
+                Text("Higher frame rates use more power. Low memory automatically reduces the render limit.")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Text("Look sensitivity")
                     Slider(value: $s.touch, in: 0.25...3, step: 0.25)
                     Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 50, alignment: .trailing)
+                }
+                Section("Aiming") {
+                    Picker("Aim button", selection: $s.aimMode) {
+                        Text("Tap to toggle").tag("toggle")
+                        Text("Hold to aim").tag("hold")
+                    }
+                    Toggle("Aim while firing", isOn: $s.fireAim)
+                    HStack {
+                        Text("Aim sensitivity")
+                        Slider(value: $s.aimSensitivity, in: 0.15...1.0, step: 0.05)
+                        Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit()
+                    }
+                    Text("Drag on the right FIRE button to adjust aim while shooting. The left FIRE button frees your right thumb to aim.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Mute audio", isOn: $s.mute)
                 Section("Multiplayer") {
@@ -159,7 +191,14 @@ struct LauncherView: View {
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                         }
+                        Text("LAN: join the host's Wi-Fi address. Internet: use a reachable server IP and UDP port 47520. Story missions remain single-player.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                Section("Diagnostics") {
+                    Button("Share startup / memory logs") { shareDiagnostics() }
+                    Text("After a crash, reopen Muguet and share the previous log. Logs contain connection addresses and runtime errors, not game files.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -208,6 +247,47 @@ struct LauncherView: View {
         do { try s.save() } catch { self.error = "Could not save settings: \(error.localizedDescription)"; return }
         play()
     }
+}
+
+@_cdecl("muguet_physical_memory")
+public func muguetPhysicalMemory() -> UInt64 { ProcessInfo.processInfo.physicalMemory }
+
+private final class RefreshHint: NSObject {
+    static let shared = RefreshHint()
+    var link: CADisplayLink?
+    @objc func tick(_ link: CADisplayLink) {}
+    func set(_ requested: UInt32) {
+        let maximum = Float(UIScreen.main.maximumFramesPerSecond)
+        let rate = requested == 0 ? maximum : min(maximum, Float(requested))
+        if link == nil {
+            link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+            link?.add(to: .main, forMode: .common)
+        }
+        link?.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, rate), maximum: rate, preferred: rate)
+    }
+}
+
+@_cdecl("muguet_set_refresh_rate")
+public func muguetSetRefreshRate(_ fps: UInt32) {
+    DispatchQueue.main.async { RefreshHint.shared.set(fps) }
+}
+
+func shareDiagnostics() {
+    let folder = configURL.deletingLastPathComponent()
+    let logs = ["muguet-previous.log", "muguet-runtime.log"].map { folder.appendingPathComponent($0) }
+        .filter { FileManager.default.fileExists(atPath: $0.path) }
+    guard !logs.isEmpty,
+          let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let window = scene.windows.first(where: { $0.isKeyWindow }),
+          let root = window.rootViewController else { return }
+    var presenter = root
+    while let child = presenter.presentedViewController { presenter = child }
+    let sheet = UIActivityViewController(activityItems: logs, applicationActivities: nil)
+    if let popover = sheet.popoverPresentationController {
+        popover.sourceView = presenter.view
+        popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+    }
+    presenter.present(sheet, animated: true)
 }
 
 func localIPs() -> [String] {

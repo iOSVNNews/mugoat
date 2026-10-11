@@ -101,6 +101,13 @@ fn tidy_lists(data: &Path) -> Result<()> {
     let present: HashSet<PathBuf> = walk(data);
     if let Some(files) = manifest.get_mut("files").and_then(|f| f.as_array_mut()) {
         files.retain(|f| f.get(0).and_then(|p| p.as_str()).is_some_and(|p| present.contains(&data.join(p))));
+        for record in files {
+            if record.get(0).and_then(|v| v.as_str()).is_some_and(|p| p.eq_ignore_ascii_case("common/data/dlcList.xml")) {
+                if let Ok(metadata) = std::fs::metadata(&dlc) {
+                    if let Some(size) = record.get_mut(1) { *size = serde_json::Value::from(metadata.len()); }
+                }
+            }
+        }
     }
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
     Ok(())

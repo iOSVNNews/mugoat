@@ -12,6 +12,7 @@ use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 const TITLE: &str = "Muguet";
 const PICK_TITLE: &str = "Muguet — loading: press Enter for Story Mode, or Space then 5 for Sandbox";
+static ENGINE_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 struct App {
     mode_chosen: bool,
@@ -20,6 +21,8 @@ struct App {
     args: Vec<String>,
     window: Option<Arc<Window>>,
     started: bool,
+    runtime_rx: Option<std::sync::mpsc::Receiver<Result<Arc<Runtime>, String>>>,
+    loading_since: Option<std::time::Instant>,
 
     #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     launcher_shown: bool,
@@ -158,10 +161,51 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Some(message) = ENGINE_ERROR.lock().unwrap().take() {
+            self.loading_since = None;
+            gpu::SUSPENDED.store(true, std::sync::atomic::Ordering::Relaxed);
+            input::set_focus(false);
+            #[cfg(target_os = "ios")]
+            crate::touch::loading(Some(&format!("Game stopped\n{message}\nReopen Muguet to share its diagnostic log.")));
+        }
+        if let Some(rx) = &self.runtime_rx {
+            match rx.try_recv() {
+                Ok(Ok(rt)) => {
+                    self.runtime_rx = None;
+                    self.rt = Some(rt.clone());
+                    self.launch_engine(rt);
+                }
+                Ok(Err(message)) => {
+                    self.runtime_rx = None;
+                    self.loading_since = None;
+                    eprintln!("[host] startup failed: {message}");
+                    #[cfg(target_os = "ios")]
+                    crate::touch::loading(Some(&format!("Could not start game\n{message}\nDetails: Files → Muguet → muguet-runtime.log")));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.runtime_rx = None;
+                    self.loading_since = None;
+                    #[cfg(target_os = "ios")]
+                    crate::touch::loading(Some("Runtime preparation failed. Reopen Muguet and share its diagnostic log."));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        #[cfg(target_os = "ios")]
+        if let Some(since) = self.loading_since {
+            if gpu::PRESENTS.load(std::sync::atomic::Ordering::Relaxed) >= 20 {
+                crate::touch::loading(None);
+                self.loading_since = None;
+            } else {
+                let phase = if self.runtime_rx.is_some() { "Preparing native game" } else { "Loading game data and shaders" };
+                crate::touch::loading(Some(&format!("{phase}… {} s\nKeep Muguet open. First launch can take longer.", since.elapsed().as_secs())));
+            }
+        }
         #[allow(unused_mut)]
         let mut wait = if crate::pad::poll() { 8 } else if cfg!(target_os = "ios") { 250 } else { 1000 };
         #[cfg(target_os = "ios")]
-        if crate::touch::refresh() { wait = 15; }
+        if crate::touch::refresh() { wait = 8; }
+        if self.loading_since.is_some() { wait = 100; }
         #[cfg(target_os = "ios")]
         if !self.started {
             self.launcher();
@@ -175,40 +219,59 @@ impl ApplicationHandler for App {
             if self.locked { input::mouse_delta_f(delta.0, delta.1); }
         }
     }
+
+    fn memory_warning(&mut self, _el: &ActiveEventLoop) {
+        gpu::request_memory_cleanup();
+        eprintln!("[memory] iOS warning: footprint {} MB, remaining {} MB", crate::footprint_mb(), crate::performance::available_memory().unwrap_or(0) >> 20);
+    }
 }
 
 impl App {
     fn start_engine(&mut self) {
-        let Some(window) = self.window.clone() else { return };
+        if self.window.is_none() { return; }
         if self.started { return; }
         self.started = true;
+        self.loading_since = Some(std::time::Instant::now());
+        #[cfg(target_os = "ios")]
+        crate::touch::loading(Some("Preparing native game…"));
+        if let Some(rt) = self.rt.clone() { self.launch_engine(rt); return; }
+        let startup = crate::config::Startup {
+            wasm_path: self.startup.wasm_path.clone(), cache_dir: self.startup.cache_dir.clone(),
+            engine_args: self.startup.engine_args.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.runtime_rx = Some(rx);
+        let result = std::thread::Builder::new().name("runtime-loader".into()).stack_size(8 << 20).spawn(move || {
+            let result = crate::config::validate_game_files().and_then(|()| crate::make_runtime(&startup)).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(result);
+        });
+        if let Err(e) = result {
+            self.runtime_rx = None;
+            self.loading_since = None;
+            eprintln!("[host] cannot prepare runtime: {e}");
+            #[cfg(target_os = "ios")]
+            crate::touch::loading(Some("Unable to prepare runtime. Reopen Muguet and use lower graphics settings."));
+        }
+    }
+
+    fn launch_engine(&mut self, rt: Arc<Runtime>) {
+        let Some(window) = self.window.clone() else { return };
         let (w, h) = backbuffer_size(&window);
         input::set_size(w, h);
-        let rt = match self.rt.clone() {
-            Some(rt) => rt,
-            None => match crate::make_runtime(&self.startup) {
-                Ok(rt) => {
-                    self.rt = Some(rt.clone());
-                    rt
-                }
-                Err(e) => {
-                    eprintln!("[host] {e:#}");
-                    return;
-                }
-            },
-        };
         let mut args = self.args.clone();
         args.extend(["-wgpu".to_string(), format!("-width={w}"), format!("-height={h}")]);
-        std::thread::Builder::new()
+        let result = std::thread::Builder::new()
             .name("engine-main".into())
             .stack_size(64 << 20)
             .spawn(move || {
                 if let Err(e) = crate::run_engine(&rt, args) {
                     eprintln!("[host] engine failed: {e:?}");
+                    *ENGINE_ERROR.lock().unwrap() = Some(format!("{e:#}"));
+                    return;
                 }
                 std::process::exit(0);
-            })
-            .expect("spawn engine thread");
+            });
+        if let Err(e) = result { *ENGINE_ERROR.lock().unwrap() = Some(format!("Cannot start game thread: {e}")); }
     }
 
     #[cfg(target_os = "ios")]
@@ -264,7 +327,7 @@ impl App {
 pub fn run(rt: Option<Arc<Runtime>>, startup: crate::config::Startup, args: Vec<String>) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, launcher_shown: false, locked: false, mods: ModifiersState::empty(), wheel_accum: 0.0 };
+    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, loading_since: None, launcher_shown: false, locked: false, mods: ModifiersState::empty(), wheel_accum: 0.0 };
     event_loop.run_app(&mut app)?;
     Ok(())
 }

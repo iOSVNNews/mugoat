@@ -259,6 +259,8 @@ impl Peer {
 struct Net {
     sock: UdpSocket,
     name: String,
+    last_server: Mutex<Instant>,
+    full: AtomicBool,
     my_id: Mutex<Option<u8>>,
     peers: Mutex<HashMap<u8, Peer>>,
     shots: Mutex<Vec<(u8, Shot)>>,
@@ -394,6 +396,22 @@ pub fn key_pressed(code: &str) {
     }
 }
 
+pub fn network_status() -> Option<String> {
+    if std::env::var("MUGUET_HOST").is_err() && std::env::var("MUGUET_SERVER").is_err() { return None; }
+    let net = match NET.get() {
+        Some(Some(net)) => net,
+        Some(None) => return Some("Online: invalid or unreachable server address".into()),
+        None => return Some("Online: waiting for game startup".into()),
+    };
+    if net.full.load(Ordering::Relaxed) { return Some("Online: room full — retrying".into()); }
+    if net.last_server.lock().unwrap().elapsed() > Duration::from_secs(proto::TIMEOUT_SECS) {
+        return Some("Online: no server response — check IP / UDP 47520".into());
+    }
+    if net.my_id.lock().unwrap().is_some() {
+        Some(format!("Online: connected · {} player(s)", net.peers.lock().unwrap().len() + 1))
+    } else { Some("Online: connecting…".into()) }
+}
+
 fn net() -> Option<&'static Net> {
     NET.get_or_init(|| {
         let host = std::env::var("MUGUET_HOST").map(|v| v == "1").unwrap_or(false);
@@ -418,7 +436,7 @@ fn net() -> Option<&'static Net> {
             }
         };
         eprintln!("[mp] server {server}, playing as {name}");
-        let net = Net { sock, name, my_id: Mutex::new(None), peers: Mutex::new(HashMap::new()), shots: Mutex::new(Vec::new()), kills: Mutex::new(Vec::new()), taken: Mutex::new(Vec::new()), explosions: Mutex::new(Vec::new()), hits: Mutex::new(Vec::new()), car_hits: Mutex::new(Vec::new()), time: Mutex::new(None), pending: Mutex::new(Vec::new()), rel_seq: Mutex::new(0), rel_seen: Mutex::new(HashMap::new()), deaths: Mutex::new(Vec::new()) };
+        let net = Net { sock, name, last_server: Mutex::new(Instant::now()), full: AtomicBool::new(false), my_id: Mutex::new(None), peers: Mutex::new(HashMap::new()), shots: Mutex::new(Vec::new()), kills: Mutex::new(Vec::new()), taken: Mutex::new(Vec::new()), explosions: Mutex::new(Vec::new()), hits: Mutex::new(Vec::new()), car_hits: Mutex::new(Vec::new()), time: Mutex::new(None), pending: Mutex::new(Vec::new()), rel_seq: Mutex::new(0), rel_seen: Mutex::new(HashMap::new()), deaths: Mutex::new(Vec::new()) };
         let rx = net.sock.try_clone().expect("socket clone");
         std::thread::Builder::new().name("mp-net".into()).spawn(move || receive_loop(rx)).ok();
         Some(net)
@@ -433,7 +451,9 @@ fn receive_loop(sock: UdpSocket) {
     let mut last_hello = Instant::now() - Duration::from_secs(10);
     loop {
         let Some(net) = net() else { return };
-
+        if net.last_server.lock().unwrap().elapsed() > Duration::from_secs(proto::TIMEOUT_SECS) {
+            *net.my_id.lock().unwrap() = None;
+        }
         let every = if net.my_id.lock().unwrap().is_none() { 1 } else { 2 };
         if last_hello.elapsed() > Duration::from_secs(every) {
             last_hello = Instant::now();
@@ -446,6 +466,7 @@ fn receive_loop(sock: UdpSocket) {
         };
         let Some((kind, p)) = proto::parse(&buf[..n]) else { continue };
         let now = Instant::now();
+        *net.last_server.lock().unwrap() = now;
         match kind {
             proto::REL if p.len() >= 4 => {
                 let (from, seq) = (p[0], u16::from_le_bytes([p[1], p[2]]));
@@ -486,6 +507,7 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
     {
         match kind {
             proto::WELCOME if !p.is_empty() => {
+                net.full.store(false, Ordering::Relaxed);
                 let mut id = net.my_id.lock().unwrap();
                 if *id != Some(p[0]) {
                     eprintln!("[mp] joined as player {}", p[0]);
@@ -493,6 +515,7 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
                 *id = Some(p[0]);
             }
             proto::FULL => {
+                net.full.store(true, Ordering::Relaxed);
                 eprintln!("[mp] server is full");
                 std::thread::sleep(Duration::from_secs(5));
             }

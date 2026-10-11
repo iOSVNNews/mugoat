@@ -25,6 +25,40 @@ Upstream source: https://github.com/c22dev/muguet
 
 Initial upstream revision: `366d0ccc00aa67bd88ac9df1fc6fc29fb3fdd577`.
 
+## iOSVN rebuild 2
+
+The original `proudly made by c22dev` credit is preserved, with `Rebuild: iOSVN`
+added beneath it. The rebuild adds a 120 FPS option on ProMotion devices, a real
+render pacer and refresh-rate hint; hardware, temperature and system policy still
+determine the achieved frame rate.
+
+Touch aiming uses a linear response with an independent aim sensitivity, tap/hold
+aim modes, optional aim while firing, a left fire button and drag-to-aim on the
+right fire button. Dragging jump, reload and other action buttons no longer rotates
+the camera. Gamepad aiming uses the same precision multiplier.
+
+Runtime preparation and game-file validation run off the main UI thread. The
+startup overlay shows progress and recoverable errors; caught game-runtime traps
+are logged and displayed instead of immediately exiting the application.
+
+The game heap has a 16 GiB ceiling, with a lower maximum chosen from physical RAM
+and the actual process memory allowance. Wasmtime uses explicit memory bounds
+instead of reserving 16 GiB on every device. Heap growth reports its actual limit,
+keeps headroom and avoids speculative over-allocation on iOS. Memory warnings and
+low available-memory readings trigger GPU cache recycling and a temporary 30 FPS
+limit. Live game textures and buffers are preserved. This reduces avoidable
+memory pressure; it cannot make GTA V fit every low-memory device or guarantee
+that iOS never terminates the app.
+
+The launcher can share bounded runtime logs, including the previous session.
+Logs may contain multiplayer IP addresses. Online status uses server responses,
+and reconnects after a timeout. LAN Host/Join uses UDP 47520 with up to 8 players;
+Internet play needs a reachable UDP server. Story missions remain single-player.
+
+The build verifies memory/frame/aim policies, a real two-client UDP handshake and
+relay, the ARM64 app and embedded AOT game code. These checks do not replace
+physical-device gameplay, RAM-pressure and aiming tests.
+
 ## Build with precompiled game code
 
 The separate **Build encrypted Muguet IPA with game code** workflow downloads a

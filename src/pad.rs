@@ -107,7 +107,10 @@ pub fn poll() -> bool {
         };
         let (dx, dy) = (curve(rs.xAxis().value()), -curve(rs.yAxis().value()));
         if dx != 0.0 || dy != 0.0 {
-            input::mouse_delta_f(dx * LOOK_SPEED * dt, dy * LOOK_SPEED * dt);
+            let aimed = buttons & 2 != 0 && !in_car;
+            let aim_scale = std::env::var("MUGUET_AIM_SENS").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4);
+            let (dx, dy) = crate::aim::scale_delta((dx * LOOK_SPEED * dt, dy * LOOK_SPEED * dt), 1.0, aimed, aim_scale);
+            input::mouse_delta_f(dx, dy);
         }
     }
 

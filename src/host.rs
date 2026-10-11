@@ -146,7 +146,7 @@ pub fn call(mut caller: Caller<'_, HostState>, idx: usize, params: &[Val], resul
         }
         "_abort_js" => anyhow::bail!("engine called abort()"),
         "emscripten_num_logical_cores" => set_int(results, std::thread::available_parallelism().map(|n| n.get() as i64).unwrap_or(8)),
-        "emscripten_get_heap_max" => set_int(results, 17_179_869_184),
+        "emscripten_get_heap_max" => set_int(results, heap_max(mem) as i64),
         "emscripten_resize_heap" => set_int(results, resize_heap(mem, int(params, 0) as u64) as i64),
         "_emscripten_system" => set_int(results, if int(params, 0) == 0 { 0 } else { -52 }),
         "emscripten_stack_snapshot" | "emscripten_stack_unwind_buffer" => set_int(results, 0),
@@ -243,17 +243,32 @@ fn invoke(caller: &mut Caller<'_, HostState>, params: &[Val], results: &mut [Val
     }
 }
 
+fn heap_max(mem: &SharedMemory) -> u64 {
+    let ty = mem.ty();
+    let declared = ty.maximum().unwrap_or(17_179_869_184 >> ty.page_size_log2()) << ty.page_size_log2();
+    if !cfg!(target_os = "ios") { return declared; }
+    declared.min(crate::performance::heap_budget(crate::performance::physical_memory(),
+        crate::performance::available_memory(), mem.data_size() as u64))
+}
+
 fn resize_heap(mem: &SharedMemory, requested: u64) -> bool {
-    const MAX: u64 = 17_179_869_184;
+    let max = heap_max(mem);
     let old = mem.data_size() as u64;
-    if requested <= old { return false; }
-    if requested > MAX { return false; }
+    if requested <= old { return true; }
+    let available = crate::performance::available_memory();
+    if !crate::performance::growth_fits(old, requested, max, available) {
+        crate::performance::MEMORY_PRESSURE.store(true, Ordering::Relaxed);
+        eprintln!("[host] heap growth refused: requested {} MB, maximum {} MB, available {} MB", requested >> 20, max >> 20, available.unwrap_or(0) >> 20);
+        return false;
+    }
+    let page = 1u64 << mem.ty().page_size_log2();
     let mut cut = 1u64;
     while cut <= 4 {
         let over = (old as f64 * (1.0 + 0.2 / cut as f64)) as u64;
-        let over = over.min(requested + 100_663_296);
-        let new = MAX.min(requested.max(over).div_ceil(65536) * 65536);
-        let pages = (new - old).div_ceil(65536);
+        let over = if cfg!(target_os = "ios") { requested } else { over.min(requested.saturating_add(100_663_296)) };
+        let new = max.min(requested.max(over).div_ceil(page) * page);
+        if new < requested { return false; }
+        let pages = (new - old).div_ceil(page);
         if mem.grow(pages).is_ok() {
             eprintln!("[host] heap grown to {} MB", mem.data_size() >> 20);
             return true;

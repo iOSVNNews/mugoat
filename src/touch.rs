@@ -52,7 +52,7 @@ const fn n(x: f64, label: &'static str, key: &'static str) -> Spec {
 use Act::*;
 use Anchor::*;
 const BUTTONS: &[Spec] = &[
-    b(BottomRight(62.0, 68.0), 40.0, Some(("FIRE", Mouse(1))), Some(("GAS", Key("KeyW")))),
+    b(BottomRight(62.0, 68.0), 44.0, Some(("FIRE", Mouse(1))), Some(("GAS", Key("KeyW")))),
     b(BottomRight(158.0, 46.0), 31.0, Some(("AIM", AimToggle)), Some(("BRAKE", Key("KeyS")))),
     b(BottomRight(58.0, 168.0), 28.0, Some(("JUMP", Key("Space"))), Some(("H.BRAKE", Key("Space")))),
     b(BottomRight(140.0, 132.0), 26.0, Some(("ENTER", Key("KeyF"))), Some(("EXIT", Key("KeyF")))),
@@ -65,6 +65,7 @@ const BUTTONS: &[Spec] = &[
     b(TopLeft(84.0, 30.0), 22.0, Some(("PHONE", KeyNav("ArrowUp"))), Some(("PHONE", KeyNav("ArrowUp")))),
     b(TopLeft(138.0, 30.0), 22.0, Some(("MENU\nKEYS", NavToggle)), Some(("MENU\nKEYS", NavToggle))),
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
+    b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
     n(-135.0, "◀", "ArrowLeft"),
     n(-87.0, "▲", "ArrowUp"),
     n(-39.0, "▼", "ArrowDown"),
@@ -77,18 +78,22 @@ const STICK_RADIUS: f64 = 58.0;
 const KNOB_RADIUS: f64 = 26.0;
 const SPRINT_REACH: f64 = 1.35;
 
-const LOOK_GAIN: f64 = 3.0;
+const LOOK_GAIN: f64 = 1.0;
 const WHEEL_DEADZONE: f64 = 10.0;
 const WHEEL_FULL: f64 = 45.0;
 const WHEEL_PUSH: f64 = 40.0;
 static TOUCH_SENS: std::sync::LazyLock<f64> = std::sync::LazyLock::new(|| std::env::var("MUGUET_TOUCH_SENS").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0));
+static AIM_SENS: std::sync::LazyLock<f64> = std::sync::LazyLock::new(|| std::env::var("MUGUET_AIM_SENS").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4));
+static HOLD_AIM: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var("MUGUET_AIM_MODE").map(|v| v == "hold").unwrap_or(false));
+static FIRE_AIM: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var("MUGUET_FIRE_AIM").map(|v| v != "0").unwrap_or(true));
 
 const MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(120);
+const MOUSE_HOLD: std::time::Duration = std::time::Duration::from_millis(25);
 
 enum Grip {
     Stick { origin: (f64, f64), at: (f64, f64) },
-    Look { last: (f64, f64) },
-    Button { idx: usize, start: (f64, f64), last: (f64, f64) },
+    Look { motion: crate::aim::DragLook },
+    Button { idx: usize, start: (f64, f64), last: (f64, f64), motion: crate::aim::DragLook },
 }
 
 struct Btn {
@@ -104,6 +109,9 @@ struct Overlay {
     stick_base: Retained<AnyObject>,
     stick_knob: Retained<AnyObject>,
     stick_home: (f64, f64),
+    loading_label: Retained<AnyObject>,
+    network_label: Retained<AnyObject>,
+    loading: bool,
 
     safe: (f64, f64, f64, f64),
     scale: f64,
@@ -213,8 +221,21 @@ pub fn install(window: &Window) {
     let stick_home = (sx + 40.0 + STICK_RADIUS, sy + sh - 30.0 - STICK_RADIUS);
     let stick_base = circle(&root, stick_home, STICK_RADIUS, 1.0, 0.12);
     let stick_knob = circle(&root, stick_home, KNOB_RADIUS, 1.0, 0.3);
+    let loading_label = label(&root, 150.0);
+    let network_label = label(&root, 150.0);
+    unsafe {
+        let _: () = msg_send![&*loading_label, setFrame: rect(sx + sw * 0.15, sy + sh * 0.32, sw * 0.7, sh * 0.36)];
+        let _: () = msg_send![&*loading_label, setNumberOfLines: 0isize];
+        let _: () = msg_send![&*loading_label, setBackgroundColor: &*color(0.05, 0.94)];
+        let font: Retained<AnyObject> = msg_send![class!(UIFont), systemFontOfSize: 18.0];
+        let _: () = msg_send![&*loading_label, setFont: &*font];
+        let _: () = msg_send![&*network_label, setFrame: rect(sx + sw * 0.35, sy + 12.0, sw * 0.3, 34.0)];
+        let _: () = msg_send![&*network_label, setBackgroundColor: &*color(0.05, 0.65)];
+    }
+    set_hidden(&loading_label, true);
+    set_hidden(&network_label, true);
     let mut o = Overlay {
-        root, buttons, stick_base, stick_knob, stick_home, safe, scale,
+        root, buttons, stick_base, stick_knob, stick_home, loading_label, network_label, loading: false, safe, scale,
         grips: HashMap::new(), held: HashSet::new(), since: HashMap::new(),
         mouse_since: [std::time::Instant::now(); 2], lingering: false, mouse: 0, aim_latched: false,
         nav: false, in_car: false, hidden: false,
@@ -272,13 +293,14 @@ impl Overlay {
     }
 
     fn touch(&mut self, t: &Touch) {
+        if self.loading { return; }
         let p = (t.location.x / self.scale, t.location.y / self.scale);
         match t.phase {
             TouchPhase::Started => {
                 if let Some(idx) = self.button_at(p) {
-                    self.grips.insert(t.id, Grip::Button { idx, start: p, last: p });
+                    self.grips.insert(t.id, Grip::Button { idx, start: p, last: p, motion: crate::aim::DragLook::new(p) });
                     match self.spec_act(idx).map(|(_, a)| a) {
-                        Some(AimToggle) => self.aim_latched = !self.aim_latched,
+                        Some(AimToggle) if !*HOLD_AIM => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
                         Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
                         _ => {}
@@ -286,21 +308,28 @@ impl Overlay {
                 } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
                     self.grips.insert(t.id, Grip::Stick { origin: p, at: p });
                 } else {
-                    self.grips.insert(t.id, Grip::Look { last: p });
+                    self.grips.insert(t.id, Grip::Look { motion: crate::aim::DragLook::new(p) });
                 }
             }
             TouchPhase::Moved => {
                 let wheel = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. }) if self.is_wheel(*idx));
+                let aimed = self.mouse & 2 != 0;
+                let camera_button = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. })
+                    if *idx == 0 && !self.in_car || matches!(self.spec_act(*idx), Some((_, AimToggle))));
                 match self.grips.get_mut(&t.id) {
                     Some(Grip::Stick { at, .. }) => *at = p,
                     Some(Grip::Button { last, .. }) if wheel => *last = p,
-                    Some(Grip::Look { last }) | Some(Grip::Button { last, .. }) => {
-                        let (dx, dy) = (p.0 - last.0, p.1 - last.1);
+                    Some(Grip::Look { motion }) => {
+                        let delta = motion.move_to(p);
+                        let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * *TOUCH_SENS, aimed, *AIM_SENS);
+                        input::mouse_delta_f(dx, dy);
+                    }
+                    Some(Grip::Button { last, motion, .. }) => {
                         *last = p;
-
-                        let speed = (dx * dx + dy * dy).sqrt();
-                        let gain = LOOK_GAIN * *TOUCH_SENS * (1.0 + (speed / 12.0).min(1.5));
-                        input::mouse_delta_f(dx * gain, dy * gain);
+                        if camera_button {
+                            let (dx, dy) = crate::aim::scale_delta(motion.move_to(p), LOOK_GAIN * *TOUCH_SENS, aimed, *AIM_SENS);
+                            input::mouse_delta_f(dx, dy);
+                        }
                     }
                     None => {}
                 }
@@ -320,7 +349,11 @@ impl Overlay {
                 Grip::Stick { origin, at } => stick = Some((*origin, *at)),
                 Grip::Button { idx, .. } => match self.spec_act(*idx).map(|(_, a)| a) {
                     Some(Key(k)) | Some(KeyNav(k)) => { keys.insert(k); }
-                    Some(Mouse(bit)) => mouse |= bit,
+                    Some(Mouse(bit)) => {
+                        mouse |= bit;
+                        if bit == 1 && *FIRE_AIM && !self.in_car { mouse |= 2; }
+                    }
+                    Some(AimToggle) if *HOLD_AIM => mouse |= 2,
                     Some(Horn) => horn = true,
                     _ => {}
                 },
@@ -370,7 +403,7 @@ impl Overlay {
         }
         self.held = keys;
         for (i, (bit, dom)) in [(1u8, 0usize), (2, 2)].into_iter().enumerate() {
-            if self.mouse & bit != 0 && mouse & bit == 0 && young(Some(&self.mouse_since[i])) {
+            if self.mouse & bit != 0 && mouse & bit == 0 && now - self.mouse_since[i] < MOUSE_HOLD {
                 mouse |= bit;
                 self.lingering = true;
             }
@@ -386,6 +419,8 @@ impl Overlay {
     fn release_all(&mut self) {
         self.grips.clear();
         self.aim_latched = false;
+        self.since.clear();
+        self.mouse_since = [std::time::Instant::now() - MIN_HOLD; 2];
         self.apply();
     }
 }
@@ -405,7 +440,7 @@ pub fn refresh() -> bool {
         if o.lingering { o.apply(); }
         let mut wheeling = false;
         for g in o.grips.values() {
-            if let Grip::Button { idx, start, last } = g {
+            if let Grip::Button { idx, start, last, .. } = g {
                 if !o.is_wheel(*idx) {
                     continue;
                 }
@@ -418,7 +453,11 @@ pub fn refresh() -> bool {
                 }
             }
         }
-        let hide = crate::pad::ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+        let hide = crate::pad::ACTIVE.load(std::sync::atomic::Ordering::Relaxed) && !o.loading;
+        if let Some(status) = crate::mp::network_status() {
+            set_text(&o.network_label, &status);
+            set_hidden(&o.network_label, false);
+        } else { set_hidden(&o.network_label, true); }
 
         if !hide { input::set_locked(true); }
         if !crate::gpu::SUSPENDED.load(std::sync::atomic::Ordering::Relaxed) { input::set_focus(true); }
@@ -437,6 +476,17 @@ pub fn refresh() -> bool {
         }
         o.lingering || wheeling
     })
+}
+
+pub fn loading(message: Option<&str>) {
+    OVERLAY.with(|cell| {
+        if let Some(o) = cell.borrow_mut().as_mut() {
+            if message.is_some() && !o.loading { o.release_all(); }
+            o.loading = message.is_some();
+            if let Some(message) = message { set_text(&o.loading_label, message); }
+            set_hidden(&o.loading_label, message.is_none());
+        }
+    });
 }
 
 pub fn release() {

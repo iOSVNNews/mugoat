@@ -2,8 +2,10 @@
 // Constantin Clerc (c22dev) - 0.1
 
 mod app;
+mod aim;
 mod audio;
 mod config;
+mod diagnostics;
 mod fs;
 mod gpu;
 mod host;
@@ -12,6 +14,7 @@ mod import;
 mod io;
 mod mp;
 mod pad;
+mod performance;
 #[cfg(feature = "jit")]
 mod patch;
 mod proto;
@@ -100,6 +103,7 @@ fn raise_open_file_limit() {
 }
 
 fn main() -> Result<()> {
+    diagnostics::install();
     raise_open_file_limit();
     let argv: Vec<String> = std::env::args().collect();
 
@@ -213,7 +217,7 @@ pub fn run_engine(rt: &Arc<Runtime>, args: Vec<String>) -> Result<()> {
             eprintln!("[host] main unwound with a live runtime; waiting on engine threads");
             loop { std::thread::park(); }
         }
-        Err(e) => eprintln!("[host] main trapped: {e:?}"),
+        Err(e) => return Err(anyhow::Error::from(e).context("Game runtime trapped")),
     }
     Ok(())
 }
@@ -308,30 +312,17 @@ fn compile_patched(engine: &Engine, wasm_path: &std::path::Path) -> Result<Modul
     Module::new(engine, &patched).map_err(anyhow::Error::from).context("compile module")
 }
 
-const IOS_HEAP_MAX: u64 = ios_heap_gb() << 30;
-const fn ios_heap_gb() -> u64 {
-    match option_env!("MUGUET_IOS_HEAP_GB") {
-        Some(v) => {
-            let b = v.as_bytes();
-            let mut n = 0u64;
-            let mut k = 0;
-            while k < b.len() {
-                n = n * 10 + (b[k] - b'0') as u64;
-                k += 1;
-            }
-            n
-        }
-        None => 5,
-    }
-}
-
+const IOS_HEAP_MAX: u64 = performance::HEAP_CEILING;
 fn heap_type(mt: MemoryType) -> Result<MemoryType> {
     if !ios_memory() {
         return Ok(mt);
     }
     let page = 1u64 << mt.page_size_log2();
-    let cap = IOS_HEAP_MAX / page;
-    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum());
+    let budget = performance::heap_budget(performance::physical_memory(), performance::available_memory(), 0);
+    let cap = budget.min(IOS_HEAP_MAX) / page;
+    anyhow::ensure!(cap >= mt.minimum(), "Insufficient iOS memory budget: game needs at least {} MB, available heap budget {} MB. Use Normal textures and lower resolution; an increased-memory profile may be required.", mt.minimum() * page >> 20, budget >> 20);
+    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap);
+    eprintln!("[host] adaptive game heap limit {} MB (16 GB ceiling)", max * page >> 20);
     MemoryTypeBuilder::new()
         .min(mt.minimum())
         .max(Some(max))
@@ -361,7 +352,9 @@ fn engine_config_for(ios: bool) -> Config {
     config.cranelift_opt_level(OptLevel::Speed);
 
     if ios {
-        config.memory_reservation(IOS_HEAP_MAX);
+        // Do not reserve 16 GB on every phone. Explicit bounds checks allow
+        // the shared memory's device-specific maximum to determine its mapping.
+        config.memory_reservation(0);
         config.memory_guard_size(64 << 10);
     } else {
         config.memory_reservation(17 << 30);
