@@ -537,13 +537,13 @@ struct HUDEditorView: View {
             // Button selector picker
             Menu {
                 ForEach(HUD_BUTTON_DEFS) { def in
-                    Button("\(def.icon) \(def.name)") {
+                    Button(def.name) {
                         selectedId = def.id
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Text("\(currentDef.icon) \(currentDef.name)")
+                    Text(currentDef.name)
                         .font(.caption.bold())
                         .foregroundColor(.cyan)
                     Image(systemName: "chevron.up.chevron.down")
