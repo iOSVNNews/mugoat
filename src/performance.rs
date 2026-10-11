@@ -5,7 +5,7 @@ pub const MIB: u64 = 1 << 20;
 pub const HEAP_CEILING: u64 = 16 << 30;
 pub static MEMORY_PRESSURE: AtomicBool = AtomicBool::new(false);
 static FRAME_LIMIT: AtomicU32 = AtomicU32::new(60);
-static PROMOTION_SYNC: AtomicBool = AtomicBool::new(true);
+static PROMOTION_SYNC: AtomicBool = AtomicBool::new(false);
 
 pub fn set_promotion_sync(enabled: bool) {
     PROMOTION_SYNC.store(enabled, Ordering::Relaxed);

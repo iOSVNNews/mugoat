@@ -137,7 +137,7 @@ fn locate() -> anyhow::Result<PathBuf> {
 const SETTING_VARS: &[&str] = &[
     "MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM",
     "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_ROOM", "MUGUET_NAME", "MUGUET_PVP",
-    "MUGUET_MODE", "MUGUET_PROMOTION_SYNC", "MUGUET_BUTTON_SCALE", "MUGUET_BUTTON_OFFSET_X", "MUGUET_BUTTON_OFFSET_Y",
+    "MUGUET_MODE", "MUGUET_PROMOTION_SYNC", "MUGUET_DEEP_OPTIMIZATION", "MUGUET_BUTTON_SCALE", "MUGUET_BUTTON_OFFSET_X", "MUGUET_BUTTON_OFFSET_Y",
     "MUGUET_BUTTON_OPACITY", "MUGUET_STICK_OFFSET_X", "MUGUET_STICK_OFFSET_Y"
 ];
 
@@ -186,7 +186,10 @@ fn settings(cfg_path: &Path) -> Vec<String> {
     if let Some(v) = num("stick_offset_x") { set_default("MUGUET_STICK_OFFSET_X", v.to_string()); }
     if let Some(v) = num("stick_offset_y") { set_default("MUGUET_STICK_OFFSET_Y", v.to_string()); }
 
-    let promotion_sync = cfg.get("promotion_sync").and_then(|v| v.as_bool()).unwrap_or(true);
+    let deep_optimization = cfg.get("deep_optimization").and_then(|v| v.as_bool()).unwrap_or(false);
+    set_default("MUGUET_DEEP_OPTIMIZATION", if deep_optimization { "1" } else { "0" });
+
+    let promotion_sync = cfg.get("promotion_sync").and_then(|v| v.as_bool()).unwrap_or(false);
     crate::performance::set_promotion_sync(promotion_sync);
     set_default("MUGUET_PROMOTION_SYNC", if promotion_sync { "1" } else { "0" });
 
@@ -227,11 +230,11 @@ fn settings(cfg_path: &Path) -> Vec<String> {
     if let Some(extra) = cfg.get("extra_args").and_then(|v| v.as_array()) {
         engine_args.extend(extra.iter().filter_map(|a| a.as_str().map(String::from)));
     }
-    fix_settings(num("texture_quality").map(|q| q as i64));
+    fix_settings(num("texture_quality").map(|q| q as i64), deep_optimization);
     engine_args
 }
 
-fn fix_settings(texture_quality: Option<i64>) {
+fn fix_settings(texture_quality: Option<i64>, deep_optimization: bool) {
     let path = support_dir().join("saves/userdata/Documents/Rockstar Games/GTA V/settings.xml");
     let Ok(xml) = std::fs::read_to_string(&path) else { return };
     let mut new = xml.clone();
@@ -245,11 +248,6 @@ fn fix_settings(texture_quality: Option<i64>) {
                     eprintln!("[config] {tag} {v} -> {to}");
                 }
             }
-        } else if new.contains("<graphics>") {
-            let to = fix(0);
-            let entry = format!("    <{tag} value=\"{to}\" />\n");
-            new = new.replace("<graphics>", &format!("<graphics>\n{entry}"));
-            eprintln!("[config] {tag} inserted -> {to}");
         }
     };
     if let Some(q) = texture_quality {
@@ -258,15 +256,17 @@ fn fix_settings(texture_quality: Option<i64>) {
     set("ShaderQuality", &|v| v.max(1));
     set("MSAA", &|v| if v > 4 { v.min(crate::gpu::max_msaa() as i64) } else { v });
 
-    // MeloNX-level Rock-solid 60/120 FPS Optimizations
-    set("ShadowQuality", &|v| v.min(1));        // Limit shadow cascade resolution to prevent GPU memory bus bottleneck
-    set("GrassQuality", &|v| v.min(1));         // Limit dense grass rendering (culprit #1 of countryside frame drops)
-    set("ReflectionMSAA", &|_| 0);             // Disable mirror anti-aliasing completely
-    set("Tessellation", &|_| 0);               // Disable displacement polygon tessellation (saves 35-40% GPU power)
-    set("ReflectionQuality", &|v| v.min(1));    // Cap reflection complexity
-    set("WaterQuality", &|v| v.min(1));         // Cap heavy water simulation
-    set("ParticleQuality", &|v| v.min(1));      // Cap particle effects
-    set("PostFX", &|v| v.min(1));               // Cap bloom / motion blur post-processing overhead
+    if deep_optimization {
+        // MeloNX-level Rock-solid 60/120 FPS Optimizations (Only applied if user turns it on)
+        set("ShadowQuality", &|v| v.min(1));        // Limit shadow cascade resolution to prevent GPU memory bus bottleneck
+        set("GrassQuality", &|v| v.min(1));         // Limit dense grass rendering (culprit #1 of countryside frame drops)
+        set("ReflectionMSAA", &|_| 0);             // Disable mirror anti-aliasing completely
+        set("Tessellation", &|_| 0);               // Disable displacement polygon tessellation (saves 35-40% GPU power)
+        set("ReflectionQuality", &|v| v.min(1));    // Cap reflection complexity
+        set("WaterQuality", &|v| v.min(1));         // Cap heavy water simulation
+        set("ParticleQuality", &|v| v.min(1));      // Cap particle effects
+        set("PostFX", &|v| v.min(1));               // Cap bloom / motion blur post-processing overhead
+    }
 
     if new != xml {
         let _ = std::fs::write(&path, new.as_bytes());

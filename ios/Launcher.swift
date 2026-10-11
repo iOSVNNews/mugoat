@@ -27,7 +27,8 @@ final class Settings: ObservableObject {
     @Published var roomPass = ""
     @Published var roomMode = "create" // "create", "join", "public", "lan"
     @Published var pvp = false
-    @Published var promotionSync = true
+    @Published var promotionSync = false
+    @Published var deepOptimization = false
     @Published var buttonScale = 1.0
     @Published var buttonOffsetX = 0.0
     @Published var buttonOffsetY = 0.0
@@ -70,6 +71,7 @@ final class Settings: ObservableObject {
         if let v = json["room_mode"] as? String, ["create", "join", "public", "lan"].contains(v) { roomMode = v }
         if let v = json["pvp"] as? Bool { pvp = v }
         if let v = json["promotion_sync"] as? Bool { promotionSync = v }
+        if let v = json["deep_optimization"] as? Bool { deepOptimization = v }
         if let v = json["button_scale"] as? Double { buttonScale = max(0.6, min(2.0, v)) }
         if let v = json["button_offset_x"] as? Double { buttonOffsetX = max(-150.0, min(150.0, v)) }
         if let v = json["button_offset_y"] as? Double { buttonOffsetY = max(-150.0, min(150.0, v)) }
@@ -103,6 +105,7 @@ final class Settings: ObservableObject {
         json["host"] = (roomMode == "lan")
         json["room_mode"] = roomMode
         json["promotion_sync"] = promotionSync
+        json["deep_optimization"] = deepOptimization
         json["room_digits"] = roomDigits
         json["join_code"] = joinCode
 
@@ -421,9 +424,13 @@ struct LauncherView: View {
                 Text("Higher frame rates use more power. Low memory automatically reduces the render limit.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Section("Tối ưu hiệu năng (MeloNX & ProMotion)") {
-                    Toggle("Khóa nhịp CADisplayLink ProMotion", isOn: $s.promotionSync)
-                    Text("Đồng bộ phần cứng nhịp quét 60Hz/120Hz của iPhone/iPad với render loop, triệt tiêu micro-stutter và ngăn ngừa hiện tượng crash nóng máy.")
+                Section("Tối ưu hiệu năng & Mượt mà (Tùy chọn)") {
+                    Toggle("Khóa nhịp ProMotion V-Sync (CADisplayLink)", isOn: $s.promotionSync)
+                    Text("Đồng bộ chính xác với tần số quét 60Hz/120Hz của màn hình iPhone/iPad để triệt tiêu khựng hình (micro-stutter) và giảm quá nhiệt. (Mặc định: Tắt - dùng nhịp dựng hình tự do ban đầu).")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Toggle("Tối ưu đồ họa sâu kiểu MeloNX (60-120 FPS Boost)", isOn: $s.deepOptimization)
+                    Text("Tự động khống chế bóng đổ (ShadowQuality=1), cỏ rậm (GrassQuality=1), tắt phản chiếu khử răng cưa và đa giác lồi (Tessellation=0) trong GTA V settings.xml để duy trì FPS tối đa khi máy nóng. (Mặc định: Tắt - giữ nguyên chất lượng đồ họa gốc của game).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
