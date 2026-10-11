@@ -299,6 +299,14 @@ fn move_to(v: &AnyObject, c: (f64, f64)) {
     unsafe { let _: () = msg_send![v, setCenter: CGPoint { x: c.0, y: c.1 }]; }
 }
 
+fn send_mouse_pos(safe: (f64, f64, f64, f64), p: (f64, f64)) {
+    let (w, h) = input::size();
+    let (sx, sy, sw, sh) = safe;
+    let ex = ((p.0 - sx).max(0.0) / sw * w as f64).clamp(0.0, (w - 1) as f64) as i32;
+    let ey = ((p.1 - sy).max(0.0) / sh * h as f64).clamp(0.0, (h - 1) as f64) as i32;
+    input::mouse_pos(ex, ey);
+}
+
 pub fn install(window: &Window) {
     update_settings_from_env();
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -393,14 +401,6 @@ impl Overlay {
         }
         if self.in_car { s.in_car } else { s.on_foot }
     }
-
-fn send_mouse_pos(safe: (f64, f64, f64, f64), p: (f64, f64)) {
-    let (w, h) = input::size();
-    let (sx, sy, sw, sh) = safe;
-    let ex = ((p.0 - sx).max(0.0) / sw * w as f64).clamp(0.0, (w - 1) as f64) as i32;
-    let ey = ((p.1 - sy).max(0.0) / sh * h as f64).clamp(0.0, (h - 1) as f64) as i32;
-    input::mouse_pos(ex, ey);
-}
 
     fn relabel(&mut self) {
         for i in 0..self.buttons.len() {
