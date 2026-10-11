@@ -195,6 +195,11 @@ struct LauncherView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Section("Save Data") {
+                    Button("Share / Backup saves") { shareSaves() }
+                    Text("In game: save via Phone > Quick Save, or Pause > Game > Save Game. Saves are stored in Files app > On My iPhone > Muguet > saves.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Diagnostics") {
                     Button("Share startup / memory logs") { shareDiagnostics() }
                     Text("After a crash, reopen Muguet and share the previous log. Logs contain connection addresses and runtime errors, not game files.")
@@ -290,6 +295,22 @@ func shareDiagnostics() {
     presenter.present(sheet, animated: true)
 }
 
+
+func shareSaves() {
+    let folder = configURL.deletingLastPathComponent().appendingPathComponent("saves")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let window = scene.windows.first(where: { $0.isKeyWindow }),
+          let root = window.rootViewController else { return }
+    var presenter = root
+    while let child = presenter.presentedViewController { presenter = child }
+    let sheet = UIActivityViewController(activityItems: [folder], applicationActivities: nil)
+    if let popover = sheet.popoverPresentationController {
+        popover.sourceView = presenter.view
+        popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+    }
+    presenter.present(sheet, animated: true)
+}
 func localIPs() -> [String] {
     var out: [String] = []
     var ifs: UnsafeMutablePointer<ifaddrs>?

@@ -135,6 +135,11 @@ pub fn handle(name: &str, mem: &SharedMemory, p: &[Val], results: &mut [Val]) ->
             }
             if flags & O_DIRECTORY != 0 { return Err(if exists { -ENOTDIR } else { -ENOENT }); }
             if !exists && !mode_creat { return Err(-ENOENT); }
+            if mode_creat {
+                if let Some(parent) = host.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+            }
             let acc = flags & O_ACCMODE;
             let file = OpenOptions::new()
                 .read(acc == 0 || acc == 2)
@@ -172,7 +177,7 @@ pub fn handle(name: &str, mem: &SharedMemory, p: &[Val], results: &mut [Val]) ->
             }
         }
         "__syscall_mkdirat" => match guest_abs(&fs, a(0), &read_cstr(mem, a(1) as u64)) {
-            Ok(g) => { let h = host_path(&fs, &g); if h.exists() { -EEXIST } else if fs::create_dir(&h).is_ok() { 0 } else { -ENOENT } }
+            Ok(g) => { let h = host_path(&fs, &g); if h.exists() { -EEXIST } else if fs::create_dir_all(&h).is_ok() { 0 } else { -ENOENT } }
             Err(e) => -e,
         },
         "__syscall_unlinkat" => match guest_abs(&fs, a(0), &read_cstr(mem, a(1) as u64)) {
@@ -191,7 +196,11 @@ pub fn handle(name: &str, mem: &SharedMemory, p: &[Val], results: &mut [Val]) ->
             let from = guest_abs(&fs, a(0), &read_cstr(mem, a(1) as u64));
             let to = guest_abs(&fs, a(2), &read_cstr(mem, a(3) as u64));
             match (from, to) {
-                (Ok(f), Ok(t)) => if fs::rename(host_path(&fs, &f), host_path(&fs, &t)).is_ok() { 0 } else { -ENOENT },
+                (Ok(f), Ok(t)) => {
+                    let tf = host_path(&fs, &t);
+                    if let Some(p) = tf.parent() { let _ = fs::create_dir_all(p); }
+                    if fs::rename(host_path(&fs, &f), &tf).is_ok() { 0 } else { -ENOENT }
+                }
                 (Err(e), _) | (_, Err(e)) => -e,
             }
         }
