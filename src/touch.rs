@@ -498,14 +498,13 @@ impl Overlay {
                     match self.spec_act(idx).map(|(_, a)| a) {
                         Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
-                        Some(KeyNav(k)) => {
-                            if *k == "Escape" {
-                                self.nav = !self.nav;
-                                self.relabel();
-                            } else if !self.nav {
-                                self.nav = true;
-                                self.relabel();
-                            }
+                        Some(KeyNav("Escape")) => {
+                            self.nav = !self.nav;
+                            self.relabel();
+                        }
+                        Some(KeyNav(_)) if !self.nav => {
+                            self.nav = true;
+                            self.relabel();
                         }
                         Some(Home) => {
                             #[cfg(target_os = "ios")]
