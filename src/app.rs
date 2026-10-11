@@ -75,7 +75,12 @@ impl ApplicationHandler for App {
         input::set_size(w, h);
         eprintln!("[app] window {}x{} px, back buffer {w}x{h}", window.inner_size().width, window.inner_size().height);
         #[cfg(target_os = "ios")]
-        crate::touch::install(&window);
+        {
+            crate::touch::install(&window);
+            window.set_cursor_visible(false);
+            self.locked = true;
+            input::set_locked(true);
+        }
         self.window = Some(window);
 
         if !cfg!(target_os = "ios") {
@@ -147,7 +152,7 @@ impl ApplicationHandler for App {
                 input::button(b, state == ElementState::Pressed);
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if !self.locked { self.cursor(&window, position); }
+                if !cfg!(target_os = "ios") && !self.locked { self.cursor(&window, position); }
             }
             #[cfg(target_os = "ios")]
             WindowEvent::Touch(t) => crate::touch::touch(&t),
@@ -314,7 +319,7 @@ impl App {
 pub fn run(rt: Option<Arc<Runtime>>, startup: crate::config::Startup, args: Vec<String>) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, launcher_shown: false, locked: false, mods: ModifiersState::empty(), wheel_accum: 0.0 };
+    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, launcher_shown: false, locked: cfg!(target_os = "ios"), mods: ModifiersState::empty(), wheel_accum: 0.0 };
     event_loop.run_app(&mut app)?;
     Ok(())
 }

@@ -43,8 +43,14 @@ pub fn publish(block: u64) {
     if let Some(e) = ext(2) { e.store(w, Ordering::SeqCst); }
     if let Some(e) = ext(3) { e.store(h, Ordering::SeqCst); }
     if let Some(f) = word(FOCUS) { f.store(1, Ordering::SeqCst); }
-    if let Some(m) = word(MX) { m.store(w >> 1, Ordering::SeqCst); }
-    if let Some(m) = word(MY) { m.store(h >> 1, Ordering::SeqCst); }
+    if cfg!(target_os = "ios") {
+        if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
+        if let Some(m) = word(MY) { m.store(-9999, Ordering::SeqCst); }
+        if let Some(l) = word(LOCKED) { l.store(1, Ordering::SeqCst); }
+    } else {
+        if let Some(m) = word(MX) { m.store(w >> 1, Ordering::SeqCst); }
+        if let Some(m) = word(MY) { m.store(h >> 1, Ordering::SeqCst); }
+    }
     if let Ok(mode) = std::env::var("MUGUET_START_MODE") {
         if let (Ok(m), Some(p)) = (mode.parse::<i32>(), base()) {
             unsafe { &*(p.add(440) as *const AtomicI32) }.store(m, Ordering::SeqCst);
@@ -69,6 +75,10 @@ pub fn set_focus(focused: bool) {
 pub fn set_locked(locked: bool) {
     let locked = if cfg!(target_os = "ios") { true } else { locked };
     if let Some(l) = word(LOCKED) { l.store(locked as i32, Ordering::SeqCst); }
+    if cfg!(target_os = "ios") {
+        if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
+        if let Some(m) = word(MY) { m.store(-9999, Ordering::SeqCst); }
+    }
 }
 fn release_all() {
     HELD.lock().unwrap().clear();
@@ -165,6 +175,11 @@ pub fn button(dom_button: usize, pressed: bool) {
 }
 
 pub fn mouse_pos(x: i32, y: i32) {
+    if cfg!(target_os = "ios") {
+        if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
+        if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
+        return;
+    }
     let (w, h) = size();
     let (x, y) = (x.clamp(0, w - 1), y.clamp(0, h - 1));
     if let (Some(mx), Some(my), Some(dx), Some(dy)) = (word(MX), word(MY), word(DX), word(DY)) {
@@ -192,12 +207,24 @@ pub fn mouse_delta_f(dx: f64, dy: f64) {
 }
 
 fn mouse_delta(dx_: i32, dy_: i32) {
-    let (w, h) = size();
-    if let (Some(mx), Some(my), Some(dx), Some(dy)) = (word(MX), word(MY), word(DX), word(DY)) {
+    if let (Some(dx), Some(dy)) = (word(DX), word(DY)) {
         dx.fetch_add(dx_, Ordering::SeqCst);
         dy.fetch_add(dy_, Ordering::SeqCst);
-        mx.store((mx.load(Ordering::SeqCst) + dx_).clamp(0, w - 1), Ordering::SeqCst);
-        my.store((my.load(Ordering::SeqCst) + dy_).clamp(0, h - 1), Ordering::SeqCst);
+    }
+    if cfg!(target_os = "ios") {
+        if let (Some(mx), Some(my)) = (word(MX), word(MY)) {
+            mx.store(-9999, Ordering::SeqCst);
+            my.store(-9999, Ordering::SeqCst);
+        }
+        if let Some(l) = word(LOCKED) {
+            l.store(1, Ordering::SeqCst);
+        }
+    } else {
+        let (w, h) = size();
+        if let (Some(mx), Some(my)) = (word(MX), word(MY)) {
+            mx.store((mx.load(Ordering::SeqCst) + dx_).clamp(0, w - 1), Ordering::SeqCst);
+            my.store((my.load(Ordering::SeqCst) + dy_).clamp(0, h - 1), Ordering::SeqCst);
+        }
     }
 }
 pub fn wheel(notches: i32) {

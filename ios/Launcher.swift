@@ -422,6 +422,8 @@ struct HUDEditorView: View {
     @State private var draggingId: Int? = nil
     @State private var dragTranslation: CGSize = .zero
     @State private var toastMessage: String?
+    @State private var isCollapsed: Bool = false
+    @State private var manualDockTop: Bool? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -459,14 +461,34 @@ struct HUDEditorView: View {
                     renderButton(def, in: geo)
                 }
 
-                // Bottom Control Floating Bar (leaves top buttons completely visible and unobstructed)
+                // Floating Dynamic Toolbar (never obscures selected button)
                 VStack(spacing: 6) {
-                    Spacer()
-                    selectedButtonControls
-                    bottomToolbar
+                    if isCollapsed {
+                        if shouldDockTop(in: geo) {
+                            collapsedBar(geo: geo, isTop: true)
+                            Spacer()
+                        } else {
+                            Spacer()
+                            collapsedBar(geo: geo, isTop: false)
+                        }
+                    } else {
+                        let isTop = shouldDockTop(in: geo)
+                        if isTop {
+                            editorToolbar(geo: geo, isTop: true)
+                            selectedButtonControls
+                            Spacer()
+                        } else {
+                            Spacer()
+                            selectedButtonControls
+                            editorToolbar(geo: geo, isTop: false)
+                        }
+                    }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.vertical, 8)
+                .animation(.easeInOut(duration: 0.25), value: isCollapsed)
+                .animation(.easeInOut(duration: 0.25), value: manualDockTop)
+                .animation(.easeInOut(duration: 0.25), value: selectedId)
 
                 // Toast notification
                 if let msg = toastMessage {
@@ -490,21 +512,53 @@ struct HUDEditorView: View {
         .onAppear(perform: loadLayout)
     }
 
-    private var bottomToolbar: some View {
-        HStack(spacing: 12) {
+    private func shouldDockTop(in geo: GeometryProxy) -> Bool {
+        if let manual = manualDockTop { return manual }
+        let currentDef = HUD_BUTTON_DEFS.first(where: { $0.id == selectedId }) ?? HUD_BUTTON_DEFS[0]
+        let pos = buttonCenter(for: currentDef, in: geo)
+        return pos.y > (geo.size.height / 2.0)
+    }
+
+    private func editorToolbar(geo: GeometryProxy, isTop: Bool) -> some View {
+        HStack(spacing: 10) {
             Button("Hủy") {
                 dismiss()
             }
             .buttonStyle(.bordered)
             .tint(.secondary)
 
+            Button(action: {
+                let current = shouldDockTop(in: geo)
+                manualDockTop = !current
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: isTop ? "arrow.down.to.line" : "arrow.up.to.line")
+                    Text(isTop ? "Xuống dưới" : "Lên trên")
+                }
+                .font(.caption.bold())
+            }
+            .buttonStyle(.bordered)
+            .tint(.cyan)
+
             Spacer()
 
-            Text("CHỈNH GIAO DIỆN NÚT (HUD EDITOR)")
+            Text("HUD EDITOR")
                 .font(.subheadline.bold())
                 .foregroundColor(.white)
 
             Spacer()
+
+            Button(action: {
+                isCollapsed = true
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    Text("Thu gọn")
+                }
+                .font(.caption.bold())
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
 
             Button("Đặt lại tất cả") {
                 for i in 0..<17 {
@@ -514,7 +568,7 @@ struct HUDEditorView: View {
                 showToast("Đã đưa toàn bộ nút về mặc định")
             }
             .buttonStyle(.bordered)
-            .tint(.orange)
+            .tint(.red)
 
             Button("Lưu & Áp dụng") {
                 saveLayout()
@@ -527,6 +581,42 @@ struct HUDEditorView: View {
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func collapsedBar(geo: GeometryProxy, isTop: Bool) -> some View {
+        HStack(spacing: 12) {
+            Button("Hủy") { dismiss() }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+
+            Spacer()
+
+            Button(action: { isCollapsed = false }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Hiện bảng HUD Editor")
+                }
+                .font(.caption.bold())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
+
+            Spacer()
+
+            Button("Lưu & Áp dụng") {
+                saveLayout()
+                dismiss()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .shadow(radius: 6)
     }
 
     private var selectedButtonControls: some View {

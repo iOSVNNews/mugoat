@@ -70,12 +70,14 @@ const BUTTONS: &[Spec] = &[
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
     b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
     b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
+    n(-185.0, "TAB ◀", "KeyQ"),
     n(-135.0, "◀", "ArrowLeft"),
     n(-87.0, "▲", "ArrowUp"),
     n(-39.0, "▼", "ArrowDown"),
     n(9.0, "▶", "ArrowRight"),
     n(63.0, "OK", "Enter"),
     n(117.0, "BACK", "Backspace"),
+    n(175.0, "TAB ▶", "KeyE"),
 ];
 
 const STICK_RADIUS: f64 = 58.0;
@@ -511,8 +513,25 @@ impl Overlay {
                     Some(Grip::Button { last, .. }) if wheel => *last = p,
                     Some(Grip::Look { motion }) => {
                         let delta = motion.move_to(p);
-                        let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
-                        input::mouse_delta_f(dx, dy);
+                        if self.nav {
+                            if delta.0 < -12.0 {
+                                input::key("ArrowLeft", true, false, None, false);
+                                input::key("ArrowLeft", false, false, None, false);
+                            } else if delta.0 > 12.0 {
+                                input::key("ArrowRight", true, false, None, false);
+                                input::key("ArrowRight", false, false, None, false);
+                            }
+                            if delta.1 < -12.0 {
+                                input::key("ArrowUp", true, false, None, false);
+                                input::key("ArrowUp", false, false, None, false);
+                            } else if delta.1 > 12.0 {
+                                input::key("ArrowDown", true, false, None, false);
+                                input::key("ArrowDown", false, false, None, false);
+                            }
+                        } else {
+                            let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
+                            input::mouse_delta_f(dx, dy);
+                        }
                     }
                     Some(Grip::Button { last, motion, .. }) => {
                         *last = p;
