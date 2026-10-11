@@ -256,9 +256,14 @@ impl Peer {
     }
 }
 
+fn pvp_enabled() -> bool {
+    std::env::var("MUGUET_PVP").map(|v| v != "0").unwrap_or(false)
+}
+
 struct Net {
     sock: UdpSocket,
     name: String,
+    room: String,
     last_server: Mutex<Instant>,
     full: AtomicBool,
     my_id: Mutex<Option<u8>>,
@@ -428,6 +433,7 @@ fn net() -> Option<&'static Net> {
         let server = std::env::var("MUGUET_SERVER").ok().filter(|s| !s.trim().is_empty()).or(host.then(|| "127.0.0.1".to_string()))?;
         let server = if server.contains(':') { server } else { format!("{server}:{}", proto::DEFAULT_PORT) };
         let name = std::env::var("MUGUET_NAME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "Player".into()));
+        let room = std::env::var("MUGUET_ROOM").ok().filter(|s| !s.trim().is_empty()).unwrap_or_default();
         let sock = match UdpSocket::bind("0.0.0.0:0").and_then(|s| s.connect(&server).map(|_| s)) {
             Ok(s) => s,
             Err(e) => {
@@ -435,8 +441,8 @@ fn net() -> Option<&'static Net> {
                 return None;
             }
         };
-        eprintln!("[mp] server {server}, playing as {name}");
-        let net = Net { sock, name, last_server: Mutex::new(Instant::now()), full: AtomicBool::new(false), my_id: Mutex::new(None), peers: Mutex::new(HashMap::new()), shots: Mutex::new(Vec::new()), kills: Mutex::new(Vec::new()), taken: Mutex::new(Vec::new()), explosions: Mutex::new(Vec::new()), hits: Mutex::new(Vec::new()), car_hits: Mutex::new(Vec::new()), time: Mutex::new(None), pending: Mutex::new(Vec::new()), rel_seq: Mutex::new(0), rel_seen: Mutex::new(HashMap::new()), deaths: Mutex::new(Vec::new()) };
+        eprintln!("[mp] server {server}, room [{room}], playing as {name}");
+        let net = Net { sock, name, room, last_server: Mutex::new(Instant::now()), full: AtomicBool::new(false), my_id: Mutex::new(None), peers: Mutex::new(HashMap::new()), shots: Mutex::new(Vec::new()), kills: Mutex::new(Vec::new()), taken: Mutex::new(Vec::new()), explosions: Mutex::new(Vec::new()), hits: Mutex::new(Vec::new()), car_hits: Mutex::new(Vec::new()), time: Mutex::new(None), pending: Mutex::new(Vec::new()), rel_seq: Mutex::new(0), rel_seen: Mutex::new(HashMap::new()), deaths: Mutex::new(Vec::new()) };
         let rx = net.sock.try_clone().expect("socket clone");
         std::thread::Builder::new().name("mp-net".into()).spawn(move || receive_loop(rx)).ok();
         Some(net)
@@ -457,7 +463,12 @@ fn receive_loop(sock: UdpSocket) {
         let every = if net.my_id.lock().unwrap().is_none() { 1 } else { 2 };
         if last_hello.elapsed() > Duration::from_secs(every) {
             last_hello = Instant::now();
-            let _ = net.sock.send(&proto::packet(proto::HELLO, net.name.as_bytes()));
+            let hello_payload = if net.room.is_empty() {
+                net.name.as_bytes().to_vec()
+            } else {
+                format!("{}\0{}", net.room, net.name).into_bytes()
+            };
+            let _ = net.sock.send(&proto::packet(proto::HELLO, &hello_payload));
         }
         resend(net);
         let n = match sock.recv(&mut buf) {
@@ -829,6 +840,7 @@ struct Game {
 
     met: bool,
     unfreeze_at: Option<Instant>,
+    spawn_shield: Option<Instant>,
 }
 
 static GAME: Mutex<Option<Game>> = Mutex::new(None);
@@ -870,6 +882,7 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
         pop_owner: None,
         met: false,
         unfreeze_at: None,
+        spawn_shield: Some(Instant::now() + Duration::from_secs(8)),
     });
 
     let is_host = thread == game.host && name == game.host_name;
@@ -1201,6 +1214,17 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         }
     }
 
+    if me_ok {
+        if let Some(t) = game.spawn_shield {
+            if Instant::now() < t {
+                c.i("SetEntityInvincible", &[i(ped), b(true)]);
+            } else {
+                c.i("SetEntityInvincible", &[i(ped), b(false)]);
+                game.spawn_shield = None;
+            }
+        }
+    }
+
     if let Some(t) = game.unfreeze_at {
         if Instant::now() >= t {
             c.i("FreezeEntityPosition", &[i(ped), b(false)]);
@@ -1220,7 +1244,8 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                     c.i("SetEntityCoordsNoOffset", &[i(ped), pos, b(false), b(false), b(false)]);
 
                     c.i("FreezeEntityPosition", &[i(ped), b(true)]);
-                    game.unfreeze_at = Some(Instant::now() + Duration::from_secs(3));
+                    game.unfreeze_at = Some(Instant::now() + Duration::from_secs(2));
+                    game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
                     eprintln!("[mp] moved next to player {id} at {at:.0?}");
                 }
                 game.met = true;
@@ -1311,6 +1336,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                 net.deaths.lock().unwrap().push((me, killer, cause));
             }
         }
+        if !dead && game.was_dead {
+            game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
+        }
         game.was_dead = dead;
     }
     let deaths = std::mem::take(&mut *net.deaths.lock().unwrap());
@@ -1360,6 +1388,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
     let my_weapon = if me_ok { c.i("GetSelectedPedWeapon", &[i(ped)]) as u32 } else { 0 };
     let mut game_marker = game.marker;
     for (id, a) in game.avatars.iter_mut() {
+        if !pvp_enabled() {
+            a.hit = 0;
+        }
         if a.hit > 0 {
             let mut p = vec![*id];
             p.extend(a.hit.to_le_bytes());
@@ -1389,8 +1420,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
 
     let hits = std::mem::take(&mut *net.hits.lock().unwrap());
     if me_ok {
+        let shielded = game.spawn_shield.is_some_and(|t| Instant::now() < t);
         for (from, target, dmg, w) in hits {
-            if Some(target) != my_id || c.i("IsPedDeadOrDying", &[i(ped), b(true)]) != 0 {
+            if !pvp_enabled() || shielded || Some(target) != my_id || c.i("IsPedDeadOrDying", &[i(ped), b(true)]) != 0 {
                 continue;
             }
             game.hurt.retain(|(id, _)| *id != from);
@@ -2045,13 +2077,14 @@ fn players_group(c: &mut Cmd) -> i32 {
     }
     let me = c.i("PlayerPedId", &[]);
     if g != 0 && c.exists(me) {
-        const DISLIKE: i32 = 4;
+        let pvp = pvp_enabled();
+        let rel: i32 = if pvp { 4 /* DISLIKE */ } else { 0 /* COMPANION */ };
         let mine = c.i("GetPedRelationshipGroupHash", &[i(me)]);
-        c.i("SetRelationshipBetweenGroups", &[i(DISLIKE), i(g), i(mine)]);
-        c.i("SetRelationshipBetweenGroups", &[i(DISLIKE), i(mine), i(g)]);
+        c.i("SetRelationshipBetweenGroups", &[i(rel), i(g), i(mine)]);
+        c.i("SetRelationshipBetweenGroups", &[i(rel), i(mine), i(g)]);
 
         c.i("SetRelationshipGroupAffectsWantedLevel", &[i(g), b(false)]);
-        c.i("SetCanAttackFriendly", &[i(me), b(true), b(false)]);
+        c.i("SetCanAttackFriendly", &[i(me), b(pvp), b(false)]);
     }
     g
 }

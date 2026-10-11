@@ -20,8 +20,11 @@ final class Settings: ObservableObject {
     @Published var mute = false
     @Published var multiplayer = false
     @Published var host = false
-    @Published var server = ""
-    @Published var name = UIDevice.current.name
+    @Published var server = "18.143.103.253"
+    @Published var name = "Player" + String(Int.random(in: 100...999))
+    @Published var room = String(Int.random(in: 1000...9999))
+    @Published var roomMode = "create"
+    @Published var pvp = false
     var extra: [String: Any] = [:]
 
     init() {
@@ -40,8 +43,13 @@ final class Settings: ObservableObject {
         if let v = json["mute"] as? Bool { mute = v }
         if let v = json["multiplayer"] as? Bool { multiplayer = v }
         if let v = json["host"] as? Bool { host = v }
-        if let v = json["server"] as? String { server = v }
-        if let v = json["player_name"] as? String, !v.isEmpty { name = v }
+        if let v = json["server"] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty { server = v }
+        if let v = json["room"] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty { room = v }
+        if let v = json["room_mode"] as? String, ["create", "join", "lan"].contains(v) { roomMode = v }
+        if let v = json["pvp"] as? Bool { pvp = v }
+        if let v = json["player_name"] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty && v != "iPhone" && v != "iPad" {
+            name = v
+        }
     }
 
     func save() throws {
@@ -56,9 +64,15 @@ final class Settings: ObservableObject {
         json["fire_aim"] = fireAim
         json["mute"] = mute
         json["multiplayer"] = multiplayer
-        json["host"] = host
-        json["server"] = server.trimmingCharacters(in: .whitespaces)
-        json["player_name"] = name.trimmingCharacters(in: .whitespaces)
+        json["host"] = (roomMode == "lan")
+        let srv = server.trimmingCharacters(in: .whitespaces)
+        json["server"] = srv.isEmpty ? "18.143.103.253" : srv
+        let rm = room.trimmingCharacters(in: .whitespaces)
+        json["room"] = rm.isEmpty ? "default" : rm
+        json["room_mode"] = roomMode
+        json["pvp"] = pvp
+        let nm = name.trimmingCharacters(in: .whitespaces)
+        json["player_name"] = nm.isEmpty ? "Player" : nm
         if json["extra_args"] == nil { json["extra_args"] = [String]() }
         let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL)
@@ -131,6 +145,17 @@ struct LauncherView: View {
             .padding(24)
             .frame(maxWidth: .infinity)
             Form {
+                Section("Tên nhân vật / Người chơi") {
+                    HStack {
+                        Image(systemName: "person.crop.circle.fill")
+                            .foregroundStyle(.blue)
+                        TextField("Nhập tên nhân vật...", text: $s.name)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                    }
+                    Text("Tên này sẽ hiển thị trên đầu nhân vật của bạn khi chơi cùng bạn bè.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Picker("Mode", selection: $s.mode) {
                     Text("Story Mode").tag(1)
                     Text("Sandbox").tag(2)
@@ -173,26 +198,68 @@ struct LauncherView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Toggle("Mute audio", isOn: $s.mute)
-                Section("Multiplayer") {
-                    Toggle("Play with friends", isOn: $s.multiplayer)
+                Section("Chơi Online (Multiplayer)") {
+                    Toggle("Bật chế độ Multiplayer", isOn: $s.multiplayer)
                     if s.multiplayer {
-                        TextField("Your name", text: $s.name)
-                        Picker("Session", selection: $s.host) {
-                            Text("Join").tag(false)
-                            Text("Host").tag(true)
+                        Picker("Loại phòng", selection: $s.roomMode) {
+                            Text("Tạo phòng").tag("create")
+                            Text("Vào phòng").tag("join")
+                            Text("LAN Host").tag("lan")
                         }
                         .pickerStyle(.segmented)
-                        if s.host {
-                            Text("Friends join with: \(localIPs().joined(separator: " or "))")
-                                .font(.callout).textSelection(.enabled)
+
+                        if s.roomMode == "create" {
+                            HStack {
+                                Text("Mã phòng:")
+                                    .fontWeight(.medium)
+                                Text(s.room)
+                                    .font(.title3.monospaced().bold())
+                                    .foregroundStyle(.green)
+                                Spacer()
+                                Button(action: {
+                                    s.room = String(Int.random(in: 1000...9999))
+                                }) {
+                                    Label("Đổi mã", systemImage: "arrow.clockwise")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            Text("Đọc mã phòng này cho bạn bè để cùng vào một phòng riêng trên máy chủ AWS!")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if s.roomMode == "join" {
+                            HStack {
+                                Text("Mã phòng:")
+                                    .fontWeight(.medium)
+                                TextField("Ví dụ: 8621", text: $s.room)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .autocorrectionDisabled()
+                                    .font(.title3.monospaced().bold())
+                            }
+                            Text("Nhập mã phòng do người tạo phòng chia sẻ.")
+                                .font(.caption).foregroundStyle(.secondary)
                         } else {
-                            TextField("Host address", text: $s.server, prompt: Text("192.168.1.20"))
-                                .keyboardType(.numbersAndPunctuation)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
+                            Text("Mở phòng trên Wi-Fi: Bạn bè kết nối qua: \(localIPs().joined(separator: " hoặc "))")
+                                .font(.callout).textSelection(.enabled)
                         }
-                        Text("LAN: join the host's Wi-Fi address. Internet: use a reachable server IP and UDP port 47520. Story missions remain single-player.")
+
+                        Toggle("Bật sát thương người chơi (PvP)", isOn: $s.pvp)
+                        Text(s.pvp ? "PvP Bật: Người chơi có thể bắn và gây sát thương lẫn nhau." : "Chế độ Hòa bình (Khuyên dùng): Không gây sát thương lẫn nhau, tránh bắn nhau loạn xạ khi mới spawn.")
                             .font(.caption).foregroundStyle(.secondary)
+
+                        DisclosureGroup("Máy chủ (Nâng cao)") {
+                            HStack {
+                                Text("Server IP:")
+                                TextField("18.143.103.253", text: $s.server)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            }
+                            HStack {
+                                Circle().fill(Color.green).frame(width: 8, height: 8)
+                                Text("Server AWS iOSVN (Singapore ~40ms ping)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
                 Section("Save Data") {
@@ -245,9 +312,16 @@ struct LauncherView: View {
     }
 
     func start() {
-        if s.multiplayer && !s.host && s.server.trimmingCharacters(in: .whitespaces).isEmpty {
-            error = "Enter the host's address to join."
+        if s.multiplayer && s.roomMode == "join" && s.room.trimmingCharacters(in: .whitespaces).isEmpty {
+            error = "Nhập mã phòng để vào chơi cùng bạn bè."
             return
+        }
+        if s.multiplayer && s.roomMode != "lan" && s.server.trimmingCharacters(in: .whitespaces).isEmpty {
+            error = "Nhập địa chỉ máy chủ để kết nối."
+            return
+        }
+        if s.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            s.name = "Player" + String(Int.random(in: 100...999))
         }
         do { try s.save() } catch { self.error = "Could not save settings: \(error.localizedDescription)"; return }
         play()

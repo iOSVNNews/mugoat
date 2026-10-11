@@ -134,7 +134,7 @@ fn locate() -> anyhow::Result<PathBuf> {
     Ok(build)
 }
 
-const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_NAME"];
+const SETTING_VARS: &[&str] = &["MUGUET_SCALE", "MUGUET_MOUSE_SENS", "MUGUET_TOUCH_SENS", "MUGUET_AIM_SENS", "MUGUET_AIM_MODE", "MUGUET_FIRE_AIM", "MUGUET_RES", "MUGUET_FULLSCREEN", "MUGUET_MUTE", "MUGUET_HOST", "MUGUET_SERVER", "MUGUET_ROOM", "MUGUET_NAME", "MUGUET_PVP"];
 
 #[cfg(target_os = "ios")]
 pub fn reload() -> Vec<String> {
@@ -168,10 +168,16 @@ fn settings(cfg_path: &Path) -> Vec<String> {
 
     let text = |k: &str| cfg.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
     if flag("multiplayer") {
-        if flag("host") { set_default("MUGUET_HOST", "1"); }
-        else if let Some(v) = text("server") { set_default("MUGUET_SERVER", v); }
+        if flag("host") {
+            set_default("MUGUET_HOST", "1");
+        } else {
+            let srv = text("server").unwrap_or("18.143.103.253");
+            set_default("MUGUET_SERVER", srv);
+        }
     }
+    if let Some(v) = text("room") { set_default("MUGUET_ROOM", v); }
     if let Some(v) = text("player_name") { set_default("MUGUET_NAME", v); }
+    set_default("MUGUET_PVP", if flag("pvp") { "1" } else { "0" });
 
     let mut engine_args = Vec::new();
 

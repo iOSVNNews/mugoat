@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 struct Player {
     id: u8,
+    room: String,
     name: String,
     last: Instant,
 }
@@ -16,7 +17,7 @@ pub fn run(port: u16, max: usize) -> std::io::Result<()> {
     let max = max.clamp(2, 32);
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_read_timeout(Some(Duration::from_millis(500)))?;
-    println!("[server] listening on UDP port {port} (up to {max} players)");
+    println!("[server] listening on UDP port {port} (up to {max} players per room)");
     for ip in local_ips() {
         println!("[server] players on this network join with {ip}:{port}");
     }
@@ -42,7 +43,7 @@ pub fn run(port: u16, max: usize) -> std::io::Result<()> {
             }
 
             for (addr, p) in &players {
-                for (to, _) in players.iter().filter(|(a, _)| *a != addr) {
+                for (to, _) in players.iter().filter(|(a, peer)| *a != addr && peer.room == p.room) {
                     let _ = sock.send_to(&name_packet(p), to);
                 }
             }
@@ -56,39 +57,59 @@ fn name_packet(p: &Player) -> Vec<u8> {
     packet(NAME, &payload)
 }
 
+fn parse_room_and_name(payload: &[u8]) -> (String, String) {
+    if let Some(pos) = payload.iter().position(|&b| b == 0) {
+        let room_str = String::from_utf8_lossy(&payload[..pos]).trim().to_lowercase();
+        let name_str = clean_name(&payload[pos + 1..]);
+        let room = if room_str.is_empty() { "default".to_string() } else { room_str };
+        (room, name_str)
+    } else {
+        ("default".to_string(), clean_name(payload))
+    }
+}
+
 fn handle(sock: &UdpSocket, players: &mut HashMap<SocketAddr, Player>, max: usize, from: SocketAddr, kind: u8, payload: &[u8]) {
     match kind {
         HELLO => {
+            let (room, name) = parse_room_and_name(payload);
             if let Some(p) = players.get_mut(&from) {
                 p.last = Instant::now();
+                p.room = room;
+                p.name = name;
                 let _ = sock.send_to(&packet(WELCOME, &[p.id]), from);
                 return;
             }
-            if players.len() >= max {
+            let room_count = players.values().filter(|p| p.room == room).count();
+            if room_count >= max {
                 let _ = sock.send_to(&packet(FULL, &[]), from);
                 return;
             }
-            let id = (1..=255u8).find(|i| !players.values().any(|p| p.id == *i)).unwrap();
-            let p = Player { id, name: clean_name(payload), last: Instant::now() };
-            println!("[server] {} joined as player {id} from {from} ({} online)", p.name, players.len() + 1);
+            let id = (1..=255u8).find(|i| !players.values().any(|p| p.room == room && p.id == *i)).unwrap();
+            let p = Player { id, room: room.clone(), name, last: Instant::now() };
+            println!("[server] {} joined room [{}] as player {id} from {from} ({} in room, {} total online)", p.name, p.room, room_count + 1, players.len() + 1);
             let _ = sock.send_to(&packet(WELCOME, &[id]), from);
-            for (addr, other) in players.iter() {
+            for (addr, other) in players.iter().filter(|(_, other)| other.room == room) {
                 let _ = sock.send_to(&name_packet(other), from);
                 let _ = sock.send_to(&name_packet(&p), addr);
             }
             players.insert(from, p);
         }
         kind if relayed(kind) => {
-            let Some(p) = players.get_mut(&from) else {
-                let _ = sock.send_to(&packet(LEAVE, &[0]), from);
-                return;
+            let (id, room) = {
+                let Some(p) = players.get_mut(&from) else {
+                    let _ = sock.send_to(&packet(LEAVE, &[0]), from);
+                    return;
+                };
+                p.last = Instant::now();
+                (p.id, p.room.clone())
             };
-            p.last = Instant::now();
-            let mut out = vec![p.id];
+            let mut out = vec![id];
             out.extend_from_slice(payload);
             let pkt = packet(kind, &out);
-            for addr in players.keys().filter(|a| **a != from) {
-                let _ = sock.send_to(&pkt, addr);
+            for (addr, peer) in players.iter() {
+                if *addr != from && peer.room == room {
+                    let _ = sock.send_to(&pkt, addr);
+                }
             }
         }
         BYE => leave(sock, players, from, "left"),
@@ -98,9 +119,11 @@ fn handle(sock: &UdpSocket, players: &mut HashMap<SocketAddr, Player>, max: usiz
 
 fn leave(sock: &UdpSocket, players: &mut HashMap<SocketAddr, Player>, addr: SocketAddr, why: &str) {
     if let Some(p) = players.remove(&addr) {
-        println!("[server] {} {why} ({} online)", p.name, players.len());
-        for to in players.keys() {
-            let _ = sock.send_to(&packet(LEAVE, &[p.id]), to);
+        println!("[server] {} in room [{}] {why} ({} total online)", p.name, p.room, players.len());
+        for (to, peer) in players.iter() {
+            if peer.room == p.room {
+                let _ = sock.send_to(&packet(LEAVE, &[p.id]), to);
+            }
         }
     }
 }
