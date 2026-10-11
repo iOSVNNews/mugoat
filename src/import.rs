@@ -100,7 +100,14 @@ fn tidy_lists(data: &Path) -> Result<()> {
     let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path)?).context("manifest.json")?;
     let present: HashSet<PathBuf> = walk(data);
     if let Some(files) = manifest.get_mut("files").and_then(|f| f.as_array_mut()) {
-        files.retain(|f| f.get(0).and_then(|p| p.as_str()).is_some_and(|p| present.contains(&data.join(p))));
+        // Only omit the intentionally unsupported packs. Dropping every absent
+        // file silently makes an incomplete archive appear ready to play.
+        files.retain(|f| !f.get(0).and_then(|p| p.as_str()).is_some_and(|p|
+            p.split('/').any(|part| SKIPPED_DIRS.contains(&part.to_ascii_lowercase().as_str()))));
+        for record in files.iter() {
+            let name = record.get(0).and_then(|v| v.as_str()).context("Invalid file in game manifest")?;
+            if !present.contains(&data.join(name)) { bail!("Incomplete game.zip: required data file missing: {name}"); }
+        }
         for record in files {
             if record.get(0).and_then(|v| v.as_str()).is_some_and(|p| p.eq_ignore_ascii_case("common/data/dlcList.xml")) {
                 if let Ok(metadata) = std::fs::metadata(&dlc) {

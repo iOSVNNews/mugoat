@@ -2318,6 +2318,12 @@ impl Gpu {
             Some(PipeEntry::Pending) => { self.pending_skips += 1; return None; }
             None => {}
         }
+        // The compiler queue owns shader modules and pipeline descriptors.
+        // Keep a scene change from enqueuing thousands of jobs on a small phone.
+        if cfg!(target_os = "ios") && self.pipe_pending.len() >= 128 {
+            self.pending_skips += 1;
+            return None;
+        }
         self.pipe_creates += 1;
         let Some((job, vb_req)) = self.create_pipeline(vs, ps, layout, &strides, topo, strip_fmt, &pi) else {
             self.pipelines.insert(key, PipeEntry::Done(None, self.presents));
@@ -3269,7 +3275,7 @@ impl Gpu {
             if crate::performance::available_memory().is_some_and(|a| a < 192 << 20) { request_memory_cleanup(); }
             crate::diagnostics::trim();
         }
-        if !crate::performance::MEMORY_PRESSURE.load(Ordering::Relaxed) || now.duration_since(self.last_cleanup) < Duration::from_secs(3) { return; }
+        if !crate::performance::MEMORY_PRESSURE.load(Ordering::Relaxed) || now.duration_since(self.last_cleanup) < Duration::from_secs(15) { return; }
         crate::performance::MEMORY_PRESSURE.store(false, Ordering::Relaxed);
         self.last_cleanup = now;
         self.pressure_until = Some(now + Duration::from_secs(30));

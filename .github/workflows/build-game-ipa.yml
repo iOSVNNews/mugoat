@@ -78,6 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo +1.98.1 build --release --locked
+          cargo +1.98.1 test --release --locked --test import-manifest
 
       - name: Test real UDP multiplayer handshake and relay
         working-directory: source
