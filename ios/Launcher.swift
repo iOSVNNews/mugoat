@@ -35,6 +35,7 @@ final class Settings: ObservableObject {
     @Published var buttonOpacity = 0.22
     @Published var stickOffsetX = 0.0
     @Published var stickOffsetY = 0.0
+    @Published var customButtons: [Int: [Double]] = [:]
     var extra: [String: Any] = [:]
 
     var formattedCreateCode: String {
@@ -81,6 +82,14 @@ final class Settings: ObservableObject {
         if let v = json["player_name"] as? String, !v.trimmingCharacters(in: .whitespaces).isEmpty && v != "iPhone" && v != "iPad" {
             name = v
         }
+        if let dict = json["custom_buttons"] as? [String: [Double]] {
+            for (k, v) in dict {
+                if let idx = Int(k), v.count >= 3 {
+                    customButtons[idx] = v
+                }
+            }
+        }
+        applyCustomLayout()
     }
 
     func parseJoinCode(_ code: String) {
@@ -164,6 +173,11 @@ final class Settings: ObservableObject {
         json["stick_offset_y"] = (stickOffsetY * 10).rounded() / 10
         let nm = name.trimmingCharacters(in: .whitespaces)
         json["player_name"] = nm.isEmpty ? "Player" : nm
+        var cbJson: [String: [Double]] = [:]
+        for (idx, v) in customButtons {
+            cbJson[String(idx)] = v
+        }
+        json["custom_buttons"] = cbJson
         if json["extra_args"] == nil { json["extra_args"] = [String]() }
         let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL)
@@ -176,6 +190,19 @@ final class Settings: ObservableObject {
         buttonOpacity = 0.22
         stickOffsetX = 0.0
         stickOffsetY = 0.0
+        customButtons.removeAll()
+        muguet_reset_button_layout()
+        muguet_apply_button_layout()
+    }
+
+    func applyCustomLayout() {
+        muguet_reset_button_layout()
+        for (idx, v) in customButtons {
+            if v.count >= 3 {
+                muguet_set_button_layout(UInt32(idx), v[0], v[1], v[2])
+            }
+        }
+        muguet_apply_button_layout()
     }
 }
 
@@ -195,6 +222,12 @@ func muguet_apply_cheat(_ code: UnsafePointer<CChar>)
 func muguet_is_multiplayer() -> Bool
 @_silgen_name("muguet_toggle_first_person")
 func muguet_toggle_first_person()
+@_silgen_name("muguet_set_button_layout")
+func muguet_set_button_layout(_ idx: UInt32, _ dx: Double, _ dy: Double, _ scale: Double)
+@_silgen_name("muguet_reset_button_layout")
+func muguet_reset_button_layout()
+@_silgen_name("muguet_apply_button_layout")
+func muguet_apply_button_layout()
 
 final class Importer: ObservableObject {
     static let shared = Importer()
@@ -311,7 +344,7 @@ struct CheatMenuView: View {
                     }
                 }
             }
-            .navigationTitle("Lệnh Cheat GTA V (Offline)")
+            .navigationTitle("Lệnh Cheat GTA V")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -332,6 +365,7 @@ struct CheatMenuView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     private func apply(_ code: String) {
@@ -343,12 +377,399 @@ struct CheatMenuView: View {
     }
 }
 
+struct HUDButtonDef: Identifiable {
+    let id: Int
+    let name: String
+    let icon: String
+    let anchorType: AnchorType
+    let baseOffset: CGPoint
+    let baseRadius: CGFloat
+}
+
+enum AnchorType {
+    case topLeft
+    case topRight
+    case bottomRight
+    case stick
+}
+
+let HUD_BUTTON_DEFS: [HUDButtonDef] = [
+    HUDButtonDef(id: 0, name: "Bắn phải / Ga", icon: "💥", anchorType: .bottomRight, baseOffset: CGPoint(x: 62, y: 68), baseRadius: 44),
+    HUDButtonDef(id: 1, name: "Ngắm / Phanh", icon: "🎯", anchorType: .bottomRight, baseOffset: CGPoint(x: 158, y: 46), baseRadius: 31),
+    HUDButtonDef(id: 2, name: "Nhảy / Phanh tay", icon: "⏫", anchorType: .bottomRight, baseOffset: CGPoint(x: 58, y: 168), baseRadius: 28),
+    HUDButtonDef(id: 3, name: "Lên/xuống xe", icon: "🚗", anchorType: .bottomRight, baseOffset: CGPoint(x: 140, y: 132), baseRadius: 26),
+    HUDButtonDef(id: 4, name: "Nạp đạn / Còi", icon: "🔄", anchorType: .bottomRight, baseOffset: CGPoint(x: 222, y: 98), baseRadius: 24),
+    HUDButtonDef(id: 5, name: "Đổi vũ khí", icon: "🔫", anchorType: .topRight, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 6, name: "Núp / Radio", icon: "🛡️", anchorType: .topRight, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 7, name: "Ngồi / Nhìn sau", icon: "🧎", anchorType: .topRight, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 8, name: "Góc camera", icon: "📷", anchorType: .topRight, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 9, name: "Bản đồ / Menu", icon: "☰", anchorType: .topRight, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 10, name: "Tạm dừng (Pause)", icon: "⏸", anchorType: .topLeft, baseOffset: CGPoint(x: 30, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 11, name: "Điện thoại", icon: "📱", anchorType: .topLeft, baseOffset: CGPoint(x: 84, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 12, name: "Phím mũi tên", icon: "⌨️", anchorType: .topLeft, baseOffset: CGPoint(x: 138, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 13, name: "Đổi nhân vật", icon: "👥", anchorType: .topLeft, baseOffset: CGPoint(x: 192, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 14, name: "Góc nhìn thứ 1", icon: "👁️", anchorType: .topLeft, baseOffset: CGPoint(x: 246, y: 30), baseRadius: 22),
+    HUDButtonDef(id: 15, name: "Bắn trái", icon: "💥", anchorType: .topLeft, baseOffset: CGPoint(x: 45, y: 112), baseRadius: 29),
+    HUDButtonDef(id: 16, name: "Joystick di chuyển", icon: "🕹️", anchorType: .stick, baseOffset: CGPoint(x: 0, y: 0), baseRadius: 55)
+]
+
+struct HUDEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var settings: Settings
+    @State private var selectedId: Int = 0
+    @State private var offsets: [Int: CGSize] = [:]
+    @State private var scales: [Int: Double] = [:]
+    @State private var draggingId: Int? = nil
+    @State private var dragTranslation: CGSize = .zero
+    @State private var toastMessage: String?
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                // Subtle grid background
+                Path { path in
+                    let step: CGFloat = 40
+                    for x in stride(from: 0, through: geo.size.width, by: step) {
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: geo.size.height))
+                    }
+                    for y in stride(from: 0, through: geo.size.height, by: step) {
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                }
+                .stroke(Color.white.opacity(0.04), lineWidth: 1)
+                .ignoresSafeArea()
+
+                // Screen center crosshair
+                Path { path in
+                    let cx = geo.size.width / 2
+                    let cy = geo.size.height / 2
+                    path.move(to: CGPoint(x: cx - 20, y: cy))
+                    path.addLine(to: CGPoint(x: cx + 20, y: cy))
+                    path.move(to: CGPoint(x: cx, y: cy - 20))
+                    path.addLine(to: CGPoint(x: cx, y: cy + 20))
+                }
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+
+                // Render Buttons Canvas
+                ForEach(HUD_BUTTON_DEFS) { def in
+                    renderButton(def, in: geo)
+                }
+
+                // Top Control Floating Bar
+                VStack(spacing: 6) {
+                    topToolbar
+                    selectedButtonControls
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                // Toast notification
+                if let msg = toastMessage {
+                    VStack {
+                        Spacer()
+                        Text(msg)
+                            .font(.callout.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.black.opacity(0.85))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(Color.blue, lineWidth: 1))
+                            .shadow(radius: 6)
+                            .padding(.bottom, 24)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+            }
+        }
+        .onAppear(perform: loadLayout)
+    }
+
+    private var topToolbar: some View {
+        HStack(spacing: 12) {
+            Button("Hủy") {
+                dismiss()
+            }
+            .buttonStyle(.bordered)
+            .tint(.secondary)
+
+            Spacer()
+
+            Text("CHỈNH GIAO DIỆN NÚT (HUD EDITOR)")
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+
+            Spacer()
+
+            Button("Đặt lại tất cả") {
+                for i in 0..<17 {
+                    offsets[i] = .zero
+                    scales[i] = 1.0
+                }
+                showToast("Đã đưa toàn bộ nút về mặc định")
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
+
+            Button("Lưu & Áp dụng") {
+                saveLayout()
+                dismiss()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var selectedButtonControls: some View {
+        let currentDef = HUD_BUTTON_DEFS.first(where: { $0.id == selectedId }) ?? HUD_BUTTON_DEFS[0]
+        let currentScale = scales[selectedId] ?? 1.0
+
+        return HStack(spacing: 14) {
+            // Button selector picker
+            Menu {
+                ForEach(HUD_BUTTON_DEFS) { def in
+                    Button("\(def.icon) \(def.name)") {
+                        selectedId = def.id
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(currentDef.icon) \(currentDef.name)")
+                        .font(.caption.bold())
+                        .foregroundColor(.cyan)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                        .foregroundColor(.cyan)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.cyan.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            Divider().frame(height: 20)
+
+            // Scale slider & buttons
+            HStack(spacing: 6) {
+                Text("Cỡ:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Button(action: { adjustScale(-0.05) }) {
+                    Image(systemName: "minus.circle")
+                        .font(.caption.bold())
+                }
+
+                Slider(value: Binding(
+                    get: { scales[selectedId] ?? 1.0 },
+                    set: { scales[selectedId] = (round($0 * 20) / 20) }
+                ), in: 0.5...2.2, step: 0.05)
+                .frame(width: 110)
+
+                Button(action: { adjustScale(0.05) }) {
+                    Image(systemName: "plus.circle")
+                        .font(.caption.bold())
+                }
+
+                Text(String(format: "%.2f×", currentScale))
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 42, alignment: .trailing)
+            }
+
+            Divider().frame(height: 20)
+
+            // D-Pad nudge arrows
+            HStack(spacing: 3) {
+                Text("Dời:")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button(action: { nudge(dx: -4, dy: 0) }) {
+                    Image(systemName: "arrow.left.square.fill")
+                }
+                Button(action: { nudge(dx: 0, dy: -4) }) {
+                    Image(systemName: "arrow.up.square.fill")
+                }
+                Button(action: { nudge(dx: 0, dy: 4) }) {
+                    Image(systemName: "arrow.down.square.fill")
+                }
+                Button(action: { nudge(dx: 4, dy: 0) }) {
+                    Image(systemName: "arrow.right.square.fill")
+                }
+            }
+            .font(.body)
+
+            Divider().frame(height: 20)
+
+            Button("Đặt lại nút") {
+                offsets[selectedId] = .zero
+                scales[selectedId] = 1.0
+                showToast("Đã đặt lại \(currentDef.name)")
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func renderButton(_ def: HUDButtonDef, in geo: GeometryProxy) -> some View {
+        let isSelected = (selectedId == def.id)
+        let pos = buttonCenter(for: def, in: geo)
+        let scale = CGFloat(scales[def.id] ?? 1.0)
+        let radius = def.baseRadius * CGFloat(settings.buttonScale) * scale
+        let diameter = radius * 2.0
+
+        return ZStack {
+            if def.id == 16 {
+                Circle()
+                    .stroke(isSelected ? Color.yellow : Color.white.opacity(0.35), lineWidth: isSelected ? 3 : 1.5)
+                    .background(Circle().fill(Color.white.opacity(0.12)))
+                    .frame(width: diameter, height: diameter)
+                Circle()
+                    .fill(isSelected ? Color.yellow.opacity(0.6) : Color.white.opacity(0.35))
+                    .frame(width: diameter * 0.45, height: diameter * 0.45)
+                Text(def.icon)
+                    .font(.system(size: max(14, radius * 0.35)))
+            } else {
+                Circle()
+                    .stroke(isSelected ? Color.yellow : Color.white.opacity(0.4), lineWidth: isSelected ? 3 : 1.5)
+                    .background(Circle().fill(isSelected ? Color.blue.opacity(0.4) : Color.white.opacity(settings.buttonOpacity)))
+                    .frame(width: diameter, height: diameter)
+                    .shadow(color: isSelected ? Color.yellow.opacity(0.8) : Color.clear, radius: 8)
+
+                Text(def.icon)
+                    .font(.system(size: max(12, radius * 0.7)))
+            }
+        }
+        .position(x: pos.x, y: pos.y)
+        .contentShape(Circle().scale(1.2))
+        .onTapGesture {
+            selectedId = def.id
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    if selectedId != def.id {
+                        selectedId = def.id
+                    }
+                    draggingId = def.id
+                    dragTranslation = value.translation
+                }
+                .onEnded { value in
+                    let base = offsets[def.id] ?? .zero
+                    offsets[def.id] = CGSize(
+                        width: base.width + value.translation.width,
+                        height: base.height + value.translation.height
+                    )
+                    dragTranslation = .zero
+                    draggingId = nil
+                }
+        )
+    }
+
+    private func buttonCenter(for def: HUDButtonDef, in geo: GeometryProxy) -> CGPoint {
+        let safe = geo.safeAreaInsets
+        let sx = safe.leading
+        let sy = safe.top
+        let sw = geo.size.width - safe.leading - safe.trailing
+        let sh = geo.size.height - safe.top - safe.bottom
+
+        let bOx = CGFloat(settings.buttonOffsetX)
+        let bOy = CGFloat(settings.buttonOffsetY)
+
+        var baseX: CGFloat = 0
+        var baseY: CGFloat = 0
+
+        switch def.anchorType {
+        case .bottomRight:
+            baseX = sx + sw - def.baseOffset.x + bOx
+            baseY = sy + sh - def.baseOffset.y + bOy
+        case .topRight:
+            baseX = sx + sw - def.baseOffset.x + bOx
+            baseY = sy + def.baseOffset.y + bOy
+        case .topLeft:
+            baseX = sx + def.baseOffset.x + bOx
+            baseY = sy + def.baseOffset.y + bOy
+        case .stick:
+            let sOx = CGFloat(settings.stickOffsetX)
+            let sOy = CGFloat(settings.stickOffsetY)
+            let sRadius: CGFloat = 55.0 * CGFloat(settings.buttonScale)
+            baseX = sx + 40.0 + sRadius + sOx
+            baseY = sy + sh - 30.0 - sRadius - sOy
+        }
+
+        let saved = offsets[def.id] ?? .zero
+        let currentDrag = (draggingId == def.id) ? dragTranslation : .zero
+
+        return CGPoint(
+            x: baseX + saved.width + currentDrag.width,
+            y: baseY + saved.height + currentDrag.height
+        )
+    }
+
+    private func loadLayout() {
+        for i in 0..<17 {
+            if let arr = settings.customButtons[i], arr.count >= 3 {
+                offsets[i] = CGSize(width: arr[0], height: arr[1])
+                scales[i] = arr[2]
+            } else {
+                offsets[i] = .zero
+                scales[i] = 1.0
+            }
+        }
+    }
+
+    private func saveLayout() {
+        for i in 0..<17 {
+            let off = offsets[i] ?? .zero
+            let sc = scales[i] ?? 1.0
+            if abs(off.width) < 0.5 && abs(off.height) < 0.5 && abs(sc - 1.0) < 0.01 {
+                settings.customButtons.removeValue(forKey: i)
+            } else {
+                settings.customButtons[i] = [Double(off.width), Double(off.height), sc]
+            }
+        }
+        do { try settings.save() } catch {}
+        settings.applyCustomLayout()
+    }
+
+    private func adjustScale(_ delta: Double) {
+        let current = scales[selectedId] ?? 1.0
+        let next = max(0.5, min(2.2, (round((current + delta) * 20) / 20)))
+        scales[selectedId] = next
+    }
+
+    private func nudge(dx: CGFloat, dy: CGFloat) {
+        let current = offsets[selectedId] ?? .zero
+        offsets[selectedId] = CGSize(width: current.width + dx, height: current.height + dy)
+    }
+
+    private func showToast(_ msg: String) {
+        withAnimation { toastMessage = msg }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation { toastMessage = nil }
+        }
+    }
+}
+
 struct LauncherView: View {
     @StateObject private var s = Settings()
     @ObservedObject private var importer = Importer.shared
     @State private var error: String?
     @State private var picking = false
     @State private var showingCheatSheet = false
+    @State private var showingHUDEditor = false
     var isOverlay: Bool = false
     let play: () -> Void
 
@@ -435,6 +856,14 @@ struct LauncherView: View {
                 }
 
                 Section("Tùy chỉnh Giao diện Nút Bấm (Touch Controls)") {
+                    Button(action: { showingHUDEditor = true }) {
+                        Label("Chỉnh vị trí & Kích thước nút trực quan (HUD Editor)", systemImage: "hand.draw.fill")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+
                     HStack {
                         Text("Kích thước nút")
                         Slider(value: $s.buttonScale, in: 0.7...1.5, step: 0.05)
@@ -528,32 +957,43 @@ struct LauncherView: View {
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("3. Mã phòng chia sẻ cho bạn bè:").font(.subheadline.bold())
-                                    HStack {
+                                    HStack(spacing: 8) {
                                         Text(s.formattedCreateCode)
                                             .font(.title2.monospaced().bold())
                                             .foregroundStyle(.green)
-                                            .padding(.horizontal, 12)
+                                            .padding(.horizontal, 10)
                                             .padding(.vertical, 6)
                                             .background(Color.green.opacity(0.15))
                                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .fixedSize(horizontal: true, vertical: false)
+                                            .layoutPriority(2)
 
-                                        Spacer()
+                                        Spacer(minLength: 4)
 
                                         Button(action: {
                                             s.roomDigits = String(Int.random(in: 1000...9999))
                                         }) {
-                                            Label("Đổi mã", systemImage: "arrow.clockwise")
-                                                .font(.caption)
+                                            Image(systemName: "arrow.clockwise")
+                                                .font(.caption.bold())
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 7)
                                         }
                                         .buttonStyle(.bordered)
+                                        .help("Đổi mã")
 
                                         Button(action: {
                                             UIPasteboard.general.string = s.formattedCreateCode
                                         }) {
-                                            Label("Sao chép", systemImage: "doc.on.doc")
-                                                .font(.caption)
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "doc.on.doc")
+                                                Text("Chép")
+                                            }
+                                            .font(.caption.bold())
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 7)
                                         }
                                         .buttonStyle(.borderedProminent)
+                                        .fixedSize()
                                     }
                                 }
 
@@ -704,6 +1144,9 @@ struct LauncherView: View {
                 code.withCString { muguet_apply_cheat($0) }
             })
         }
+        .fullScreenCover(isPresented: $showingHUDEditor) {
+            HUDEditorView(settings: s)
+        }
     }
 
     @ViewBuilder var importView: some View {
@@ -738,6 +1181,7 @@ struct LauncherView: View {
 
     func resumeAndSave() {
         do { try s.save() } catch {}
+        s.applyCustomLayout()
         play()
         muguet_reload_settings()
     }
@@ -758,6 +1202,7 @@ struct LauncherView: View {
             s.name = "Player" + String(Int.random(in: 100...999))
         }
         do { try s.save() } catch { self.error = "Could not save settings: \(error.localizedDescription)"; return }
+        s.applyCustomLayout()
         play()
     }
 }
@@ -832,24 +1277,27 @@ public func muguetOpenMenu() {
         var presenter = root
         while let child = presenter.presentedViewController { presenter = child }
 
-        let alert = UIAlertController(title: "Muguet Menu", message: "Chọn hành động:", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Tiếp tục chơi (Resume)", style: .cancel))
+        let alert = UIAlertController(title: "Muguet Menu", message: nil, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Tiếp tục chơi", style: .cancel))
+
+        alert.addAction(UIAlertAction(title: "Chỉnh vị trí & kích thước nút (HUD)", style: .default, handler: { _ in
+            let host = UIHostingController(rootView: HUDEditorView(settings: Settings()))
+            host.modalPresentationStyle = .fullScreen
+            presenter.present(host, animated: true)
+        }))
 
         let isMp = muguet_is_multiplayer()
         if !isMp {
-            alert.addAction(UIAlertAction(title: "🎮 Bảng Lệnh Cheat (Offline)", style: .default, handler: { _ in
+            alert.addAction(UIAlertAction(title: "Bảng lệnh cheat", style: .default, handler: { _ in
                 let cheatHost = UIHostingController(rootView: CheatMenuView(onApply: { code in
                     code.withCString { muguet_apply_cheat($0) }
                 }))
+                cheatHost.modalPresentationStyle = .formSheet
                 presenter.present(cheatHost, animated: true)
             }))
         }
 
-        alert.addAction(UIAlertAction(title: "📷 Đổi góc nhìn (1st / 3rd POV)", style: .default, handler: { _ in
-            muguet_toggle_first_person()
-        }))
-
-        alert.addAction(UIAlertAction(title: "⚙️ Màn hình chính & Tùy chỉnh Nút", style: .default, handler: { _ in
+        alert.addAction(UIAlertAction(title: "Cài đặt & Tùy chọn", style: .default, handler: { _ in
             weak var sheet: UIViewController?
             let host = UIHostingController(rootView: LauncherView(isOverlay: true, play: {
                 sheet?.dismiss(animated: true)
@@ -861,14 +1309,10 @@ public func muguetOpenMenu() {
             presenter.present(host, animated: true)
         }))
 
-        alert.addAction(UIAlertAction(title: "🚪 Thoát ứng dụng nhanh", style: .destructive, handler: { _ in
+        alert.addAction(UIAlertAction(title: "Thoát ứng dụng", style: .destructive, handler: { _ in
             exit(0)
         }))
 
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = presenter.view
-            popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
-        }
         presenter.present(alert, animated: true)
     }
 }
