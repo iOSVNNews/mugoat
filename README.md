@@ -18,15 +18,16 @@ An open-source native Mach-O ARM64 port of Grand Theft Auto V for iOS, iPadOS, a
 - **No Debugger / Tethering Needed**: Runs at full native machine speed without requiring JIT debugging entitlements, Xcode tethering, or external developer tools.
 - **Compatible with iOS 15.0+**: Supports 64-bit iOS devices running iOS/iPadOS 15.0 or newer.
 
-### 2. Apple Metal Hardware-Accelerated Graphics
+### 2. Apple Metal Graphics & 120 FPS Activation
 - **Direct Metal Pipeline**: Graphics commands route directly through Apple Metal via `wgpu`.
 - **Zero Web Overhead**: Bypasses browser sandboxes, WebGPU layers, and WebKit compositor overhead, minimizing draw-call latency and memory consumption.
-- **High Refresh Rate (ProMotion)**: `CADisplayLink` frame synchronization supporting 30 FPS, 60 FPS, and up to 120 FPS on ProMotion-enabled iPhones and iPads.
+- **120 FPS ProMotion Support**: Supports 30 FPS, 60 FPS, and unlocks full 120 FPS with `CADisplayLink` frame synchronization.
+- **1-Click 120 FPS Performance Preset**: Instantly optimizes resolution scale (50%), textures, ProMotion V-Sync, and Deep Optimization for maximum sustained 120 FPS without thermal throttling.
 
 ### 3. Customizable Touchscreen HUD
 - **In-Game Layout Editor**: Visual layout customizer accessible from the launcher and pause menu.
 - **Free Drag & Repositioning**: Reposition every on-screen action button, virtual stick, or HUD cluster anywhere on screen.
-- **Independent Scaling**: Resize individual control elements between `0.5×` and `2.2×` scale with granular nudging controls.
+- **Independent Scaling & Opacity**: Resize individual control elements between `0.5×` and `2.2×` scale with granular nudging controls and opacity adjustments.
 - **Action Clusters**: Mobile-first controls for shooting, aiming, driving, vehicle entry/exit, horn, cover, handbrake, and weapon wheel.
 - **Configurable Aiming**: Toggle or hold aiming modes with customizable touch look sensitivity curves.
 
@@ -36,8 +37,9 @@ An open-source native Mach-O ARM64 port of Grand Theft Auto V for iOS, iPadOS, a
 - **One-Tap Waypoints**: Tap anywhere on the world map to set instant GPS navigation waypoints.
 - **Optional Navigation Cluster**: Toggleable on-screen directional buttons (TAB ◀/▶, arrows, OK, BACK) for quick menu browsing.
 
-### 5. Multiplayer UDP Lobby & Room Routing
+### 5. Multiplayer UDP Lobby & 32/64 Player Server Support
 - **Low-Latency Relay Networking**: High-performance UDP networking layer syncing player positions, vehicle states, and animations.
+- **32 / 64 Player Capacity**: Configurable room limit supporting standard 32 players or expanded 64-player servers.
 - **Custom Room Codes**: Isolated lobbies via 6-character room codes for private or community sessions.
 - **Gameplay Modes**: Support for separated Story Mode co-op and Sandbox free-roam sessions with host-configurable PvP rules.
 
@@ -49,6 +51,10 @@ An open-source native Mach-O ARM64 port of Grand Theft Auto V for iOS, iPadOS, a
 - **Extended Virtual Addressing**: Built with `com.apple.developer.kernel.extended-virtual-addressing` entitlement, providing full 64-bit virtual memory space to prevent `mmap` allocation failures.
 - **Increased Memory Limit**: Includes `com.apple.developer.kernel.increased-memory-limit` entitlement to access extended RAM budgets.
 - **Adaptive Memory Management**: Automatically adjusts heap reservations to device hardware (4 GB, 6 GB, 8 GB+ RAM).
+
+### 8. Interactive GTA V Cheat Menu
+- **Comprehensive Cheat Library**: Invincibility (PAINKILLER), Max Health & Armor (TURTLE), All Weapons (TOOLUP), Clear Wanted Level (LAWYERUP), Super Jump, Moon Gravity, Weather Control, and vehicle spawning (Buzzard attack chopper, Duke O'Death, Comet, PCJ-600, Kraken submarine, etc.).
+- **One-Tap In-Game Activation**: Browse and activate cheats easily from the launcher or directly mid-game via the in-game menu (offline story mode only).
 
 ---
 
@@ -79,11 +85,19 @@ Precompiled IPA binaries are available on the [Releases page](https://github.com
 
 ---
 
-## Game Assets
+## Game Assets Installation
 
 Muguet is an open-source game engine reimplementation and does **not** contain any proprietary game assets, audio files, or textures.
 
-To run the game, import your compatible asset archive (`game.zip`) containing the `data/` and `b/<build>/shaders/` directories via the app's initial document picker.
+### Method 1: Direct Folder Copy via Files App (Fastest & Recommended)
+1. Extract your `game.zip` asset package on your computer or directly on your device.
+2. Open the iOS **Files** app (`Tệp`) and navigate to **On My iPhone / iPad > Muguet** (`muguet`).
+3. Create a new folder named **`game`** (all lowercase).
+4. Copy and paste the extracted **`data`** and **`b`** folders inside the **`game`** folder (`.../Muguet/game/data` and `.../Muguet/game/b`).
+5. Open Muguet — the game will detect the assets instantly and launch without waiting for in-app decompression.
+
+### Method 2: In-App Archive Import
+- Launch Muguet and tap **Import game data .zip** to select your `game.zip` archive directly through the iOS document picker.
 
 ---
 
