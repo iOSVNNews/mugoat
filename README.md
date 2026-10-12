@@ -70,11 +70,11 @@ This fork adds mobile-first controls, UI customizations, touch map navigation, a
 
 ## Installation & Sideloading
 
-Direct downloads for precompiled IPA binaries are available on the [Releases page](https://github.com/iOSVNNews/muguet/releases/tag/iosvn-runtime8.4-20261012):
+Direct downloads for precompiled IPA binaries are available on the [Releases page](https://github.com/iOSVNNews/muguet/releases/tag/iosvn-runtime8.5-20261012):
 
-- **Build 8.4 IPA:** [Muguet-v8.4.ipa](https://github.com/iOSVNNews/muguet/releases/download/iosvn-runtime8.4-20261012/Muguet-v8.4.ipa)
-- **Build Revision:** 8.4 (Native Mach-O ARM64 `__GAME` executable segment, precompiled game bytecode)
-- **SHA-256:** `0de7d4fe1e79612b9ffe8b9c9c80f47ffbb0e7bbf1e5f9af8bd12e9912aa844e`
+- **Build 8.5 IPA:** [Muguet-v8.5.ipa](https://github.com/iOSVNNews/muguet/releases/download/iosvn-runtime8.5-20261012/Muguet-v8.5.ipa)
+- **Build Revision:** 8.5 (Native Mach-O ARM64 `__GAME` executable segment, precompiled game bytecode)
+- **SHA-256:** `284df7f1a9f89332a84710f8301ae93d077d605f40bfd352390be56c19a9577c`
 
 Mirror release repository: [iOSVNNews/muguet-ios-build Releases](https://github.com/iOSVNNews/muguet-ios-build/releases).
 
