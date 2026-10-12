@@ -4,15 +4,25 @@ pub struct MenuState {
     pub nav: bool,
     // This records an Escape request, not an engine-reported pause state.
     pub pause_requested: bool,
+    pause_keys_visible: bool,
 }
 
 impl MenuState {
     pub fn pause(&mut self) {
         self.pause_requested = !self.pause_requested;
+        self.pause_keys_visible = self.pause_requested;
     }
 
     pub fn toggle_keys(&mut self) {
-        self.nav = !self.nav;
+        if self.pause_requested {
+            self.pause_keys_visible = !self.pause_keys_visible;
+        } else {
+            self.nav = !self.nav;
+        }
+    }
+
+    pub fn keys_visible(&self) -> bool {
+        if self.pause_requested { self.pause_keys_visible } else { self.nav }
     }
 }
 
@@ -49,12 +59,13 @@ mod tests {
         let mut state = MenuState::default();
         state.pause();
         assert!(!state.nav && state.pause_requested);
+        assert!(state.keys_visible());
         state.toggle_keys();
-        assert!(state.nav && state.pause_requested);
+        assert!(!state.nav && state.pause_requested && !state.keys_visible());
         state.toggle_keys();
-        assert!(!state.nav && state.pause_requested);
+        assert!(!state.nav && state.pause_requested && state.keys_visible());
         state.pause();
-        assert!(!state.nav && !state.pause_requested);
+        assert!(!state.nav && !state.pause_requested && !state.keys_visible());
     }
 
     #[test]
@@ -64,6 +75,18 @@ mod tests {
         state.pause();
         state.pause();
         assert!(state.nav && !state.pause_requested);
+    }
+
+    #[test]
+    fn hiding_pause_buttons_does_not_unpause_or_change_gameplay_keys() {
+        let mut state = MenuState::default();
+        state.pause();
+        state.toggle_keys();
+        assert!(state.pause_requested && !state.keys_visible() && !state.nav);
+        state.pause();
+        assert!(!state.pause_requested && !state.nav);
+        state.pause();
+        assert!(state.pause_requested && state.keys_visible() && !state.nav);
     }
 
     #[test]

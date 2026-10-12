@@ -429,12 +429,13 @@ impl Overlay {
 
     fn spec_act(&self, idx: usize) -> Option<(&'static str, Act)> {
         let s = &BUTTONS[idx];
-        if self.menu.nav {
+        if self.menu.keys_visible() {
             if s.nav {
                 return if self.in_car { s.in_car } else { s.on_foot };
             }
             match s.on_foot.map(|(_, a)| a) {
-                Some(Act::KeyNav("Escape")) | Some(Act::Key("ArrowUp")) | Some(Act::NavToggle) => return s.on_foot,
+                Some(Act::KeyNav("Escape")) | Some(Act::NavToggle) => return s.on_foot,
+                Some(Act::Key("ArrowUp")) if !self.menu.pause_requested => return s.on_foot,
                 _ => return None,
             }
         }
@@ -510,7 +511,7 @@ impl Overlay {
         let pressed: HashSet<usize> = self.grips.values().filter_map(|g| if let Grip::Button { idx, .. } = g { Some(*idx) } else { None }).collect();
         for (i, b) in self.buttons.iter().enumerate() {
             let latched = self.aim_latched && matches!(self.spec_act(i), Some((_, AimToggle)))
-                || self.menu.nav && matches!(self.spec_act(i), Some((_, NavToggle)));
+                || self.menu.keys_visible() && matches!(self.spec_act(i), Some((_, NavToggle)));
             set_alpha_bg(&b.view, if pressed.contains(&i) { (base_alpha + 0.25).min(0.95) } else if latched { (base_alpha + 0.15).min(0.9) } else { base_alpha });
         }
     }
