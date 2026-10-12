@@ -10,7 +10,8 @@ use crate::game_data::SKIPPED_DIRS;
 
 pub fn import(zip_path: &Path, dest: &Path, keep_code: bool, mut progress: impl FnMut(u64, u64)) -> Result<()> {
     let file = File::open(zip_path).with_context(|| format!("{}", zip_path.display()))?;
-    let mut zip = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 20, file)).context("not a zip file")?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::with_capacity(1 << 20, file))
+        .context("Cannot read the ZIP directory. The file may be incomplete, corrupt, or one part of a split archive. Download the complete game.zip to On My iPhone before importing; renaming RAR/7z to .zip does not convert it")?;
 
     let names: Vec<String> = zip.file_names().map(String::from).collect();
     let manifest = names

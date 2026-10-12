@@ -242,14 +242,21 @@ final class Importer: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let ok = url.path.withCString { muguet_import($0) { done, total in
-                let now = ProcessInfo.processInfo.systemUptime
-                guard done == total || now - Importer.shared.lastProgressTime >= 0.05 else { return }
-                Importer.shared.lastProgressTime = now
-                let p = total > 0 ? Double(done) / Double(total) : 0
-                DispatchQueue.main.async { Importer.shared.progress = p }
-            } }
-            let message = ok ? nil : muguet_import_error().map { String(cString: $0) } ?? "unknown error"
+            // File providers must finish materializing the selected ZIP before
+            // Rust seeks to its central directory at the end of the archive.
+            var coordinationError: NSError?
+            var ok = false
+            NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &coordinationError) { localURL in
+                ok = localURL.path.withCString { muguet_import($0) { done, total in
+                    let now = ProcessInfo.processInfo.systemUptime
+                    guard done == total || now - Importer.shared.lastProgressTime >= 0.05 else { return }
+                    Importer.shared.lastProgressTime = now
+                    let p = total > 0 ? Double(done) / Double(total) : 0
+                    DispatchQueue.main.async { Importer.shared.progress = p }
+                } }
+            }
+            let message = ok ? nil : coordinationError?.localizedDescription
+                ?? muguet_import_error().map { String(cString: $0) } ?? "unknown error"
             DispatchQueue.main.async {
                 self.progress = nil
                 self.ready = muguet_game_ready()
@@ -466,9 +473,7 @@ struct HUDEditorView: View {
                     if isCollapsed {
                         if shouldDockTop(in: geo) {
                             collapsedBar(geo: geo, isTop: true)
-                            Spacer()
                         } else {
-                            Spacer()
                             collapsedBar(geo: geo, isTop: false)
                         }
                     } else {
@@ -476,9 +481,7 @@ struct HUDEditorView: View {
                         if isTop {
                             editorToolbar(geo: geo, isTop: true)
                             selectedButtonControls
-                            Spacer()
                         } else {
-                            Spacer()
                             selectedButtonControls
                             editorToolbar(geo: geo, isTop: false)
                         }
@@ -486,7 +489,11 @@ struct HUDEditorView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .allowsHitTesting(false)
+                // Disable only the transparent background; disabling this parent
+                // also disables its toolbar buttons and sliders.
+                .background(Color.clear.allowsHitTesting(false))
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: shouldDockTop(in: geo) ? .top : .bottom)
                 .animation(.easeInOut(duration: 0.25), value: isCollapsed)
                 .animation(.easeInOut(duration: 0.25), value: manualDockTop)
                 .animation(.easeInOut(duration: 0.25), value: selectedId)
@@ -507,8 +514,10 @@ struct HUDEditorView: View {
                             .padding(.bottom, 24)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
+                    .allowsHitTesting(false)
                 }
             }
+            .coordinateSpace(name: "hudCanvas")
         }
         .onAppear(perform: loadLayout)
     }
@@ -745,10 +754,11 @@ struct HUDEditorView: View {
                     .multilineTextAlignment(.center)
             }
         }
-        .position(x: pos.x, y: pos.y)
+        // Keep the hit region the size of the button, before positioning it.
+        .frame(width: diameter, height: diameter)
         .contentShape(Circle().scale(1.3))
         .gesture(
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("hudCanvas"))
                 .onChanged { value in
                     if selectedId != def.id {
                         selectedId = def.id
@@ -766,6 +776,7 @@ struct HUDEditorView: View {
                     draggingId = nil
                 }
         )
+        .position(x: pos.x, y: pos.y)
     }
 
     private func buttonCenter(for def: HUDButtonDef, in geo: GeometryProxy) -> CGPoint {

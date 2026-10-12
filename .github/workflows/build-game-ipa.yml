@@ -71,6 +71,8 @@ jobs:
           "$RUNNER_TEMP/performance-tests"
           rustc --edition=2021 --test src/aim.rs -o "$RUNNER_TEMP/aim-tests"
           "$RUNNER_TEMP/aim-tests"
+          rustc --edition=2021 --test src/touch_gestures.rs -o "$RUNNER_TEMP/touch-tests"
+          "$RUNNER_TEMP/touch-tests"
 
       - name: Build the host compiler
         working-directory: source
@@ -143,7 +145,7 @@ jobs:
       - name: Encrypt the output bundle
         working-directory: source
         env:
-          MUGUET_ARTIFACT_KEY: ${{ secrets.MUGUET_ARTIFACT_KEY_V2 }}
+          MUGUET_ARTIFACT_KEY: ${{ secrets.MUGUET_ARTIFACT_KEY_V3 }}
         shell: bash
         run: |
           set -euo pipefail

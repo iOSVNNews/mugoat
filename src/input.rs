@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 static BLOCK: AtomicU64 = AtomicU64::new(0);
+static MENU_TOUCH: AtomicBool = AtomicBool::new(false);
 static SIZE: Mutex<(i32, i32)> = Mutex::new((1280, 720));
 static HELD: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -46,7 +47,7 @@ pub fn publish(block: u64) {
     if cfg!(target_os = "ios") {
         if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
         if let Some(m) = word(MY) { m.store(-9999, Ordering::SeqCst); }
-        if let Some(l) = word(LOCKED) { l.store(1, Ordering::SeqCst); }
+        set_locked(!MENU_TOUCH.load(Ordering::Relaxed));
     } else {
         if let Some(m) = word(MX) { m.store(w >> 1, Ordering::SeqCst); }
         if let Some(m) = word(MY) { m.store(h >> 1, Ordering::SeqCst); }
@@ -73,11 +74,30 @@ pub fn set_focus(focused: bool) {
     if !focused { release_all(); }
 }
 pub fn set_locked(locked: bool) {
-    let locked = if cfg!(target_os = "ios") { true } else { locked };
+    let pointer = MENU_TOUCH.load(Ordering::Relaxed);
+    let locked = if cfg!(target_os = "ios") { !pointer } else { locked };
     if let Some(l) = word(LOCKED) { l.store(locked as i32, Ordering::SeqCst); }
-    if cfg!(target_os = "ios") {
+    if cfg!(target_os = "ios") && !pointer {
         if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
         if let Some(m) = word(MY) { m.store(-9999, Ordering::SeqCst); }
+    }
+}
+
+pub fn set_menu_touch(enabled: bool) {
+    if MENU_TOUCH.swap(enabled, Ordering::Relaxed) == enabled { return; }
+    // Prevent a look delta / old click from leaking across menu transitions.
+    for index in [DX, DY, DZ, BTN] {
+        if let Some(value) = word(index) { value.store(0, Ordering::SeqCst); }
+    }
+    if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
+    if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
+    set_locked(!enabled);
+}
+
+pub fn hide_touch_pointer() {
+    if cfg!(target_os = "ios") {
+        if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
+        if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
     }
 }
 fn release_all() {
@@ -175,13 +195,19 @@ pub fn button(dom_button: usize, pressed: bool) {
 }
 
 pub fn mouse_pos(x: i32, y: i32) {
-    if cfg!(target_os = "ios") {
+    if cfg!(target_os = "ios") && !MENU_TOUCH.load(Ordering::Relaxed) {
         if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
         if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
         return;
     }
     let (w, h) = size();
-    let (x, y) = (x.clamp(0, w - 1), y.clamp(0, h - 1));
+    let (x, y) = (x.clamp(0, (w - 1).max(0)), y.clamp(0, (h - 1).max(0)));
+    if cfg!(target_os = "ios") {
+        // Finger positions are absolute render coordinates, never camera motion.
+        if let Some(mx) = word(MX) { mx.store(x, Ordering::SeqCst); }
+        if let Some(my) = word(MY) { my.store(y, Ordering::SeqCst); }
+        return;
+    }
     if let (Some(mx), Some(my), Some(dx), Some(dy)) = (word(MX), word(MY), word(DX), word(DY)) {
         dx.fetch_add(x - mx.load(Ordering::SeqCst), Ordering::SeqCst);
         dy.fetch_add(y - my.load(Ordering::SeqCst), Ordering::SeqCst);
@@ -211,7 +237,7 @@ fn mouse_delta(dx_: i32, dy_: i32) {
         dx.fetch_add(dx_, Ordering::SeqCst);
         dy.fetch_add(dy_, Ordering::SeqCst);
     }
-    if cfg!(target_os = "ios") {
+    if cfg!(target_os = "ios") && !MENU_TOUCH.load(Ordering::Relaxed) {
         if let (Some(mx), Some(my)) = (word(MX), word(MY)) {
             mx.store(-9999, Ordering::SeqCst);
             my.store(-9999, Ordering::SeqCst);

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 pub const MIB: u64 = 1 << 20;
 pub const HEAP_CEILING: u64 = 16 << 30;
+pub const IOS_HEAP_MAX: u64 = 3072 * MIB;
 pub static MEMORY_PRESSURE: AtomicBool = AtomicBool::new(false);
 static FRAME_LIMIT: AtomicU32 = AtomicU32::new(60);
 static PROMOTION_SYNC: AtomicBool = AtomicBool::new(false);
@@ -56,6 +57,10 @@ pub fn heap_budget(physical: u64, available: Option<u64>, current_heap: u64) -> 
     device_budget.min(process_budget).min(HEAP_CEILING).max(current_heap)
 }
 
+pub fn ios_heap_budget(physical: u64, available: Option<u64>, current_heap: u64) -> u64 {
+    heap_budget(physical, available, current_heap).min(IOS_HEAP_MAX)
+}
+
 pub fn growth_fits(old: u64, requested: u64, maximum: u64, available: Option<u64>) -> bool {
     if requested <= old { return true; }
     requested <= maximum && available.map(|a| requested - old <= a.saturating_sub(256 * MIB)).unwrap_or(true)
@@ -84,6 +89,8 @@ mod tests {
         assert!(heap_budget(8 << 30, Some(6 << 30), 0) < 6 << 30);
         assert_eq!(heap_budget(32 << 30, Some(24 << 30), 0), HEAP_CEILING);
         assert_eq!(heap_budget(4 << 30, Some(128 * MIB), 1 << 30), 1 << 30);
+        assert_eq!(ios_heap_budget(8 << 30, Some(6 << 30), 1 << 30), 3 << 30);
+        assert!(ios_heap_budget(4 << 30, Some(2 << 30), 0) < 3 << 30);
     }
     #[test]
     fn refuses_growth_that_consumes_native_headroom() {

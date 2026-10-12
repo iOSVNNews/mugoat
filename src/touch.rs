@@ -70,14 +70,14 @@ const BUTTONS: &[Spec] = &[
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
     b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
     b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
-    n(-140.0, "TAB ◀", "KeyQ"),
-    n(-100.0, "◀", "ArrowLeft"),
-    n(-60.0, "▲", "ArrowUp"),
-    n(-20.0, "▼", "ArrowDown"),
-    n(20.0, "▶", "ArrowRight"),
-    n(60.0, "OK", "Enter"),
-    n(100.0, "BACK", "Backspace"),
-    n(140.0, "TAB ▶", "KeyE"),
+    n(-182.0, "TAB ◀", "KeyQ"),
+    n(-130.0, "◀", "ArrowLeft"),
+    n(-78.0, "▲", "ArrowUp"),
+    n(-26.0, "▼", "ArrowDown"),
+    n(26.0, "▶", "ArrowRight"),
+    n(78.0, "OK", "Enter"),
+    n(130.0, "BACK", "Backspace"),
+    n(182.0, "TAB ▶", "KeyE"),
 ];
 
 const STICK_RADIUS: f64 = 58.0;
@@ -88,6 +88,10 @@ const LOOK_GAIN: f64 = 3.0;
 const WHEEL_DEADZONE: f64 = 10.0;
 const WHEEL_FULL: f64 = 45.0;
 const WHEEL_PUSH: f64 = 40.0;
+
+fn nav_scale(width: f64) -> f64 {
+    button_scale().min(((width - 32.0) / 406.0).max(0.1))
+}
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static TOUCH_SENS_BITS: AtomicU64 = AtomicU64::new(1.0f64.to_bits());
@@ -209,9 +213,10 @@ const MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(120);
 const MOUSE_HOLD: std::time::Duration = std::time::Duration::from_millis(25);
 
 enum Grip {
+    Pointer { at: (f64, f64) },
     Stick { origin: (f64, f64), at: (f64, f64) },
     Look { motion: crate::aim::DragLook },
-    Button { idx: usize, start: (f64, f64), last: (f64, f64), motion: crate::aim::DragLook },
+    Button { idx: usize, act: Act, start: (f64, f64), last: (f64, f64), motion: crate::aim::DragLook },
 }
 
 struct Btn {
@@ -232,6 +237,7 @@ struct Overlay {
     loading: bool,
 
     safe: (f64, f64, f64, f64),
+    screen: (f64, f64),
     scale: f64,
     grips: HashMap<u64, Grip>,
     held: HashSet<&'static str>,
@@ -242,7 +248,9 @@ struct Overlay {
     lingering: bool,
     mouse: u8,
     aim_latched: bool,
-    nav: bool,
+    menu: crate::touch_gestures::MenuState,
+    pinch: crate::touch_gestures::Pinch,
+    pinching: bool,
     in_car: bool,
     hidden: bool,
 }
@@ -329,14 +337,14 @@ pub fn install(window: &Window) {
         BottomRight(dx, dy) => (sx + sw - dx * b_scale - b_ox, sy + sh - dy * b_scale - b_oy),
         TopLeft(dx, dy) => (sx + dx * b_scale, sy + dy * b_scale),
         TopRight(dx, dy) => (sx + sw - dx * b_scale, sy + dy * b_scale),
-        Nav(dx, dy) => (sx + sw / 2.0 + dx * b_scale, sy + 30.0 * b_scale + dy),
+        Nav(dx, dy) => (sx + sw / 2.0 + dx * nav_scale(sw), sy + 90.0 * b_scale + dy),
     };
     let buttons = BUTTONS
         .iter()
         .enumerate()
         .map(|(i, s)| {
             let (c_dx, c_dy, c_scale) = if i < 16 { custom_button_layout(i) } else { (0.0, 0.0, 1.0) };
-            let r = s.radius * b_scale * c_scale;
+            let r = s.radius * if s.nav { nav_scale(sw) } else { b_scale * c_scale };
             let mut center = place(s.anchor);
             center.0 += c_dx;
             center.1 += c_dy;
@@ -366,9 +374,10 @@ pub fn install(window: &Window) {
     set_hidden(&network_label, true);
     let mut o = Overlay {
         root, buttons, stick_base, stick_knob, stick_home, loading_label, network_label, loading: false, safe, scale,
+        screen: (full.width, full.height),
         grips: HashMap::new(), held: HashSet::new(), since: HashMap::new(),
         mouse_since: [std::time::Instant::now(); 2], lingering: false, mouse: 0, aim_latched: false,
-        nav: false, in_car: false, hidden: false,
+        menu: Default::default(), pinch: Default::default(), pinching: false, in_car: false, hidden: false,
     };
     o.relabel();
     eprintln!("[touch] overlay ready ({:.0}x{:.0} pt, safe area {:.0},{:.0} {:.0}x{:.0})", full.width, full.height, sx, sy, sw, sh);
@@ -376,7 +385,31 @@ pub fn install(window: &Window) {
 }
 
 impl Overlay {
+    fn direct_touch(&self) -> bool { self.menu.nav || self.menu.pause_requested }
+
+    fn pointer_at(&self, p: (f64, f64)) {
+        let (x, y) = crate::touch_gestures::pointer_position(p, self.screen, input::size());
+        input::mouse_pos(x, y);
+    }
+
+    fn pointer_distance(&self) -> Option<f64> {
+        let mut points = self.grips.values().filter_map(|g| match g {
+            Grip::Pointer { at } => Some(*at),
+            _ => None,
+        });
+        let a = points.next()?;
+        let b = points.next()?;
+        Some((a.0 - b.0).hypot(a.1 - b.1))
+    }
+
+    fn menu_changed(&mut self) {
+        self.release_all();
+        input::set_menu_touch(self.direct_touch());
+        self.relabel();
+    }
+
     fn is_wheel(&self, idx: usize) -> bool {
+        if BUTTONS[idx].nav { return false; }
         match self.spec_act(idx).map(|(_, a)| a) {
             Some(Key("Tab")) | Some(Key("AltLeft")) => true,
             Some(Key("KeyQ")) => self.in_car,
@@ -386,12 +419,12 @@ impl Overlay {
 
     fn spec_act(&self, idx: usize) -> Option<(&'static str, Act)> {
         let s = &BUTTONS[idx];
-        if self.nav {
+        if self.menu.nav {
             if s.nav {
                 return if self.in_car { s.in_car } else { s.on_foot };
             }
             match s.on_foot.map(|(_, a)| a) {
-                Some(Act::KeyNav("Escape")) | Some(Act::Home) => return s.on_foot,
+                Some(Act::KeyNav("Escape")) | Some(Act::NavToggle) => return s.on_foot,
                 _ => return None,
             }
         }
@@ -406,8 +439,8 @@ impl Overlay {
             set_hidden(&b.view, act.is_none());
             if let Some((text, _)) = act { set_text(&b.label, text); }
         }
-        set_hidden(&self.stick_base, self.nav);
-        set_hidden(&self.stick_knob, self.nav);
+        set_hidden(&self.stick_base, self.menu.nav);
+        set_hidden(&self.stick_knob, self.menu.nav);
         self.restyle();
     }
 
@@ -421,13 +454,13 @@ impl Overlay {
             BottomRight(dx, dy) => (sx + sw - dx * b_scale - b_ox, sy + sh - dy * b_scale - b_oy),
             TopLeft(dx, dy) => (sx + dx * b_scale, sy + dy * b_scale),
             TopRight(dx, dy) => (sx + sw - dx * b_scale, sy + dy * b_scale),
-            Nav(dx, dy) => (sx + sw / 2.0 + dx * b_scale, sy + 30.0 * b_scale + dy),
+            Nav(dx, dy) => (sx + sw / 2.0 + dx * nav_scale(sw), sy + 90.0 * b_scale + dy),
         };
 
         for (i, b) in self.buttons.iter_mut().enumerate() {
             let s = &BUTTONS[i];
             let (c_dx, c_dy, c_scale) = if i < 16 { custom_button_layout(i) } else { (0.0, 0.0, 1.0) };
-            b.radius = s.radius * b_scale * c_scale;
+            b.radius = s.radius * if s.nav { nav_scale(sw) } else { b_scale * c_scale };
             let mut center = place(s.anchor);
             center.0 += c_dx;
             center.1 += c_dy;
@@ -461,16 +494,19 @@ impl Overlay {
         let pressed: HashSet<usize> = self.grips.values().filter_map(|g| if let Grip::Button { idx, .. } = g { Some(*idx) } else { None }).collect();
         for (i, b) in self.buttons.iter().enumerate() {
             let latched = self.aim_latched && matches!(self.spec_act(i), Some((_, AimToggle)))
-                || self.nav && matches!(self.spec_act(i), Some((_, NavToggle)));
+                || self.menu.nav && matches!(self.spec_act(i), Some((_, NavToggle)));
             set_alpha_bg(&b.view, if pressed.contains(&i) { (base_alpha + 0.25).min(0.95) } else if latched { (base_alpha + 0.15).min(0.9) } else { base_alpha });
         }
     }
 
     fn button_at(&self, p: (f64, f64)) -> Option<usize> {
-        (0..self.buttons.len()).filter(|&i| self.spec_act(i).is_some()).find(|&i| {
+        (0..self.buttons.len()).filter(|&i| self.spec_act(i).is_some()).filter(|&i| {
             let b = &self.buttons[i];
-            let r = b.radius + 8.0;
+            let r = b.radius + if BUTTONS[i].nav { 0.0 } else { 8.0 };
             (p.0 - b.center.0).powi(2) + (p.1 - b.center.1).powi(2) <= r * r
+        }).min_by(|&a, &b| {
+            let distance = |i: usize| (p.0 - self.buttons[i].center.0).hypot(p.1 - self.buttons[i].center.1);
+            distance(a).total_cmp(&distance(b))
         })
     }
 
@@ -490,12 +526,20 @@ impl Overlay {
         match t.phase {
             TouchPhase::Started => {
                 if let Some(idx) = self.button_at(p) {
-                    self.grips.insert(t.id, Grip::Button { idx, start: p, last: p, motion: crate::aim::DragLook::new(p) });
-                    match self.spec_act(idx).map(|(_, a)| a) {
+                    let act = self.spec_act(idx).map(|(_, a)| a).unwrap();
+                    match Some(act) {
                         Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
-                        Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
-                        Some(KeyNav("Escape")) if self.nav => { self.nav = false; self.relabel(); }
-                        Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
+                        Some(NavToggle) => { self.menu.toggle_keys(); self.menu_changed(); }
+                        Some(KeyNav("Escape")) => {
+                            // Do not merge two Escape presses from rapid taps or two fingers.
+                            if self.held.contains("Escape") { return; }
+                            self.menu.pause();
+                            self.menu_changed();
+                        }
+                        Some(KeyNav(_)) if !self.menu.nav => {
+                            self.menu.nav = true;
+                            self.menu_changed();
+                        }
                         Some(Home) => {
                             #[cfg(target_os = "ios")]
                             {
@@ -509,13 +553,36 @@ impl Overlay {
                         }
                         _ => {}
                     }
-                } else if !self.nav && self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
+                    self.grips.insert(t.id, Grip::Button { idx, act, start: p, last: p, motion: crate::aim::DragLook::new(p) });
+                } else if self.direct_touch() {
+                    let count = self.grips.values().filter(|g| matches!(g, Grip::Pointer { .. })).count();
+                    if count < 2 {
+                        self.grips.insert(t.id, Grip::Pointer { at: p });
+                        if count == 0 && !self.pinching { self.pointer_at(p); }
+                        if count == 1 {
+                            self.pinching = true;
+                            self.pinch.reset();
+                            input::hide_touch_pointer();
+                        }
+                    }
+                } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
                     self.grips.insert(t.id, Grip::Stick { origin: p, at: p });
                 } else {
                     self.grips.insert(t.id, Grip::Look { motion: crate::aim::DragLook::new(p) });
                 }
             }
             TouchPhase::Moved => {
+                let before = self.pointer_distance();
+                if let Some(Grip::Pointer { at }) = self.grips.get_mut(&t.id) {
+                    *at = p;
+                    if let (Some(before), Some(after)) = (before, self.pointer_distance()) {
+                        input::wheel(self.pinch.update(before, after));
+                    } else if !self.pinching {
+                        self.pointer_at(p);
+                    }
+                    self.apply();
+                    return;
+                }
                 let wheel = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. }) if self.is_wheel(*idx));
                 let aimed = self.mouse & 2 != 0;
                 let camera_button = matches!(self.grips.get(&t.id), Some(Grip::Button { idx, .. })
@@ -525,22 +592,7 @@ impl Overlay {
                     Some(Grip::Button { last, .. }) if wheel => *last = p,
                     Some(Grip::Look { motion }) => {
                         let delta = motion.move_to(p);
-                        if self.nav {
-                            if delta.0 < -12.0 {
-                                input::key("ArrowLeft", true, false, None, false);
-                                input::key("ArrowLeft", false, false, None, false);
-                            } else if delta.0 > 12.0 {
-                                input::key("ArrowRight", true, false, None, false);
-                                input::key("ArrowRight", false, false, None, false);
-                            }
-                            if delta.1 < -12.0 {
-                                input::key("ArrowUp", true, false, None, false);
-                                input::key("ArrowUp", false, false, None, false);
-                            } else if delta.1 > 12.0 {
-                                input::key("ArrowDown", true, false, None, false);
-                                input::key("ArrowDown", false, false, None, false);
-                            }
-                        } else {
+                        if !self.menu.nav {
                             let (dx, dy) = crate::aim::scale_delta(delta, LOOK_GAIN * touch_sensitivity(), aimed, aim_sensitivity());
                             input::mouse_delta_f(dx, dy);
                         }
@@ -552,10 +604,20 @@ impl Overlay {
                             input::mouse_delta_f(dx, dy);
                         }
                     }
-                    None => {}
+                    Some(Grip::Pointer { .. }) | None => {}
                 }
             }
-            TouchPhase::Ended | TouchPhase::Cancelled => { self.grips.remove(&t.id); }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if matches!(self.grips.get(&t.id), Some(Grip::Pointer { .. })) && !self.pinching {
+                    self.pointer_at(p);
+                }
+                self.grips.remove(&t.id);
+                if !self.grips.values().any(|g| matches!(g, Grip::Pointer { .. })) {
+                    self.pinching = false;
+                    self.pinch.reset();
+                }
+                if t.phase == TouchPhase::Cancelled { self.mouse_since = [std::time::Instant::now() - MIN_HOLD; 2]; }
+            }
         }
         self.apply();
     }
@@ -568,7 +630,7 @@ impl Overlay {
         for g in self.grips.values() {
             match g {
                 Grip::Stick { origin, at } => stick = Some((*origin, *at)),
-                Grip::Button { idx, .. } => match self.spec_act(*idx).map(|(_, a)| a) {
+                Grip::Button { act, .. } => match Some(*act) {
                     Some(Key(k)) | Some(KeyNav(k)) => { keys.insert(k); }
                     Some(Mouse(bit)) => {
                         mouse |= bit;
@@ -579,6 +641,8 @@ impl Overlay {
                     _ => {}
                 },
                 Grip::Look { .. } => {}
+                Grip::Pointer { .. } if !self.pinching => mouse |= 1,
+                Grip::Pointer { .. } => {}
             }
         }
         if let Some((o, at)) = stick {
@@ -625,7 +689,8 @@ impl Overlay {
         }
         self.held = keys;
         for (i, (bit, dom)) in [(1u8, 0usize), (2, 2)].into_iter().enumerate() {
-            if self.mouse & bit != 0 && mouse & bit == 0 && now - self.mouse_since[i] < MOUSE_HOLD {
+            let hold = if self.direct_touch() { std::time::Duration::from_millis(80) } else { MOUSE_HOLD };
+            if !self.pinching && self.mouse & bit != 0 && mouse & bit == 0 && now - self.mouse_since[i] < hold {
                 mouse |= bit;
                 self.lingering = true;
             }
@@ -635,11 +700,16 @@ impl Overlay {
             }
         }
         self.mouse = mouse;
+        if self.direct_touch() && mouse == 0 && !self.grips.values().any(|g| matches!(g, Grip::Pointer { .. })) {
+            input::hide_touch_pointer();
+        }
         self.restyle();
     }
 
     fn release_all(&mut self) {
         self.grips.clear();
+        self.pinching = false;
+        self.pinch.reset();
         self.aim_latched = false;
         self.since.clear();
         self.mouse_since = [std::time::Instant::now() - MIN_HOLD; 2];
@@ -681,7 +751,8 @@ pub fn refresh() -> bool {
             set_hidden(&o.network_label, false);
         } else { set_hidden(&o.network_label, true); }
 
-        if !hide { input::set_locked(true); }
+        input::set_menu_touch(!hide && o.direct_touch());
+        if !hide { input::set_locked(!o.direct_touch()); }
         if !crate::gpu::SUSPENDED.load(std::sync::atomic::Ordering::Relaxed) { input::set_focus(true); }
         if hide != o.hidden {
             o.hidden = hide;

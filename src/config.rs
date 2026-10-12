@@ -63,11 +63,15 @@ pub fn validate_game_files() -> anyhow::Result<()> {
     let root = game_dir();
     let data_manifest = root.join("data/manifest.json");
     anyhow::ensure!(data_manifest.is_file(), "Game data is missing. Import a complete compatible game.zip");
+    // Validate old imports too, before streaming starts, and give HTTPFS the
+    // reconciled manifest rather than the stale sizes in the original ZIP.
+    let manifest = crate::game_data::load_manifest(&root.join("data"))?;
     let build = build_dir(&root).context("Missing shader pack")?;
     let index = build.join("shaders/index.json");
     anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");
     let shaders: serde_json::Value = serde_json::from_slice(&std::fs::read(index)?).context("Invalid shader index")?;
     anyhow::ensure!(shaders.as_object().is_some_and(|o| !o.is_empty()), "Shader pack is empty");
+    let _ = crate::game_data::RUNTIME_MANIFEST.set(std::sync::Arc::from(serde_json::to_vec(&manifest)?));
     eprintln!("[config] verified game manifest and shader pack");
     Ok(())
 }

@@ -3,6 +3,7 @@
 
 mod app;
 mod aim;
+mod touch_gestures;
 mod audio;
 mod config;
 mod diagnostics;
@@ -313,16 +314,18 @@ fn compile_patched(engine: &Engine, wasm_path: &std::path::Path) -> Result<Modul
     Module::new(engine, &patched).map_err(anyhow::Error::from).context("compile module")
 }
 
-const IOS_HEAP_MAX: u64 = 3072 * performance::MIB;
 fn heap_type(mt: MemoryType) -> Result<MemoryType> {
     if !ios_memory() {
         return Ok(mt);
     }
     let page = 1u64 << mt.page_size_log2();
     let min_bytes = mt.minimum() * page;
-    let budget = performance::heap_budget(performance::physical_memory(), performance::available_memory(), min_bytes);
-    let cap = (budget.min(IOS_HEAP_MAX) / page).max(mt.minimum());
-    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum()).min(IOS_HEAP_MAX / page);
+    anyhow::ensure!(min_bytes <= performance::IOS_HEAP_MAX,
+        "Game requires {} MB of initial memory, above the iOS {} MB heap limit. Use a compatible game build",
+        min_bytes >> 20, performance::IOS_HEAP_MAX >> 20);
+    let budget = performance::ios_heap_budget(performance::physical_memory(), performance::available_memory(), min_bytes);
+    let cap = (budget / page).max(mt.minimum());
+    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum());
     eprintln!("[host] adaptive game heap limit {} MB (iOS safe ceiling)", max * page >> 20);
     MemoryTypeBuilder::new()
         .min(mt.minimum())

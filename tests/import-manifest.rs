@@ -86,3 +86,16 @@ fn an_incomplete_archive_preserves_the_previous_game() {
     assert_eq!(std::fs::read(dest.join("previous-game")).unwrap(), b"preserve me");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_zip_without_its_directory_preserves_installed_data_and_explains_recovery() {
+    let root = fixture();
+    let dest = root.join("game");
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(dest.join("previous-game"), b"preserve me").unwrap();
+    std::fs::write(root.join("truncated.zip"), b"PK\x03\x04truncated").unwrap();
+    let error = import::import(&root.join("truncated.zip"), &dest, false, |_, _| {}).unwrap_err();
+    assert!(error.to_string().contains("Download the complete game.zip"));
+    assert_eq!(std::fs::read(dest.join("previous-game")).unwrap(), b"preserve me");
+    std::fs::remove_dir_all(root).unwrap();
+}
