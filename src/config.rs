@@ -59,13 +59,17 @@ fn build_dir(root: &Path) -> Option<PathBuf> {
 }
 
 pub fn validate_game_files() -> anyhow::Result<()> {
+    validate_game_files_with_progress(|_, _| {})
+}
+
+pub fn validate_game_files_with_progress(progress: impl FnMut(usize, usize)) -> anyhow::Result<()> {
     use anyhow::Context;
     let root = game_dir();
     let data_manifest = root.join("data/manifest.json");
     anyhow::ensure!(data_manifest.is_file(), "Game data is missing. Import a complete compatible game.zip");
     // Validate old imports too, before streaming starts, and give HTTPFS the
     // reconciled manifest rather than the stale sizes in the original ZIP.
-    let manifest = crate::game_data::load_manifest(&root.join("data"))?;
+    let manifest = crate::game_data::load_manifest_with_progress(&root.join("data"), progress)?;
     let build = build_dir(&root).context("Missing shader pack")?;
     let index = build.join("shaders/index.json");
     anyhow::ensure!(std::fs::metadata(&index)?.len() <= 64 << 20, "Shader index is too large");

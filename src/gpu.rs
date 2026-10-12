@@ -60,6 +60,7 @@ pub fn start(mem: &SharedMemory, ring: u64, size: u64, dbg: u64) {
                 Ok(g) => g,
                 Err(e) => {
                     log(&format!("init failed: {e:#}"));
+                    crate::app::engine_error(format!("Cannot initialize graphics: {e:#}"));
                     drain_forever(&mem, ring);
                 }
             };

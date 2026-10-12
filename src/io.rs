@@ -18,14 +18,7 @@ pub fn data_dir() -> PathBuf {
 }
 
 fn manifest_files() -> Vec<(String, u64)> {
-    let text = std::fs::read_to_string(data_dir().join("manifest.json")).expect("manifest.json");
-    let v: serde_json::Value = serde_json::from_str(&text).expect("manifest json");
-    v["files"]
-        .as_array()
-        .expect("files")
-        .iter()
-        .map(|f| (f[0].as_str().unwrap_or("").to_string(), f[1].as_u64().unwrap_or(0)))
-        .collect()
+    crate::game_data::runtime_files(&data_dir()).expect("validated runtime manifest")
 }
 
 fn atomic_i32(mem: &SharedMemory, addr: u64) -> &AtomicI32 {

@@ -9,7 +9,6 @@ pub struct MenuState {
 impl MenuState {
     pub fn pause(&mut self) {
         self.pause_requested = !self.pause_requested;
-        self.nav = self.pause_requested;
     }
 
     pub fn toggle_keys(&mut self) {
@@ -46,14 +45,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pause_closes_even_after_menu_keys_were_hidden() {
+    fn pause_and_menu_keys_are_independent() {
         let mut state = MenuState::default();
         state.pause();
+        assert!(!state.nav && state.pause_requested);
+        state.toggle_keys();
         assert!(state.nav && state.pause_requested);
         state.toggle_keys();
         assert!(!state.nav && state.pause_requested);
         state.pause();
         assert!(!state.nav && !state.pause_requested);
+    }
+
+    #[test]
+    fn pause_preserves_explicit_menu_keys_selection() {
+        let mut state = MenuState::default();
+        state.toggle_keys();
+        state.pause();
+        state.pause();
+        assert!(state.nav && !state.pause_requested);
     }
 
     #[test]

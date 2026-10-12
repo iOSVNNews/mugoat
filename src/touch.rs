@@ -65,7 +65,7 @@ const BUTTONS: &[Spec] = &[
     b(TopRight(192.0, 30.0), 22.0, Some(("CAM", Key("KeyV"))), Some(("CAM", Key("KeyV")))),
     b(TopRight(246.0, 30.0), 22.0, Some(("MENU", Home)), Some(("MENU", Home))),
     b(TopLeft(30.0, 30.0), 22.0, Some(("PAUSE", KeyNav("Escape"))), Some(("PAUSE", KeyNav("Escape")))),
-    b(TopLeft(84.0, 30.0), 22.0, Some(("PHONE", KeyNav("ArrowUp"))), Some(("PHONE", KeyNav("ArrowUp")))),
+    b(TopLeft(84.0, 30.0), 22.0, Some(("PHONE", Key("ArrowUp"))), Some(("PHONE", Key("ArrowUp")))),
     b(TopLeft(138.0, 30.0), 22.0, Some(("MENU\nKEYS", NavToggle)), Some(("MENU\nKEYS", NavToggle))),
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
     b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
@@ -424,9 +424,15 @@ impl Overlay {
                 return if self.in_car { s.in_car } else { s.on_foot };
             }
             match s.on_foot.map(|(_, a)| a) {
-                Some(Act::KeyNav("Escape")) | Some(Act::NavToggle) => return s.on_foot,
+                Some(Act::KeyNav("Escape")) | Some(Act::Key("ArrowUp")) | Some(Act::NavToggle) => return s.on_foot,
                 _ => return None,
             }
+        }
+        if self.menu.pause_requested {
+            return match s.on_foot.map(|(_, a)| a) {
+                Some(KeyNav("Escape")) | Some(NavToggle) => s.on_foot,
+                _ => None,
+            };
         }
         if s.nav { return None; }
         if self.in_car { s.in_car } else { s.on_foot }
@@ -439,8 +445,8 @@ impl Overlay {
             set_hidden(&b.view, act.is_none());
             if let Some((text, _)) = act { set_text(&b.label, text); }
         }
-        set_hidden(&self.stick_base, self.menu.nav);
-        set_hidden(&self.stick_knob, self.menu.nav);
+        set_hidden(&self.stick_base, self.direct_touch());
+        set_hidden(&self.stick_knob, self.direct_touch());
         self.restyle();
     }
 
@@ -534,10 +540,6 @@ impl Overlay {
                             // Do not merge two Escape presses from rapid taps or two fingers.
                             if self.held.contains("Escape") { return; }
                             self.menu.pause();
-                            self.menu_changed();
-                        }
-                        Some(KeyNav(_)) if !self.menu.nav => {
-                            self.menu.nav = true;
                             self.menu_changed();
                         }
                         Some(Home) => {
@@ -720,7 +722,7 @@ impl Overlay {
 pub fn touch(t: &Touch) {
     OVERLAY.with(|cell| {
         if let Some(o) = cell.borrow_mut().as_mut() {
-            if !o.hidden { o.touch(t); }
+            if !o.hidden && !o.loading { o.touch(t); }
         }
     });
 }

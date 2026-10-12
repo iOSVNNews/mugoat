@@ -1471,8 +1471,11 @@ public func muguetShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done
     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
     weak var sheet: UIViewController?
     let host = UIHostingController(rootView: LauncherView(isOverlay: false, play: {
-        sheet?.dismiss(animated: true)
-        done()
+        if let sheet {
+            sheet.dismiss(animated: true, completion: { done() })
+        } else {
+            done()
+        }
     }))
     sheet = host
     host.modalPresentationStyle = .fullScreen

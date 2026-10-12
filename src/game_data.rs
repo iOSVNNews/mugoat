@@ -6,6 +6,23 @@ use std::sync::{Arc, OnceLock};
 pub const SKIPPED_DIRS: &[&str] = &["env_test", "verityradio"];
 pub static RUNTIME_MANIFEST: OnceLock<Arc<[u8]>> = OnceLock::new();
 
+// HTTPFS and native I/O must use this exact snapshot: IDs are array indices.
+pub fn runtime_manifest(data: &Path) -> Result<Arc<[u8]>> {
+    if let Some(bytes) = RUNTIME_MANIFEST.get() { return Ok(bytes.clone()); }
+    std::fs::read(data.join("manifest.json")).map(Arc::from).context("Cannot read runtime manifest")
+}
+
+pub fn runtime_files(data: &Path) -> Result<Vec<(String, u64)>> {
+    let bytes = runtime_manifest(data)?;
+    let manifest: Value = serde_json::from_slice(&bytes).context("Invalid runtime manifest")?;
+    manifest.get("files").and_then(Value::as_array).context("Runtime manifest has no files")?
+        .iter().map(|record| {
+            let name = record.get(0).and_then(Value::as_str).context("Invalid runtime file name")?;
+            let size = record.get(1).and_then(Value::as_u64).context("Invalid runtime file size")?;
+            Ok((name.to_owned(), size))
+        }).collect()
+}
+
 fn optional_web_document(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.starts_with("common/non_final/www/")
@@ -16,6 +33,10 @@ fn optional_web_document(name: &str) -> bool {
 // normalize its text/line endings, while leaving the original manifest sizes.
 // Keep the manifest supplied to the engine consistent with the files on disk.
 pub fn load_manifest(data: &Path) -> Result<Value> {
+    load_manifest_with_progress(data, |_, _| {})
+}
+
+pub fn load_manifest_with_progress(data: &Path, mut progress: impl FnMut(usize, usize)) -> Result<Value> {
     let path = data.join("manifest.json");
     anyhow::ensure!(std::fs::metadata(&path)?.len() <= 64 << 20, "Game manifest is too large");
     let mut manifest: Value = serde_json::from_slice(&std::fs::read(path)?).context("Invalid game manifest")?;
@@ -23,7 +44,10 @@ pub fn load_manifest(data: &Path) -> Result<Value> {
     anyhow::ensure!(!files.is_empty(), "Game data is empty. Import a complete compatible game.zip");
     let mut kept = Vec::with_capacity(files.len());
     let mut adjusted = 0;
-    for mut record in files.drain(..) {
+    let total = files.len();
+    progress(0, total);
+    for (index, mut record) in files.drain(..).enumerate() {
+        if index % 512 == 0 { progress(index, total); }
         let name = record.get(0).and_then(Value::as_str).context("Invalid file in game manifest")?.to_owned();
         let size = record.get(1).and_then(Value::as_u64).context("Invalid size in game manifest")?;
         let relative = Path::new(&name);
@@ -52,6 +76,7 @@ pub fn load_manifest(data: &Path) -> Result<Value> {
     }
     anyhow::ensure!(!kept.is_empty(), "Game data contains no runtime files. Import a complete compatible game.zip");
     *files = kept;
+    progress(total, total);
     if adjusted != 0 { eprintln!("[config] reconciled {adjusted} optional or modified manifest entries"); }
     Ok(manifest)
 }

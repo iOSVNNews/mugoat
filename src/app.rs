@@ -13,6 +13,17 @@ use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 const TITLE: &str = "Muguet";
 const PICK_TITLE: &str = "Muguet — loading: press Enter for Story Mode, or Space then 5 for Sandbox";
 static ENGINE_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static STARTUP_STATUS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn startup_status(message: impl Into<String>) {
+    let message = message.into();
+    eprintln!("[startup] {message}");
+    *STARTUP_STATUS.lock().unwrap() = Some(message);
+}
+
+pub(crate) fn engine_error(message: String) {
+    *ENGINE_ERROR.lock().unwrap() = Some(message);
+}
 
 struct App {
     mode_chosen: bool,
@@ -22,6 +33,9 @@ struct App {
     window: Option<Arc<Window>>,
     started: bool,
     runtime_rx: Option<std::sync::mpsc::Receiver<Result<Arc<Runtime>, String>>>,
+    startup_since: Option<std::time::Instant>,
+    startup_stage: String,
+    startup_warning_shown: bool,
 
     #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
     launcher_shown: bool,
@@ -167,7 +181,13 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Some(message) = STARTUP_STATUS.lock().unwrap().take() {
+            self.startup_stage = message;
+            #[cfg(target_os = "ios")]
+            if self.startup_since.is_some() { crate::touch::loading(Some(&self.startup_stage)); }
+        }
         if let Some(message) = ENGINE_ERROR.lock().unwrap().take() {
+            self.startup_since = None;
             gpu::SUSPENDED.store(true, std::sync::atomic::Ordering::Relaxed);
             input::set_focus(false);
             #[cfg(target_os = "ios")]
@@ -177,23 +197,38 @@ impl ApplicationHandler for App {
             match rx.try_recv() {
                 Ok(Ok(rt)) => {
                     self.runtime_rx = None;
-                    #[cfg(target_os = "ios")]
-                    crate::touch::loading(None);
                     self.rt = Some(rt.clone());
                     self.launch_engine(rt);
                 }
                 Ok(Err(message)) => {
                     self.runtime_rx = None;
+                    self.startup_since = None;
                     eprintln!("[host] startup failed: {message}");
                     #[cfg(target_os = "ios")]
                     crate::touch::loading(Some(&format!("Could not start game\n{message}\nDetails: Files → Muguet → muguet-runtime.log")));
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.runtime_rx = None;
+                    self.startup_since = None;
                     #[cfg(target_os = "ios")]
                     crate::touch::loading(Some("Runtime preparation failed. Reopen Muguet and share its diagnostic log."));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(since) = self.startup_since {
+            if gpu::PRESENTS.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+                eprintln!("[startup] first displayed frame after {:.2}s", since.elapsed().as_secs_f64());
+                self.startup_since = None;
+                #[cfg(target_os = "ios")]
+                crate::touch::loading(None);
+            } else if since.elapsed().as_secs() >= 45 && !self.startup_warning_shown {
+                self.startup_warning_shown = true;
+                eprintln!("[startup] still waiting for first frame: {} (GPU started={}, occluded={}, suspended={})",
+                    self.startup_stage, gpu::STARTED.load(std::sync::atomic::Ordering::Relaxed),
+                    gpu::OCCLUDED.load(std::sync::atomic::Ordering::Relaxed), gpu::SUSPENDED.load(std::sync::atomic::Ordering::Relaxed));
+                #[cfg(target_os = "ios")]
+                crate::touch::loading(Some(&format!("{}\nChưa có hình ảnh sau 45 giây. Game vẫn đang khởi động.\nNếu không tiếp tục, mở lại Muguet và chia sẻ muguet-runtime.log.", self.startup_stage)));
             }
         }
         #[allow(unused_mut)]
@@ -225,6 +260,10 @@ impl App {
         if self.window.is_none() { return; }
         if self.started { return; }
         self.started = true;
+        self.startup_since = Some(std::time::Instant::now());
+        self.startup_stage = "Đang kiểm tra dữ liệu game…".into();
+        #[cfg(target_os = "ios")]
+        crate::touch::loading(Some(&self.startup_stage));
         #[cfg(target_os = "ios")]
         if let Some(rt) = self.rt.clone() { self.launch_engine(rt); return; }
         let startup = crate::config::Startup {
@@ -234,11 +273,21 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.runtime_rx = Some(rx);
         let result = std::thread::Builder::new().name("runtime-loader".into()).stack_size(8 << 20).spawn(move || {
-            let result = crate::config::validate_game_files().and_then(|()| crate::make_runtime(&startup)).map_err(|e| format!("{e:#}"));
+            let mut reported = std::time::Instant::now();
+            let result = crate::config::validate_game_files_with_progress(|done, total| {
+                if done == 0 || done == total || reported.elapsed().as_millis() >= 500 {
+                    startup_status(format!("Đang kiểm tra dữ liệu game: {done}/{total} tệp…"));
+                    reported = std::time::Instant::now();
+                }
+            }).and_then(|()| {
+                startup_status("Đang nạp runtime game…");
+                crate::make_runtime(&startup)
+            }).map_err(|e| format!("{e:#}"));
             let _ = tx.send(result);
         });
         if let Err(e) = result {
             self.runtime_rx = None;
+            self.startup_since = None;
             eprintln!("[host] cannot prepare runtime: {e}");
             #[cfg(target_os = "ios")]
             crate::touch::loading(Some("Unable to prepare runtime. Reopen Muguet and use lower graphics settings."));
@@ -319,7 +368,9 @@ impl App {
 pub fn run(rt: Option<Arc<Runtime>>, startup: crate::config::Startup, args: Vec<String>) -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None, launcher_shown: false, locked: cfg!(target_os = "ios"), mods: ModifiersState::empty(), wheel_accum: 0.0 };
+    let mut app = App { mode_chosen: false, rt, startup, args, window: None, started: false, runtime_rx: None,
+        startup_since: None, startup_stage: String::new(), startup_warning_shown: false,
+        launcher_shown: false, locked: cfg!(target_os = "ios"), mods: ModifiersState::empty(), wheel_accum: 0.0 };
     event_loop.run_app(&mut app)?;
     Ok(())
 }

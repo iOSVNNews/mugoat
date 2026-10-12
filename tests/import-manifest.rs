@@ -99,3 +99,35 @@ fn a_zip_without_its_directory_preserves_installed_data_and_explains_recovery() 
     assert_eq!(std::fs::read(dest.join("previous-game")).unwrap(), b"preserve me");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn httpfs_and_native_io_use_identical_ids_after_optional_entries_are_removed() {
+    let data = fixture();
+    std::fs::write(data.join("manifest.json"),
+        r#"{"files":[["common/non_final/www/missing.html",10],["required.rpf",4]]}"#).unwrap();
+    std::fs::write(data.join("required.rpf"), b"RPF7").unwrap();
+    let normalized = game_data::load_manifest(&data).unwrap();
+    game_data::RUNTIME_MANIFEST.set(std::sync::Arc::from(serde_json::to_vec(&normalized).unwrap())).unwrap();
+    let httpfs: serde_json::Value = serde_json::from_slice(&game_data::runtime_manifest(&data).unwrap()).unwrap();
+    let io_files = game_data::runtime_files(&data).unwrap();
+    assert_eq!(io_files.len(), 1);
+    assert_eq!(io_files[0], ("required.rpf".to_owned(), 4));
+    assert_eq!(httpfs["files"][0][0], io_files[0].0);
+    assert_eq!(httpfs["files"][0][1], io_files[0].1);
+    // The stale manifest on disk still has the optional file at ID 0.
+    let old: serde_json::Value = serde_json::from_slice(&std::fs::read(data.join("manifest.json")).unwrap()).unwrap();
+    assert_ne!(old["files"][0][0], httpfs["files"][0][0]);
+    std::fs::remove_dir_all(data).unwrap();
+}
+
+#[test]
+fn manifest_validation_reports_progress_without_skipping_required_files() {
+    let data = fixture();
+    std::fs::write(data.join("manifest.json"), r#"{"files":[["required.rpf",4]]}"#).unwrap();
+    std::fs::write(data.join("required.rpf"), b"RPF7").unwrap();
+    let mut progress = Vec::new();
+    game_data::load_manifest_with_progress(&data, |done, total| progress.push((done, total))).unwrap();
+    assert_eq!(progress.first(), Some(&(0, 1)));
+    assert_eq!(progress.last(), Some(&(1, 1)));
+    std::fs::remove_dir_all(data).unwrap();
+}
