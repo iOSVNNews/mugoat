@@ -486,6 +486,7 @@ struct HUDEditorView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+                .allowsHitTesting(false)
                 .animation(.easeInOut(duration: 0.25), value: isCollapsed)
                 .animation(.easeInOut(duration: 0.25), value: manualDockTop)
                 .animation(.easeInOut(duration: 0.25), value: selectedId)
@@ -514,9 +515,7 @@ struct HUDEditorView: View {
 
     private func shouldDockTop(in geo: GeometryProxy) -> Bool {
         if let manual = manualDockTop { return manual }
-        let currentDef = HUD_BUTTON_DEFS.first(where: { $0.id == selectedId }) ?? HUD_BUTTON_DEFS[0]
-        let pos = buttonCenter(for: currentDef, in: geo)
-        return pos.y > (geo.size.height / 2.0)
+        return false
     }
 
     private func editorToolbar(geo: GeometryProxy, isTop: Bool) -> some View {
@@ -581,6 +580,7 @@ struct HUDEditorView: View {
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .allowsHitTesting(true)
     }
 
     private func collapsedBar(geo: GeometryProxy, isTop: Bool) -> some View {
@@ -617,6 +617,7 @@ struct HUDEditorView: View {
         .background(.ultraThinMaterial)
         .clipShape(Capsule())
         .shadow(radius: 6)
+        .allowsHitTesting(true)
     }
 
     private var selectedButtonControls: some View {
@@ -711,13 +712,15 @@ struct HUDEditorView: View {
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .allowsHitTesting(true)
     }
 
     private func renderButton(_ def: HUDButtonDef, in geo: GeometryProxy) -> some View {
         let isSelected = (selectedId == def.id)
         let pos = buttonCenter(for: def, in: geo)
-        let scale = CGFloat(scales[def.id] ?? 1.0)
-        let radius = def.baseRadius * CGFloat(settings.buttonScale) * scale
+        let bScale = CGFloat(settings.buttonScale)
+        let cScale = CGFloat(scales[def.id] ?? 1.0)
+        let radius = def.baseRadius * bScale * cScale
         let diameter = radius * 2.0
 
         return ZStack {
@@ -727,28 +730,25 @@ struct HUDEditorView: View {
                     .background(Circle().fill(Color.white.opacity(0.12)))
                     .frame(width: diameter, height: diameter)
                 Circle()
-                    .fill(isSelected ? Color.yellow.opacity(0.6) : Color.white.opacity(0.35))
-                    .frame(width: diameter * 0.45, height: diameter * 0.45)
+                    .fill(isSelected ? Color.yellow.opacity(0.7) : Color.white.opacity(0.35))
+                    .frame(width: diameter * (26.0 / 58.0), height: diameter * (26.0 / 58.0))
             } else {
                 Circle()
                     .stroke(isSelected ? Color.yellow : Color.white.opacity(0.4), lineWidth: isSelected ? 3 : 1.5)
-                    .background(Circle().fill(isSelected ? Color.blue.opacity(0.4) : Color.white.opacity(settings.buttonOpacity)))
+                    .background(Circle().fill(isSelected ? Color.white.opacity(0.45) : Color.white.opacity(settings.buttonOpacity)))
                     .frame(width: diameter, height: diameter)
-                    .shadow(color: isSelected ? Color.yellow.opacity(0.8) : Color.clear, radius: 8)
+                    .shadow(color: isSelected ? Color.yellow.opacity(0.8) : Color.black.opacity(0.3), radius: isSelected ? 6 : 2)
 
                 Text(def.label)
-                    .font(.system(size: max(8, radius * 0.38), weight: .bold))
-                    .foregroundColor(.white.opacity(0.95))
+                    .font(.system(size: max(8, min(16, radius * 0.42)), weight: .bold))
+                    .foregroundColor(Color.white.opacity(0.95))
                     .multilineTextAlignment(.center)
             }
         }
         .position(x: pos.x, y: pos.y)
-        .contentShape(Circle().scale(1.2))
-        .onTapGesture {
-            selectedId = def.id
-        }
+        .contentShape(Circle().scale(1.3))
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     if selectedId != def.id {
                         selectedId = def.id
@@ -769,43 +769,41 @@ struct HUDEditorView: View {
     }
 
     private func buttonCenter(for def: HUDButtonDef, in geo: GeometryProxy) -> CGPoint {
-        let safe = geo.safeAreaInsets
-        let sx = safe.leading
-        let sy = safe.top
-        let sw = geo.size.width - safe.leading - safe.trailing
-        let sh = geo.size.height - safe.top - safe.bottom
+        let sw = geo.size.width
+        let sh = geo.size.height
 
+        let bScale = CGFloat(settings.buttonScale)
         let bOx = CGFloat(settings.buttonOffsetX)
         let bOy = CGFloat(settings.buttonOffsetY)
 
-        var baseX: CGFloat = 0
-        var baseY: CGFloat = 0
+        let saved = offsets[def.id] ?? .zero
+        let currentDrag = (draggingId == def.id) ? dragTranslation : .zero
+        let cDx = saved.width + currentDrag.width
+        let cDy = saved.height + currentDrag.height
+        let cScale = CGFloat(scales[def.id] ?? 1.0)
+
+        var x: CGFloat = 0
+        var y: CGFloat = 0
 
         switch def.anchorType {
         case .bottomRight:
-            baseX = sx + sw - def.baseOffset.x + bOx
-            baseY = sy + sh - def.baseOffset.y + bOy
+            x = sw - def.baseOffset.x * bScale - bOx + cDx
+            y = sh - def.baseOffset.y * bScale - bOy + cDy
         case .topRight:
-            baseX = sx + sw - def.baseOffset.x + bOx
-            baseY = sy + def.baseOffset.y + bOy
+            x = sw - def.baseOffset.x * bScale + cDx
+            y = def.baseOffset.y * bScale + cDy
         case .topLeft:
-            baseX = sx + def.baseOffset.x + bOx
-            baseY = sy + def.baseOffset.y + bOy
+            x = def.baseOffset.x * bScale + cDx
+            y = def.baseOffset.y * bScale + cDy
         case .stick:
             let sOx = CGFloat(settings.stickOffsetX)
             let sOy = CGFloat(settings.stickOffsetY)
-            let sRadius: CGFloat = 55.0 * CGFloat(settings.buttonScale)
-            baseX = sx + 40.0 + sRadius + sOx
-            baseY = sy + sh - 30.0 - sRadius - sOy
+            let stickRadius = 58.0 * bScale * cScale
+            x = 40.0 + stickRadius + sOx + cDx
+            y = sh - 30.0 - stickRadius - sOy + cDy
         }
 
-        let saved = offsets[def.id] ?? .zero
-        let currentDrag = (draggingId == def.id) ? dragTranslation : .zero
-
-        return CGPoint(
-            x: baseX + saved.width + currentDrag.width,
-            y: baseY + saved.height + currentDrag.height
-        )
+        return CGPoint(x: x, y: y)
     }
 
     private func loadLayout() {

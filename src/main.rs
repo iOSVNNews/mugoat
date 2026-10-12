@@ -313,7 +313,7 @@ fn compile_patched(engine: &Engine, wasm_path: &std::path::Path) -> Result<Modul
     Module::new(engine, &patched).map_err(anyhow::Error::from).context("compile module")
 }
 
-const IOS_HEAP_MAX: u64 = performance::HEAP_CEILING;
+const IOS_HEAP_MAX: u64 = 3072 * performance::MIB;
 fn heap_type(mt: MemoryType) -> Result<MemoryType> {
     if !ios_memory() {
         return Ok(mt);
@@ -322,8 +322,8 @@ fn heap_type(mt: MemoryType) -> Result<MemoryType> {
     let min_bytes = mt.minimum() * page;
     let budget = performance::heap_budget(performance::physical_memory(), performance::available_memory(), min_bytes);
     let cap = (budget.min(IOS_HEAP_MAX) / page).max(mt.minimum());
-    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum());
-    eprintln!("[host] adaptive game heap limit {} MB (16 GB ceiling)", max * page >> 20);
+    let max = mt.maximum().map(|m| m.min(cap)).unwrap_or(cap).max(mt.minimum()).min(IOS_HEAP_MAX / page);
+    eprintln!("[host] adaptive game heap limit {} MB (iOS safe ceiling)", max * page >> 20);
     MemoryTypeBuilder::new()
         .min(mt.minimum())
         .max(Some(max))

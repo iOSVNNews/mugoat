@@ -70,14 +70,14 @@ const BUTTONS: &[Spec] = &[
     b(TopLeft(192.0, 30.0), 22.0, Some(("SWITCH", Key("AltLeft"))), Some(("SWITCH", Key("AltLeft")))),
     b(TopLeft(246.0, 30.0), 22.0, Some(("1ST\nPOV", FirstPerson)), Some(("1ST\nPOV", FirstPerson))),
     b(TopLeft(45.0, 112.0), 29.0, Some(("FIRE", Mouse(1))), None),
-    n(-185.0, "TAB ◀", "KeyQ"),
-    n(-135.0, "◀", "ArrowLeft"),
-    n(-87.0, "▲", "ArrowUp"),
-    n(-39.0, "▼", "ArrowDown"),
-    n(9.0, "▶", "ArrowRight"),
-    n(63.0, "OK", "Enter"),
-    n(117.0, "BACK", "Backspace"),
-    n(175.0, "TAB ▶", "KeyE"),
+    n(-140.0, "TAB ◀", "KeyQ"),
+    n(-100.0, "◀", "ArrowLeft"),
+    n(-60.0, "▲", "ArrowUp"),
+    n(-20.0, "▼", "ArrowDown"),
+    n(20.0, "▶", "ArrowRight"),
+    n(60.0, "OK", "Enter"),
+    n(100.0, "BACK", "Backspace"),
+    n(140.0, "TAB ▶", "KeyE"),
 ];
 
 const STICK_RADIUS: f64 = 58.0;
@@ -335,7 +335,7 @@ pub fn install(window: &Window) {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let (c_dx, c_dy, c_scale) = custom_button_layout(i);
+            let (c_dx, c_dy, c_scale) = if i < 16 { custom_button_layout(i) } else { (0.0, 0.0, 1.0) };
             let r = s.radius * b_scale * c_scale;
             let mut center = place(s.anchor);
             center.0 += c_dx;
@@ -386,7 +386,16 @@ impl Overlay {
 
     fn spec_act(&self, idx: usize) -> Option<(&'static str, Act)> {
         let s = &BUTTONS[idx];
-        if s.nav && !self.nav { return None; }
+        if self.nav {
+            if s.nav {
+                return if self.in_car { s.in_car } else { s.on_foot };
+            }
+            match s.on_foot.map(|(_, a)| a) {
+                Some(Act::KeyNav("Escape")) | Some(Act::Home) => return s.on_foot,
+                _ => return None,
+            }
+        }
+        if s.nav { return None; }
         if self.in_car { s.in_car } else { s.on_foot }
     }
 
@@ -397,6 +406,8 @@ impl Overlay {
             set_hidden(&b.view, act.is_none());
             if let Some((text, _)) = act { set_text(&b.label, text); }
         }
+        set_hidden(&self.stick_base, self.nav);
+        set_hidden(&self.stick_knob, self.nav);
         self.restyle();
     }
 
@@ -415,7 +426,7 @@ impl Overlay {
 
         for (i, b) in self.buttons.iter_mut().enumerate() {
             let s = &BUTTONS[i];
-            let (c_dx, c_dy, c_scale) = custom_button_layout(i);
+            let (c_dx, c_dy, c_scale) = if i < 16 { custom_button_layout(i) } else { (0.0, 0.0, 1.0) };
             b.radius = s.radius * b_scale * c_scale;
             let mut center = place(s.anchor);
             center.0 += c_dx;
@@ -483,6 +494,7 @@ impl Overlay {
                     match self.spec_act(idx).map(|(_, a)| a) {
                         Some(AimToggle) if !hold_aim() => self.aim_latched = !self.aim_latched,
                         Some(NavToggle) => { self.nav = !self.nav; self.relabel(); }
+                        Some(KeyNav("Escape")) if self.nav => { self.nav = false; self.relabel(); }
                         Some(KeyNav(_)) if !self.nav => { self.nav = true; self.relabel(); }
                         Some(Home) => {
                             #[cfg(target_os = "ios")]
@@ -497,7 +509,7 @@ impl Overlay {
                         }
                         _ => {}
                     }
-                } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
+                } else if !self.nav && self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
                     self.grips.insert(t.id, Grip::Stick { origin: p, at: p });
                 } else {
                     self.grips.insert(t.id, Grip::Look { motion: crate::aim::DragLook::new(p) });
