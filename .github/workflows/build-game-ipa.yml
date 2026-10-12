@@ -73,6 +73,8 @@ jobs:
           "$RUNNER_TEMP/aim-tests"
           rustc --edition=2021 --test src/touch_gestures.rs -o "$RUNNER_TEMP/touch-tests"
           "$RUNNER_TEMP/touch-tests"
+          rustc --edition=2021 --cfg 'target_os="ios"' -Aexplicit_builtin_cfgs_in_flags --test tests/input-bridge.rs -o "$RUNNER_TEMP/input-tests"
+          "$RUNNER_TEMP/input-tests"
 
       - name: Build the host compiler
         working-directory: source

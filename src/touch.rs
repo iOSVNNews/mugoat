@@ -402,6 +402,16 @@ impl Overlay {
         Some((a.0 - b.0).hypot(a.1 - b.1))
     }
 
+    fn pointer_center(&self) -> Option<(f64, f64)> {
+        let mut points = self.grips.values().filter_map(|g| match g {
+            Grip::Pointer { at } => Some(*at),
+            _ => None,
+        });
+        let a = points.next()?;
+        let b = points.next().unwrap_or(a);
+        Some(((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0))
+    }
+
     fn menu_changed(&mut self) {
         self.release_all();
         input::set_menu_touch(self.direct_touch());
@@ -560,11 +570,17 @@ impl Overlay {
                     let count = self.grips.values().filter(|g| matches!(g, Grip::Pointer { .. })).count();
                     if count < 2 {
                         self.grips.insert(t.id, Grip::Pointer { at: p });
-                        if count == 0 && !self.pinching { self.pointer_at(p); }
+                        if count == 0 && !self.pinching {
+                            self.pointer_at(p);
+                            eprintln!("[touch] menu finger down at {:.0},{:.0}", p.0, p.1);
+                        }
                         if count == 1 {
                             self.pinching = true;
                             self.pinch.reset();
-                            input::hide_touch_pointer();
+                            // Release dragging before moving to the pinch pivot.
+                            self.apply();
+                            if let Some(center) = self.pointer_center() { self.pointer_at(center); }
+                            eprintln!("[touch] menu pinch started");
                         }
                     }
                 } else if self.in_stick_zone(p) && !self.grips.values().any(|g| matches!(g, Grip::Stick { .. })) {
@@ -578,6 +594,7 @@ impl Overlay {
                 if let Some(Grip::Pointer { at }) = self.grips.get_mut(&t.id) {
                     *at = p;
                     if let (Some(before), Some(after)) = (before, self.pointer_distance()) {
+                        if let Some(center) = self.pointer_center() { self.pointer_at(center); }
                         input::wheel(self.pinch.update(before, after));
                     } else if !self.pinching {
                         self.pointer_at(p);
@@ -702,9 +719,8 @@ impl Overlay {
             }
         }
         self.mouse = mouse;
-        if self.direct_touch() && mouse == 0 && !self.grips.values().any(|g| matches!(g, Grip::Pointer { .. })) {
-            input::hide_touch_pointer();
-        }
+        // Keep the final position valid after release and throughout a pinch.
+        // The engine can consume button-up / wheel on a later frame.
         self.restyle();
     }
 

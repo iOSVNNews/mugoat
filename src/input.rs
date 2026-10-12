@@ -45,8 +45,9 @@ pub fn publish(block: u64) {
     if let Some(e) = ext(3) { e.store(h, Ordering::SeqCst); }
     if let Some(f) = word(FOCUS) { f.store(1, Ordering::SeqCst); }
     if cfg!(target_os = "ios") {
-        if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
-        if let Some(m) = word(MY) { m.store(-9999, Ordering::SeqCst); }
+        let pointer = MENU_TOUCH.load(Ordering::Relaxed);
+        if let Some(m) = word(MX) { m.store(if pointer { w >> 1 } else { -9999 }, Ordering::SeqCst); }
+        if let Some(m) = word(MY) { m.store(if pointer { h >> 1 } else { -9999 }, Ordering::SeqCst); }
         set_locked(!MENU_TOUCH.load(Ordering::Relaxed));
     } else {
         if let Some(m) = word(MX) { m.store(w >> 1, Ordering::SeqCst); }
@@ -75,7 +76,9 @@ pub fn set_focus(focused: bool) {
 }
 pub fn set_locked(locked: bool) {
     let pointer = MENU_TOUCH.load(Ordering::Relaxed);
-    let locked = if cfg!(target_os = "ios") { !pointer } else { locked };
+    // The original browser locks its canvas on mousedown, including in menus.
+    // Touch coordinates remain valid while the native window cursor is hidden.
+    let locked = if cfg!(target_os = "ios") { true } else { locked };
     if let Some(l) = word(LOCKED) { l.store(locked as i32, Ordering::SeqCst); }
     if cfg!(target_os = "ios") && !pointer {
         if let Some(m) = word(MX) { m.store(-9999, Ordering::SeqCst); }
@@ -89,16 +92,11 @@ pub fn set_menu_touch(enabled: bool) {
     for index in [DX, DY, DZ, BTN] {
         if let Some(value) = word(index) { value.store(0, Ordering::SeqCst); }
     }
-    if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
-    if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
+    let (w, h) = size();
+    if let Some(mx) = word(MX) { mx.store(if enabled { w >> 1 } else { -9999 }, Ordering::SeqCst); }
+    if let Some(my) = word(MY) { my.store(if enabled { h >> 1 } else { -9999 }, Ordering::SeqCst); }
     set_locked(!enabled);
-}
-
-pub fn hide_touch_pointer() {
-    if cfg!(target_os = "ios") {
-        if let Some(mx) = word(MX) { mx.store(-9999, Ordering::SeqCst); }
-        if let Some(my) = word(MY) { my.store(-9999, Ordering::SeqCst); }
-    }
+    eprintln!("[input] menu touch={enabled}, input block ready={}", BLOCK.load(Ordering::Acquire) != 0);
 }
 fn release_all() {
     HELD.lock().unwrap().clear();
@@ -202,15 +200,14 @@ pub fn mouse_pos(x: i32, y: i32) {
     }
     let (w, h) = size();
     let (x, y) = (x.clamp(0, (w - 1).max(0)), y.clamp(0, (h - 1).max(0)));
-    if cfg!(target_os = "ios") {
-        // Finger positions are absolute render coordinates, never camera motion.
-        if let Some(mx) = word(MX) { mx.store(x, Ordering::SeqCst); }
-        if let Some(my) = word(MY) { my.store(y, Ordering::SeqCst); }
-        return;
-    }
     if let (Some(mx), Some(my), Some(dx), Some(dy)) = (word(MX), word(MY), word(DX), word(DY)) {
-        dx.fetch_add(x - mx.load(Ordering::SeqCst), Ordering::SeqCst);
-        dy.fetch_add(y - my.load(Ordering::SeqCst), Ordering::SeqCst);
+        let (old_x, old_y) = (mx.load(Ordering::SeqCst), my.load(Ordering::SeqCst));
+        // Match browser mousemove: the engine consumes both absolute position
+        // and relative movement. Never subtract the hidden-cursor sentinel.
+        if old_x >= 0 && old_y >= 0 {
+            dx.fetch_add(x - old_x, Ordering::SeqCst);
+            dy.fetch_add(y - old_y, Ordering::SeqCst);
+        }
         mx.store(x, Ordering::SeqCst);
         my.store(y, Ordering::SeqCst);
     }
