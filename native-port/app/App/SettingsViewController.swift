@@ -81,7 +81,7 @@ final class SettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
-        case .cheat: return 1
+        case .cheat: return 2
         case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 3
         case .controls: return 10
@@ -92,13 +92,13 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        [L10n.text("Tiện ích game"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
+        [L10n.text("Mod & Tiện ích game"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .cheat:
-            return L10n.text("Mở bảng lệnh cheat để kích hoạt bất tử, hồi máu & giáp, nhận tất cả vũ khí, gọi xe cộ, máy bay, đổi thời tiết...")
+            return L10n.text("Menu Mod cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể chép mod vào thư mục Mugoat trong ứng dụng Tệp.")
         case .mode:
             var text = L10n.text("Story mode saves stay on this phone between launches. Sandbox keeps its own separate files.")
             if let runningMode {
@@ -129,14 +129,17 @@ final class SettingsViewController: UITableViewController {
         let presets = settings.tier.allowed
         switch Section(rawValue: indexPath.section)! {
         case .cheat:
-            content.text = L10n.text("Bảng lệnh cheat (Cheat Menu)")
-            content.secondaryText = L10n.text("Nhập mã lệnh hoặc bật nhanh các cheat có sẵn")
-            let button = UIButton(configuration: .tinted())
-            button.configuration?.title = L10n.text("Mở menu")
-            button.configuration?.cornerStyle = .capsule
-            button.isUserInteractionEnabled = false
-            cell.accessoryView = button
-            cell.selectionStyle = .default
+            if indexPath.row == 0 {
+                content.text = L10n.text("Menu Mod & Cheat (Trainer)")
+                content.secondaryText = L10n.text("Kích hoạt bất tử, full vũ khí, gọi xe cộ, máy bay, đổi thời tiết...")
+                cell.accessoryType = .disclosureIndicator
+                cell.selectionStyle = .default
+            } else {
+                content.text = L10n.text("Quản lý Mod & Tệp game")
+                content.secondaryText = L10n.text("Xem dữ liệu game & thư mục Mugoat trên iPhone để cài Mod")
+                cell.accessoryType = .disclosureIndicator
+                cell.selectionStyle = .default
+            }
         case .mode:
             let mode = GameMode.allCases[indexPath.row]
             content.text = mode.title + (mode == runningMode ? L10n.text(" (playing now)") : "")
@@ -196,10 +199,10 @@ final class SettingsViewController: UITableViewController {
             cell.selectionStyle = .none
             switch indexPath.row {
             case 0:
-                cell.accessoryView = slider(settings.lookSensitivity, 0.3, 3, label: L10n.text("Look speed")) { [weak self] in self?.settings.lookSensitivity = $0 }
+                cell.accessoryView = slider(settings.lookSensitivity, 0.5, 10.0, label: L10n.text("Look speed")) { [weak self] in self?.settings.lookSensitivity = $0 }
                 content.text = L10n.text("Camera stick speed")
             case 5:
-                cell.accessoryView = slider(settings.aimSensitivity, 0.3, 4, label: "Aim look speed") { [weak self] in self?.settings.aimSensitivity = $0 }
+                cell.accessoryView = slider(settings.aimSensitivity, 0.5, 10.0, label: "Aim look speed") { [weak self] in self?.settings.aimSensitivity = $0 }
                 content.text = L10n.text("Aim stick speed")
             case 7:
                 content.text = L10n.text("Edit controls layout")
@@ -330,7 +333,11 @@ final class SettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if indexPath.section == Section.cheat.rawValue { openCheat?(); return }
+        if indexPath.section == Section.cheat.rawValue {
+            if indexPath.row == 0 { openCheat?() }
+            else { showGameFiles() }
+            return
+        }
         if indexPath.section == Section.device.rawValue, indexPath.row == 4 {
             LocalizedUI.chooseLanguage(from: self) { [weak self] in
                 self?.title = L10n.text("Cài đặt Mugoat")
@@ -548,6 +555,13 @@ final class SettingsViewController: UITableViewController {
         let sheet = UIActivityViewController(activityItems: logs, applicationActivities: nil)
         sheet.popoverPresentationController?.sourceView = cell ?? view
         present(sheet, animated: true)
+    }
+    private func showGameFiles() {
+        let vc = GameFilesViewController()
+        let nav = UINavigationController(rootViewController: vc)
+        Theme.styleNavigation(nav)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
     }
     private func resolutionTitle(_ height: Int) -> String {
         if height == 0 {

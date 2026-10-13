@@ -201,6 +201,19 @@ final class FloatingStick: UIView {
     }
 }
 
+/// Responsive pinch-to-zoom accumulator for pause map
+private struct PinchTracker {
+    private var remainder: Double = 0
+    mutating func reset() { remainder = 0 }
+    mutating func update(before: Double, after: Double) -> Int32 {
+        guard before >= 10, after >= 10 else { return 0 }
+        remainder += log(after / before) / log(1.08)
+        let steps = Int32(trunc(remainder))
+        remainder -= Double(steps)
+        return steps
+    }
+}
+
 /// The touch overlay. Every finger gets one role when it lands (a button, the
 /// move stick, the look pad, ...), and the result is reported as a game
 /// controller so the engine's own controller handling (assisted aim, analog
@@ -227,8 +240,11 @@ final class TouchControlsView: UIView {
         /// Character switch: D-pad down held, the same finger points at Michael, Franklin or Trevor.
         case characterWheel(start: CGPoint, current: CGPoint)
         case fireLook(ControlButton)
+        case mapPointer(start: CGPoint, current: CGPoint, dragging: Bool)
     }
     private var roles: [ObjectIdentifier: Role] = [:]
+    private var mapPinch = PinchTracker()
+    private var lastPinchDist: Double?
 
     private let moveStick = FloatingStick()
     private let lookStick = FloatingStick()
@@ -264,6 +280,7 @@ final class TouchControlsView: UIView {
     private let fire = ControlButton("fire", icon: "fire", label: "Fire")
     private let aim = ControlButton("aim", icon: "aim", label: "Aim")
     private let leftFire = ControlButton("leftFire", icon: "fire", label: "Fire, left hand")
+    private let leftAim = ControlButton("leftAim", icon: "aim", label: "Aim, left hand")
     private let jump = ControlButton("jump", icon: "jump", label: "Jump")
     private let enter = ControlButton("enter", icon: "enter_exit", label: "Enter vehicle")
     private let weapons = ControlButton("weapons", icon: "weapons", label: "Weapon wheel")
@@ -314,7 +331,7 @@ final class TouchControlsView: UIView {
     private let tabRight = ControlButton("tabRight", icon: "tab_right", label: "Next tab")
 
     private var allButtons: [ControlButton] {
-        [fire, aim, leftFire, jump, enter, weapons, reload, cover, crouch, switcher, special, interact, detonate, zoomIn, zoomOut,
+        [fire, aim, leftFire, leftAim, jump, enter, weapons, reload, cover, crouch, switcher, special, interact, detonate, zoomIn, zoomOut,
          weaponPrev, weaponNext, gas, brake, handbrake, driveBy, horn, lookBack,
          vehicleWeapon, dive, surface, airFire, gear, throttleUp, throttleDown, yawLeft, yawRight, camera, phone, pause, settings, cheat, lights, radio,
          up, down, left, right, accept, back, tabLeft, tabRight]
@@ -354,7 +371,7 @@ final class TouchControlsView: UIView {
         if characterSwitchEnabled, playing, [.onFoot, .car, .bike, .boat].contains(context) { list.append(switcher) }
         // In the layout editor every situational button shows, so it can be placed.
         if editing && !context.flying {
-            list += context == .onFoot ? [special, interact, detonate, zoomIn, zoomOut, weaponPrev, weaponNext] : [special, interact, detonate]
+            list += context == .onFoot ? [special, interact, detonate, zoomIn, zoomOut, weaponPrev, weaponNext, leftFire, leftAim] : [special, interact, detonate]
             return list
         }
         // Situational buttons, shown only while they do something (engine state, PGReadControlHints).
@@ -388,8 +405,8 @@ final class TouchControlsView: UIView {
         if promptActive && !editing { return [camera, pause, settings, cheat, accept, back] }
         switch context {
         case .onFoot:
-            return aimActive ? utility + [fire, aim, enter, weapons, reload, cover, leftFire]
-                             : utility + [fire, aim, jump, enter, weapons, reload, cover, crouch]
+            return aimActive ? utility + [fire, aim, enter, weapons, reload, cover, leftFire, leftAim]
+                             : utility + [fire, aim, jump, enter, weapons, reload, cover, crouch, leftAim]
         case .car, .boat:
             return utility + [gas, brake, handbrake, enter, driveBy, horn, lookBack, vehicleWeapon]
         case .bike:
@@ -499,6 +516,7 @@ final class TouchControlsView: UIView {
         place(cover, 0.60, 0.82, 52)
         place(crouch, 0.58, 0.60, 44)
         place(leftFire, 0.10, 0.36, 58)
+        place(leftAim, 0.10, 0.50, 58)
         place(switcher, 0.955, 0.295, 46)
         place(special, 0.86, 0.24, 48)
         place(interact, 0.60, 0.38, 52)
@@ -597,6 +615,27 @@ final class TouchControlsView: UIView {
             .min { hypot($0.center.x - point.x, $0.center.y - point.y) < hypot($1.center.x - point.x, $1.center.y - point.y) }
     }
 
+    private func currentMapTouches() -> [(id: ObjectIdentifier, start: CGPoint, current: CGPoint, dragging: Bool)] {
+        var list: [(ObjectIdentifier, CGPoint, CGPoint, Bool)] = []
+        for (id, role) in roles {
+            if case .mapPointer(let s, let c, let d) = role {
+                list.append((id, s, c, d))
+            }
+        }
+        return list
+    }
+
+    private func sendMenuPointer(at point: CGPoint, buttons: Int32) {
+        var rw: Int32 = 0, rh: Int32 = 0
+        PGGetRenderSize(&rw, &rh)
+        if rw < 320 || rh < 180 { rw = 1280; rh = 720 }
+        let boundsSize = bounds.size
+        guard boundsSize.width > 0, boundsSize.height > 0 else { return }
+        let rx = Int32(clamping: Int((point.x / boundsSize.width) * CGFloat(rw)))
+        let ry = Int32(clamping: Int((point.y / boundsSize.height) * CGFloat(rh)))
+        PGSetMousePosition(rx, ry, buttons)
+    }
+
     private func has(_ check: (Role) -> Bool) -> Bool { roles.values.contains(where: check) }
     private func isStick(_ role: Role) -> Bool { if case .moveStick = role { return true }; if case .steer = role { return true }; return false }
     private func isWeaponWheel(_ role: Role) -> Bool { if case .weaponWheel = role { return true }; return false }
@@ -611,7 +650,20 @@ final class TouchControlsView: UIView {
             let leftZone = point.x < safe.minX + safe.width * 0.45
             if let button = button(at: point) {
                 press(button, touch: touch, at: point)
-            } else if context == .menu || phoneDock {
+            } else if context == .menu {
+                let existing = currentMapTouches()
+                if existing.isEmpty {
+                    roles[id] = .mapPointer(start: point, current: point, dragging: false)
+                    sendMenuPointer(at: point, buttons: 0)
+                } else if existing.count == 1 {
+                    roles[id] = .mapPointer(start: point, current: point, dragging: false)
+                    mapPinch.reset()
+                    let other = existing[0].current
+                    lastPinchDist = Double(hypot(other.x - point.x, other.y - point.y))
+                    let center = CGPoint(x: (other.x + point.x) / 2, y: (other.y + point.y) / 2)
+                    sendMenuPointer(at: center, buttons: 0)
+                }
+            } else if phoneDock {
                 if !has(isLook) { roles[id] = .look; lookStick.begin(at: point) }
             } else if context.flying, leftZone {
                 if !has(isStick) { roles[id] = .moveStick; moveStick.begin(at: point) }
@@ -656,7 +708,14 @@ final class TouchControlsView: UIView {
             // the thumb down and dragging aims, like dragging from Fire.
             aimToggled.toggle()
             aim.active = aimToggled
+            leftAim.active = aimToggled
             roles[id] = .fireLook(button)
+            updateVisibility()
+        case leftAim:
+            aimToggled.toggle()
+            aim.active = aimToggled
+            leftAim.active = aimToggled
+            roles[id] = .button(button)
             updateVisibility()
         case enter where context.flying:
             exitHoldStart = now
@@ -703,6 +762,27 @@ final class TouchControlsView: UIView {
                 roles[id] = .weaponWheel(start: start, current: point)
             case .characterWheel(let start, _):
                 roles[id] = .characterWheel(start: start, current: point)
+            case .mapPointer(let start, _, var dragging):
+                let mapTouches = currentMapTouches()
+                if mapTouches.count >= 2 {
+                    let pts = mapTouches.map { $0.id == id ? point : $0.current }
+                    let dist = Double(hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y))
+                    let center = CGPoint(x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2)
+                    sendMenuPointer(at: center, buttons: 0)
+                    if let prev = lastPinchDist {
+                        let steps = mapPinch.update(before: prev, after: dist)
+                        if steps != 0 {
+                            PGMouseWheel(steps)
+                        }
+                    }
+                    lastPinchDist = dist
+                    roles[id] = .mapPointer(start: start, current: point, dragging: true)
+                } else {
+                    let travel = hypot(point.x - start.x, point.y - start.y)
+                    if travel > 6 { dragging = true }
+                    roles[id] = .mapPointer(start: start, current: point, dragging: dragging)
+                    sendMenuPointer(at: point, buttons: dragging ? 1 : 0)
+                }
             case .button(let button):
                 // Pedals: a finger may roll from one to another without lifting.
                 if button.slideTarget, !button.contains(point: point, slop: 10),
@@ -733,10 +813,26 @@ final class TouchControlsView: UIView {
                 // Released quickly without picking: a tap, the next station.
                 if CACurrentMediaTime() - since < 0.25 { pulse(.left, for: 0.1) }
             case .characterWheel: switcher.setPressed(false)
+            case .mapPointer(let start, _, let dragging):
+                let remaining = currentMapTouches().filter { $0.id != ObjectIdentifier(touch) }
+                if remaining.isEmpty {
+                    lastPinchDist = nil
+                    mapPinch.reset()
+                }
+                let pt = touch.location(in: self)
+                let travel = hypot(pt.x - start.x, pt.y - start.y)
+                if !dragging && travel <= 8 {
+                    sendMenuPointer(at: pt, buttons: 1)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        self.sendMenuPointer(at: pt, buttons: 0)
+                    }
+                } else {
+                    sendMenuPointer(at: pt, buttons: 0)
+                }
             case .fireLook(let button):
                 button.setPressed(false)
                 if button === fire || button === driveBy { fireStartedAt = nil }
-                if button !== aim { lastFireTime = CACurrentMediaTime() }
+                if button !== aim && button !== leftAim { lastFireTime = CACurrentMediaTime() }
             case .button(let button):
                 button.setPressed(false)
                 if button === enter { exitHoldStart = nil; enter.setProgress(0) }
@@ -762,10 +858,13 @@ final class TouchControlsView: UIView {
             case .weaponWheel: weapons.setPressed(false)
             case .characterWheel: switcher.setPressed(false)
             case .look: lookStick.end()
+            case .mapPointer: break
             }
             roles[id] = nil
         }
-        aimToggled = false; aim.active = false
+        aimToggled = false; aim.active = false; leftAim.active = false
+        lastPinchDist = nil; mapPinch.reset()
+        if context == .menu { PGSetMousePosition(0, 0, 0) }
         fireStartedAt = nil; exitHoldStart = nil
         enter.setProgress(0)
         sprintSince = nil; moveStick.sprinting = false
@@ -777,7 +876,7 @@ final class TouchControlsView: UIView {
     // MARK: Output
 
     /// Whether the player is aiming; gyro aim runs only then by default.
-    var aiming: Bool { aimActive || fire.pressed || leftFire.pressed || driveBy.pressed }
+    var aiming: Bool { aimActive || fire.pressed || leftFire.pressed || driveBy.pressed || leftAim.pressed }
     /// Aircraft are flown with the left stick and buttons now; kept for the gyro check.
     var flyingWithRightStick: Bool { false }
 
@@ -817,10 +916,10 @@ final class TouchControlsView: UIView {
             let firing = fire.pressed || leftFire.pressed
             if firing { lastFireTime = now }
             if aimToggled && moveStick.sprinting {
-                aimToggled = false; aim.active = false; updateVisibility()
+                aimToggled = false; aim.active = false; leftAim.active = false; updateVisibility()
             }
             let fireAims = GameSettings.shared.fireAlsoAims
-            if aimActive || (firing && fireAims) { state.leftTrigger = 1 }
+            if aimActive || leftAim.pressed || (firing && fireAims) { state.leftTrigger = 1 }
             if firing {
                 // When Fire also aims, give the lock-on a moment before the first shot.
                 let lockDelay = !aimActive && fireAims && fire.pressed ? 0.09 : 0

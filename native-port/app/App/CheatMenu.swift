@@ -180,7 +180,7 @@ struct CheatMenuView: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Tìm kiếm lệnh cheat...")
-            .navigationTitle("Lệnh Cheat GTA V")
+            .navigationTitle("Menu Mod & Cheat GTA V")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

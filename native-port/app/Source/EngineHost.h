@@ -68,6 +68,8 @@ void PGMouseInput(int32_t dx, int32_t dy, int32_t buttons);
 void PGMouseWheel(int32_t notches);
 // The window has focus / the pointer is captured for looking around.
 void PGSetMouseFocus(bool focused, bool locked);
+void PGSetMousePosition(int32_t x, int32_t y, int32_t buttons);
+void PGGetRenderSize(int32_t *width, int32_t *height);
 bool PGDebugReadMemory(uint64_t address, void *out, uint64_t length);
 // Virtual controller fed into the engine's own pad 0 (see
 // Scripts/prepare_virtual_pad.py). Buttons use the engine's pad bits:

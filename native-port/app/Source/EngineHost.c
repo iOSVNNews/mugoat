@@ -431,6 +431,35 @@ void PGSetMouseFocus(bool focused, bool locked) {
   atomic_store(words + 6, focused ? 1 : 0);
   atomic_store(words + 7, locked ? 1 : 0);
 }
+void PGSetMousePosition(int32_t x, int32_t y, int32_t buttons) {
+  _Atomic uint8_t *keys = pg_input_keys();
+  if (!keys) return;
+  _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
+  int32_t width = atomic_load(words + 44), height = atomic_load(words + 45);
+  if (width < 320 || height < 180) { width = 960; height = 540; }
+  int32_t clampedX = x < 0 ? 0 : x > width - 1 ? width - 1 : x;
+  int32_t clampedY = y < 0 ? 0 : y > height - 1 ? height - 1 : y;
+  int32_t oldX = atomic_load(words);
+  int32_t oldY = atomic_load(words + 1);
+  if (oldX >= 0 && oldY >= 0) {
+    atomic_fetch_add(words + 2, clampedX - oldX);
+    atomic_fetch_add(words + 3, clampedY - oldY);
+  }
+  atomic_store(words, clampedX);
+  atomic_store(words + 1, clampedY);
+  atomic_store(words + 5, buttons);
+  atomic_store(words + 6, 1);
+  atomic_store(words + 7, 0);
+}
+void PGGetRenderSize(int32_t *width, int32_t *height) {
+  _Atomic uint8_t *keys = pg_input_keys();
+  if (!keys) { if (width) *width = 960; if (height) *height = 540; return; }
+  _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
+  int32_t w = atomic_load(words + 44), h = atomic_load(words + 45);
+  if (w < 320 || h < 180) { w = 960; h = 540; }
+  if (width) *width = w;
+  if (height) *height = h;
+}
 void PGSendChar(uint16_t ch) {
   _Atomic uint8_t *keys = pg_input_keys();
   if (!keys) return;
@@ -939,6 +968,14 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
   if(atomic_load(&touchCameraEnabled)) {
     double x=(double)atomic_exchange(&touchCameraX,0)/65536;
     double y=(double)atomic_exchange(&touchCameraY,0)/65536;
+    if (isfinite(x) && isfinite(y)) {
+      _Atomic uint8_t *keys = pg_input_keys();
+      if (keys) {
+        _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
+        atomic_fetch_add(words + 2, (int32_t)llround(x * 2.2));
+        atomic_fetch_add(words + 3, (int32_t)llround(y * 2.2));
+      }
+    }
     float rightX=((int)((packed>>32)&255)-127.5f)/127.5f;
     float rightY=-((int)((packed>>40)&255)-127.5f)/127.5f;
     rightX+=pg_drag_camera_axis(x,cameraSeconds);rightY+=pg_drag_camera_axis(y,cameraSeconds);

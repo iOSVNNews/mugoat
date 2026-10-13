@@ -63,13 +63,13 @@ final class GameSettings {
         set { defaults.set(min(max(newValue, 0.7), 1.5), forKey: "controlScale") }
     }
     var lookSensitivity: Double {
-        get { defaults.object(forKey: "lookSensitivity") as? Double ?? 2.0 }
-        set { defaults.set(min(max(newValue, 0.3), 3), forKey: "lookSensitivity") }
+        get { defaults.object(forKey: "lookSensitivity") as? Double ?? 2.5 }
+        set { defaults.set(min(max(newValue, 0.5), 10.0), forKey: "lookSensitivity") }
     }
     /// Camera speed while aiming (the game slows the camera when aiming).
     var aimSensitivity: Double {
-        get { defaults.object(forKey: "aimSensitivity") as? Double ?? 1.3 }
-        set { defaults.set(min(max(newValue, 0.3), 4), forKey: "aimSensitivity") }
+        get { defaults.object(forKey: "aimSensitivity") as? Double ?? 2.5 }
+        set { defaults.set(min(max(newValue, 0.5), 10.0), forKey: "aimSensitivity") }
     }
     /// Fire also locks on, like the classic mobile GTA ports.
     var fireAlsoAims: Bool {

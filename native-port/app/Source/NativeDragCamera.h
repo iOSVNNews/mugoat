@@ -6,7 +6,7 @@
 static inline float pg_drag_camera_axis(double points, double seconds) {
  if(!isfinite(points)||!isfinite(seconds)||seconds<=0||seconds>0.05)return 0;
  double speed=fabs(points)/fmax(seconds,1.0/240.0);
- if(speed<=4)return 0;
- double amount=fmin(1,speed/320.0);
- return (float)copysign(0.24+0.76*pow(amount,0.75),points);
+ if(speed<=3)return 0;
+ double amount=fmin(1,speed/180.0);
+ return (float)copysign(0.35+0.65*pow(amount,0.70),points);
 }

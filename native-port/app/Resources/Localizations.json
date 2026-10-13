@@ -1802,5 +1802,33 @@
   "PvP: bắn người chơi khác": {
     "vi": "PvP: bắn người chơi khác",
     "en": "PvP: attack other players"
+  },
+  "Mod & Tiện ích game": {
+    "vi": "Mod & Tiện ích game",
+    "en": "Mods & Game Utilities"
+  },
+  "Menu Mod & Cheat (Trainer)": {
+    "vi": "Menu Mod & Cheat (Trainer)",
+    "en": "Mod & Cheat Menu (Trainer)"
+  },
+  "Kích hoạt bất tử, full vũ khí, gọi xe cộ, máy bay, đổi thời tiết...": {
+    "vi": "Kích hoạt bất tử, full vũ khí, gọi xe cộ, máy bay, đổi thời tiết...",
+    "en": "Activate god mode, full weapons, spawn vehicles, change weather..."
+  },
+  "Quản lý Mod & Tệp game": {
+    "vi": "Quản lý Mod & Tệp game",
+    "en": "Mod & Game File Manager"
+  },
+  "Xem dữ liệu game & thư mục Mugoat trên iPhone để cài Mod": {
+    "vi": "Xem dữ liệu game & thư mục Mugoat trên iPhone để cài Mod",
+    "en": "Manage game data & Mugoat folder in Files app to install mods"
+  },
+  "Menu Mod cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể chép mod vào thư mục Mugoat trong ứng dụng Tệp.": {
+    "vi": "Menu Mod cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể chép mod vào thư mục Mugoat trong ứng dụng Tệp.",
+    "en": "Mod menu allows activating trainer features, spawning vehicles and gameplay tweaks. You can also copy mods to the Mugoat folder in the Files app."
+  },
+  "Aim, left hand": {
+    "vi": "Ngắm bắn (tay trái)",
+    "en": "Aim, left hand"
   }
 }

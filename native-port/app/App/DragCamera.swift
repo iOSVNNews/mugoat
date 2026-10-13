@@ -28,7 +28,7 @@ struct DragCamera {
 
     mutating func motion(sensitivity: Double) -> CGPoint {
         let delta = pending; pending = .zero
-        let gain = min(max(sensitivity, 0.1), 4)
+        let gain = min(max(sensitivity, 0.1), 10.0)
         return CGPoint(x: delta.x * gain, y: -delta.y * gain * 0.85)
     }
 
