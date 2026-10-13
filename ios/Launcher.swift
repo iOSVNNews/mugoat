@@ -195,37 +195,15 @@ final class Settings: ObservableObject {
         json["join_code"] = joinCode
 
         if multiplayer {
-            if roomMode == "create" {
-                let m = mode == 1 ? "story" : "sandbox"
-                let r = pvp ? "pvp" : "peace"
-                let rm = "\(m)-\(r)-\(roomDigits)"
-                json["room"] = rm
-                json["room_pass"] = roomPass.trimmingCharacters(in: .whitespaces)
-                json["start_mode"] = mode
-                json["pvp"] = pvp
-            } else if roomMode == "join" {
-                parseJoinCode(joinCode)
-                let m = mode == 1 ? "story" : "sandbox"
-                let r = pvp ? "pvp" : "peace"
-                let digits = joinCode.filter { $0.isNumber }
-                let rm = "\(m)-\(r)-\(digits.isEmpty ? "default" : digits)"
-                json["room"] = rm
-                json["room_pass"] = roomPass.trimmingCharacters(in: .whitespaces)
-                json["start_mode"] = mode
-                json["pvp"] = pvp
-            } else if roomMode == "public" {
-                let m = mode == 1 ? "story" : "sandbox"
-                json["room"] = "\(m)-public"
-                json["room_pass"] = ""
-                json["start_mode"] = mode
-                json["pvp"] = false
-            } else { // lan
-                let m = mode == 1 ? "story" : "sandbox"
-                json["room"] = "\(m)-lan"
-                json["room_pass"] = ""
-                json["start_mode"] = mode
-                json["pvp"] = pvp
-            }
+            let srv = server.trimmingCharacters(in: .whitespaces)
+            json["server"] = srv.isEmpty ? "18.143.103.253" : srv
+            json["multiplayer"] = true
+            json["host"] = false
+            json["start_mode"] = 1 // Cốt truyện Story Mode cho server AWS iOSVN
+            let r = pvp ? "pvp" : "peace"
+            json["room"] = "story-\(r)"
+            json["room_pass"] = ""
+            json["pvp"] = pvp
         } else {
             json["start_mode"] = mode
             json["room"] = "default"
@@ -1531,154 +1509,57 @@ struct LauncherView: View {
                 Toggle(L("Tắt âm thanh (Mute audio)", "Mute audio"), isOn: $s.mute)
 
                 // Section 6: Online Multiplayer
-                Section(L("Chơi Online (Multiplayer)", "Online Multiplayer (AWS Server)")) {
+                Section(L("Chơi Online (Multiplayer)", "Online Multiplayer (IP Server)")) {
                     Toggle(L("Bật chế độ Multiplayer", "Enable Multiplayer"), isOn: $s.multiplayer)
                     if s.multiplayer {
-                        Picker(L("Chế độ phòng", "Room Mode"), selection: $s.roomMode) {
-                            Text(L("Tạo phòng", "Create")).tag("create")
-                            Text(L("Vào phòng", "Join")).tag("join")
-                            Text(L("Công khai", "Public")).tag("public")
-                            Text(L("LAN Host", "LAN")).tag("lan")
-                        }
-                        .pickerStyle(.segmented)
-
-                        if s.roomMode == "create" {
-                            VStack(alignment: .leading, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(L("1. Chọn Chế độ phòng:", "1. Select Game Mode:")).font(.subheadline.bold())
-                                    Picker("Mode", selection: $s.mode) {
-                                        Text(L("Story Mode", "Story Mode")).tag(1)
-                                        Text(L("Sandbox", "Sandbox")).tag(2)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(L("2. Luật sát thương (PvP):", "2. PvP Damage Rules:")).font(.subheadline.bold())
-                                    Picker("PvP", selection: $s.pvp) {
-                                        Text(L("🛡️ Hòa bình (Co-op)", "🛡️ Peaceful (Co-op)")).tag(false)
-                                        Text(L("⚔️ Đấu trường (PvP)", "⚔️ PvP Combat")).tag(true)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(L("3. Số người chơi tối đa:", "3. Server Capacity:")).font(.subheadline.bold())
-                                    Picker("Capacity", selection: $s.maxPlayers) {
-                                        Text(L("32 Người", "32 Players")).tag(32)
-                                        Text(L("64 Người", "64 Players")).tag(64)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(L("4. Mã phòng chia sẻ cho bạn bè:", "4. Room Code to Share:")).font(.subheadline.bold())
-                                    HStack(spacing: 8) {
-                                        Text(s.formattedCreateCode)
-                                            .font(.title2.monospaced().bold())
-                                            .foregroundStyle(.green)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(Color.green.opacity(0.15))
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                        Spacer(minLength: 4)
-
-                                        Button(action: {
-                                            s.roomDigits = String(Int.random(in: 1000...9999))
-                                        }) {
-                                            Image(systemName: "arrow.clockwise")
-                                                .font(.caption.bold())
-                                                .padding(6)
-                                        }
-                                        .buttonStyle(.bordered)
-
-                                        Button(action: {
-                                            UIPasteboard.general.string = s.formattedCreateCode
-                                        }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "doc.on.doc")
-                                                Text(L("Chép", "Copy"))
-                                            }
-                                            .font(.caption.bold())
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 6)
-                                        }
-                                        .buttonStyle(.borderedProminent)
-                                    }
-                                }
-
-                                HStack {
-                                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
-                                    TextField(L("Mật khẩu phòng (Tùy chọn)", "Room Password (Optional)"), text: $s.roomPass)
-                                        .textInputAutocapitalization(.never)
-                                        .autocorrectionDisabled()
-                                }
-                            }
-                        } else if s.roomMode == "join" {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(L("Nhập mã phòng:", "Enter Room Code:")).font(.subheadline.bold())
-                                TextField(L("Ví dụ: SP-8621 hoặc BX-5520", "e.g. SP-8621 or BX-5520"), text: $s.joinCode)
-                                    .font(.title3.monospaced().bold())
-                                    .textInputAutocapitalization(.characters)
-                                    .autocorrectionDisabled()
-                                    .onChange(of: s.joinCode) { val in
-                                        s.parseJoinCode(val)
-                                    }
-
-                                HStack {
-                                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
-                                    TextField(L("Mật khẩu phòng (nếu có)", "Room Password (if set)"), text: $s.roomPass)
-                                        .textInputAutocapitalization(.never)
-                                        .autocorrectionDisabled()
-                                }
-                            }
-                        } else if s.roomMode == "public" {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Picker("Public Division", selection: $s.mode) {
-                                    Text("Story Mode Public").tag(1)
-                                    Text("Sandbox Public").tag(2)
-                                }
-                                .pickerStyle(.segmented)
-                                Text(L("Tự động kết nối vào sảnh chung trên server AWS iOSVN.", "Connects to public lobby on AWS Singapore server."))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Picker("LAN", selection: $s.mode) {
-                                    Text("Story Mode").tag(1)
-                                    Text("Sandbox").tag(2)
-                                }
-                                .pickerStyle(.segmented)
-                                Text(L("Mở phòng Wi-Fi nội bộ: ", "Local Wi-Fi Host: ") + localIPs().joined(separator: " / "))
-                                    .font(.callout).textSelection(.enabled)
-                            }
-                        }
-
-                        DisclosureGroup(L("Máy chủ (Nâng cao)", "Server Address (Advanced)")) {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text("Server IP:")
+                                Text(L("Địa chỉ IP Server:", "Server IP:"))
+                                    .fontWeight(.semibold)
                                 TextField("18.143.103.253", text: $s.server)
                                     .keyboardType(.numbersAndPunctuation)
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
+                                    .textFieldStyle(.roundedBorder)
                             }
-                            HStack {
+
+                            HStack(spacing: 8) {
                                 Circle().fill(Color.green).frame(width: 8, height: 8)
-                                Text("AWS Singapore Server (Ping ~40ms · 32/64 Slots)")
+                                Text(L("Server AWS iOSVN Singapore · Chế độ Cốt truyện (Story)", "AWS Singapore Server · Story Mode"))
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.green)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(L("Luật sát thương giữa người chơi (PvP):", "Player vs Player Combat (PvP):"))
+                                    .font(.subheadline.bold())
+                                Picker("PvP", selection: $s.pvp) {
+                                    Text(L("🛡️ Hòa bình (Co-op)", "🛡️ Peaceful (Co-op)")).tag(false)
+                                    Text(L("⚔️ Đấu trường (PvP)", "⚔️ PvP Combat")).tag(true)
+                                }
+                                .pickerStyle(.segmented)
+                                Text(s.pvp ? L("Người chơi có thể bắn và gây sát thương lẫn nhau.", "Players can damage each other.") : L("Không gây sát thương lẫn nhau, tránh phá game.", "Friendly fire disabled."))
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
+
+                            Text(L("💡 Chỉ cần bật Multiplayer và nhập IP là chơi được. Khi Online, lệnh Cheat sẽ tự động bị khóa và game chạy ở chế độ Cốt truyện.", "Enter server IP to play GTA V Story mode. Cheats are locked online."))
+                                .font(.caption2).foregroundStyle(.orange)
                         }
                     }
                 }
 
-                // Section 7: In-Game Cheats
+                // Section 7: In-Game Cheats (Offline Only)
                 if !s.multiplayer {
                     Section(L("Lệnh Cheat GTA V (Chỉ Offline)", "GTA V Cheats (Offline Only)")) {
                         Button(action: { showingCheatSheet = true }) {
                             Label(L("Xem & Kích hoạt Lệnh Cheat", "View & Activate Cheats"), systemImage: "wand.and.stars")
                         }
                         Text(L("Tra cứu và kích hoạt nhanh các lệnh cheat (Bất tử, full vũ khí, trực thăng, xe đua...). Tự động khóa trong chế độ Online.", "Quick cheat activator for single player."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section(L("Lệnh Cheat GTA V", "GTA V Cheats")) {
+                        Text(L("🔒 Lệnh Cheat đã bị khóa trong chế độ Online để đảm bảo tính công bằng.", "🔒 Cheats are locked in Multiplayer to ensure fairness."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -1793,15 +1674,8 @@ struct LauncherView: View {
     }
 
     func start() {
-        if s.multiplayer && s.roomMode == "join" {
-            let digits = s.joinCode.filter { $0.isNumber }
-            if digits.isEmpty {
-                error = L("Nhập mã phòng (vd: SP-8621) để vào chơi cùng bạn bè.", "Enter a valid room code (e.g. SP-8621) to join.")
-                return
-            }
-        }
-        if s.multiplayer && s.roomMode != "lan" && s.server.trimmingCharacters(in: .whitespaces).isEmpty {
-            error = L("Nhập địa chỉ máy chủ để kết nối.", "Enter a valid server address.")
+        if s.multiplayer && s.server.trimmingCharacters(in: .whitespaces).isEmpty {
+            error = L("Nhập địa chỉ IP máy chủ để kết nối.", "Enter a valid server address.")
             return
         }
         if s.name.trimmingCharacters(in: .whitespaces).isEmpty {
