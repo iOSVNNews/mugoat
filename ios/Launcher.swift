@@ -200,10 +200,9 @@ final class Settings: ObservableObject {
             json["multiplayer"] = true
             json["host"] = false
             json["start_mode"] = 1 // Cốt truyện Story Mode cho server AWS iOSVN
-            let r = pvp ? "pvp" : "peace"
-            json["room"] = "story-\(r)"
+            json["room"] = "story"
             json["room_pass"] = ""
-            json["pvp"] = pvp
+            json["pvp"] = true // Server quyết định luật PvP hoặc Co-op
         } else {
             json["start_mode"] = mode
             json["room"] = "default"
@@ -1530,16 +1529,12 @@ struct LauncherView: View {
                                     .foregroundStyle(.green)
                             }
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L("Luật sát thương giữa người chơi (PvP):", "Player vs Player Combat (PvP):"))
-                                    .font(.subheadline.bold())
-                                Picker("PvP", selection: $s.pvp) {
-                                    Text(L("🛡️ Hòa bình (Co-op)", "🛡️ Peaceful (Co-op)")).tag(false)
-                                    Text(L("⚔️ Đấu trường (PvP)", "⚔️ PvP Combat")).tag(true)
-                                }
-                                .pickerStyle(.segmented)
-                                Text(s.pvp ? L("Người chơi có thể bắn và gây sát thương lẫn nhau.", "Players can damage each other.") : L("Không gây sát thương lẫn nhau, tránh phá game.", "Friendly fire disabled."))
-                                    .font(.caption2).foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Image(systemName: "shield.righthalf.filled")
+                                    .foregroundStyle(.blue)
+                                Text(L("Luật PvP / Co-op sẽ tự động đồng bộ theo cấu hình của Server bạn tham gia.", "PvP / Co-op combat rules are automatically dictated by the server."))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
 
                             Text(L("💡 Chỉ cần bật Multiplayer và nhập IP là chơi được. Khi Online, lệnh Cheat sẽ tự động bị khóa và game chạy ở chế độ Cốt truyện.", "Enter server IP to play GTA V Story mode. Cheats are locked online."))
