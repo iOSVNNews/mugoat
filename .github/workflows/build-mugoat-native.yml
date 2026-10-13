@@ -1,0 +1,121 @@
+name: Build Mugoat Native IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mugoat-native-ipa
+  cancel-in-progress: false
+jobs:
+  interface-preview:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and render actual UIKit home screen
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          cd native-port/app/Preview
+          xcodegen generate --quiet
+          xcodebuild -quiet -project MugoatPreview.xcodeproj -scheme MugoatPreview -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath Build CODE_SIGNING_ALLOWED=NO build
+          python3 - <<'PY'
+          import json, subprocess
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
+          all_devices=[device for group in devices.values() for device in group]
+          for name in ['iPhone SE (3rd generation)','iPhone 16 Pro Max']:
+              matches=[device for device in all_devices if device['name']==name]
+              if not matches: raise SystemExit('Missing preview simulator '+name)
+              udid=matches[-1]['udid']
+              subprocess.run(['xcrun','simctl','boot',udid],check=True)
+              subprocess.run(['xcrun','simctl','bootstatus',udid,'-b'],check=True)
+              subprocess.run(['xcrun','simctl','install',udid,'Build/Build/Products/Debug-iphonesimulator/MugoatPreview.app'],check=True)
+              subprocess.run(['xcrun','simctl','launch',udid,'vn.iosvn.mugoat.preview'],check=True)
+              import time
+              time.sleep(3)
+              subprocess.run(['xcrun','simctl','io',udid,'screenshot',name.replace(' ','-')+'.png'],check=True)
+              subprocess.run(['xcrun','simctl','shutdown',udid],check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mugoat-UIKit-previews
+          path: native-port/app/Preview/*.png
+          if-no-files-found: error
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize source and check signing metadata
+        run: |
+          find native-port -type f \( -name '*.sh' -o -name '*.py' -o -name '*.entitlements' -o -name '*.plist' -o -name '*.yml' -o -name '*.c' -o -name '*.h' -o -name '*.mm' -o -name '*.swift' \) -exec sed -i '' 's/\r$//' {} +
+          chmod +x native-port/build_ipa.sh
+          plutil -lint native-port/app/App/Free.entitlements native-port/app/App/Full.entitlements
+      - uses: actions/cache@v4
+        id: native-cache
+        with:
+          path: |
+            native-port/app/Tools
+            native-port/app/Generated
+            native-port/app/GeneratedResources
+            native-port/app/Build/MetalShaders
+            native-port/app/Build/Release
+          key: mugoat-native-ios164-v1-${{ hashFiles('native-port/app/Scripts/**', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml') }}
+      - name: Fetch and validate compatible engine and shaders
+        run: |
+          mkdir -p "$RUNNER_TEMP/game-files/b/8b0b5899ed"
+          MUGUET_WASM_DEST="$RUNNER_TEMP/game-files/b/8b0b5899ed/game.wasm" node native-port/app/Scripts/download-wasm.cjs
+          /usr/bin/python3 native-port/app/Scripts/fetch_game_files.py --server 'https://hml.sinimediata.com.br' --out "$RUNNER_TEMP/game-files"
+          /usr/bin/python3 native-port/app/Scripts/check_game_files.py --mirror "$RUNNER_TEMP/game-files"
+      - name: Install build tools
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcrun -sdk iphoneos metal --version > /dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
+      - name: Check streaming reserve and actual FPS accounting
+        working-directory: native-port/app
+        run: |
+          clang -std=c11 -I Source Tests/memory_budget.c -o "$RUNNER_TEMP/mugoat-memory-tests"
+          "$RUNNER_TEMP/mugoat-memory-tests"
+          clang++ -std=c++20 -I Source Tests/frame_rate.cpp -o "$RUNNER_TEMP/mugoat-fps-tests"
+          "$RUNNER_TEMP/mugoat-fps-tests"
+          clang++ -std=c++20 -I Source Tests/frame_metrics.cpp -o "$RUNNER_TEMP/mugoat-frame-tests"
+          "$RUNNER_TEMP/mugoat-frame-tests"
+      - name: Compile native ARM64 engine and package both IPAs
+        working-directory: native-port
+        env:
+          JOBS: '3'
+          PG_REUSE_PREPARED: ${{ steps.native-cache.outputs.cache-hit == 'true' && '1' || '0' }}
+        run: |
+          ./build_ipa.sh --mirror "$RUNNER_TEMP/game-files"
+          shasum -a 256 Mugoat-AppleID-Free.ipa Mugoat-Cert-Paid.ipa > SHA256SUMS.txt
+          codesign --verify --deep --strict app/Build/IPA-Free/Payload/PlayGTA5Native.app
+          codesign --verify --deep --strict app/Build/IPA-Paid/Payload/PlayGTA5Native.app
+          plutil -lint app/Build/IPA-Free/Payload/PlayGTA5Native.app/Info.plist
+          unzip -t Mugoat-AppleID-Free.ipa > /dev/null
+          unzip -t Mugoat-Cert-Paid.ipa > /dev/null
+      - name: Test native runtime and BC texture fallback
+        working-directory: native-port/app
+        run: |
+          sh Scripts/check_runtime.sh
+          clang -std=c11 -O2 Tests/bc_textures.c Source/BCTextureDecoder.c -o "$RUNNER_TEMP/mugoat-bc-tests"
+          "$RUNNER_TEMP/mugoat-bc-tests"
+      - name: Encrypt output
+        working-directory: native-port
+        env:
+          MUGUET_ARTIFACT_KEY: ${{ secrets.MUGUET_ARTIFACT_KEY_V4 }}
+        run: |
+          node app/Scripts/ipa-artifact.cjs encrypt Mugoat-AppleID-Free.ipa Mugoat-AppleID-Free.enc
+          node app/Scripts/ipa-artifact.cjs encrypt Mugoat-Cert-Paid.ipa Mugoat-Cert-Paid.enc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mugoat-Native-IPAs-encrypted
+          path: |
+            native-port/Mugoat-AppleID-Free.enc
+            native-port/Mugoat-Cert-Paid.enc
+            native-port/SHA256SUMS.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Mugoat-compiler-logs
+          path: native-port/app/Build/xcodebuild.log
+          if-no-files-found: ignore

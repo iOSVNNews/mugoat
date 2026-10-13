@@ -1,0 +1,30 @@
+name: MugoatPreview
+options:
+  deploymentTarget:
+    iOS: '16.4'
+targets:
+  MugoatPreview:
+    type: application
+    platform: iOS
+    sources:
+      - PreviewApp.swift
+      - ../App/HomeView.swift
+      - ../App/Theme.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: vn.iosvn.mugoat.preview
+        SWIFT_VERSION: '5.0'
+        TARGETED_DEVICE_FAMILY: '1,2'
+        CODE_SIGNING_ALLOWED: NO
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Mugoat
+        CFBundleShortVersionString: '1.0.0'
+        CFBundleVersion: '1'
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
