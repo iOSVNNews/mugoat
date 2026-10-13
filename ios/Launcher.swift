@@ -330,6 +330,42 @@ final class Importer: ObservableObject {
     @Published var error: String?
     private var lastProgressTime = 0.0
 
+    func refreshReady() {
+        DispatchQueue.main.async {
+            self.ready = muguet_game_ready()
+        }
+    }
+
+    func importFolder(from url: URL) {
+        error = nil
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dest = docs.appendingPathComponent("game")
+
+        do {
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            let items = try fm.contentsOfDirectory(atPath: url.path)
+            if items.contains("manifest.json") {
+                let targetData = dest.appendingPathComponent("data")
+                if fm.fileExists(atPath: targetData.path) { try? fm.removeItem(at: targetData) }
+                try fm.copyItem(at: url, to: targetData)
+            } else {
+                for item in items {
+                    let src = url.appendingPathComponent(item)
+                    let dst = dest.appendingPathComponent(item)
+                    if fm.fileExists(atPath: dst.path) { try? fm.removeItem(at: dst) }
+                    try fm.copyItem(at: src, to: dst)
+                }
+            }
+            refreshReady()
+        } catch {
+            self.error = "Lỗi chép thư mục: \(error.localizedDescription)"
+            refreshReady()
+        }
+    }
+
     func run(_ url: URL) {
         error = nil
         progress = 0
