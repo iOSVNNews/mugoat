@@ -865,7 +865,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         if now - lastFPSLabelUpdate >= 0.25 {
             let fps = PGRenderedFramesPerSecond()
             let frames = fps > 0 ? String(format: "%.0f FPS", fps) : "— FPS"
-            fpsLabel.text = MugoatOnlineEnabled() ? frames + " · " + OnlineSettings.status : frames
+            fpsLabel.text = frames
             lastFPSLabelUpdate = now
         }
         let elapsed = lastControllerPoll.map { now - $0 } ?? (1.0 / 60.0)

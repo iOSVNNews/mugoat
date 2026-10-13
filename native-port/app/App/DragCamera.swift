@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Muguet-style relative dragging. Each finger has its own dead zone; the
 /// camera receives movement once, without a second floating joystick.
