@@ -391,6 +391,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 return
             }
             PGSetLocalGameFolder(data.path)
+            syncMods(to: data)
         } else {
             PGSetAssetServer(GameSettings.shared.assetServer)
         }
@@ -403,6 +404,62 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
         path.withCString { manifest in
             root.withCString { PGStartEngine(manifest, $0, engineLog, Unmanaged.passUnretained(self).toOpaque()) }
+        }
+    }
+
+    private func syncMods(to data: URL) {
+        let modsDir = ModManagerViewController.modsDirectory
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(at: modsDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return }
+
+        var foundDLCs: [String: URL] = [:]
+        for case let fileURL as URL in enumerator {
+            guard fileURL.lastPathComponent.lowercased() == "dlc.rpf" else { continue }
+            let packName = fileURL.deletingLastPathComponent().lastPathComponent.lowercased()
+            if !packName.isEmpty && packName != "mods" {
+                foundDLCs[packName] = fileURL
+            }
+        }
+
+        guard !foundDLCs.isEmpty else { return }
+
+        let dlcDestDirs = [
+            data.appendingPathComponent("update/x64/dlcpacks"),
+            data.appendingPathComponent("dlcpacks")
+        ]
+
+        for (packName, dlcURL) in foundDLCs {
+            for destBase in dlcDestDirs {
+                if fm.fileExists(atPath: destBase.path) {
+                    let targetPack = destBase.appendingPathComponent(packName)
+                    let targetDLC = targetPack.appendingPathComponent("dlc.rpf")
+                    if !fm.fileExists(atPath: targetPack.path) {
+                        try? fm.createDirectory(at: targetPack, withIntermediateDirectories: true)
+                    }
+                    if !fm.fileExists(atPath: targetDLC.path) {
+                        try? fm.copyItem(at: dlcURL, to: targetDLC)
+                        appendLog("Mod: Mounted DLC pack '\(packName)' into \(destBase.lastPathComponent)")
+                    }
+                }
+            }
+
+            let dlcListPaths = [
+                data.appendingPathComponent("common/data/dlcList.xml"),
+                data.appendingPathComponent("common/data/dlclist.xml"),
+                data.appendingPathComponent("update/update.rpf/common/data/dlclist.xml")
+            ]
+
+            for dlcListURL in dlcListPaths {
+                guard fm.fileExists(atPath: dlcListURL.path),
+                      var xml = try? String(contentsOf: dlcListURL, encoding: .utf8) else { continue }
+                if !xml.contains("dlcpacks:/\(packName)/") {
+                    if let range = xml.range(of: "</Paths>") {
+                        xml.insert(contentsOf: "\t<Item>dlcpacks:/\(packName)/</Item>\n", at: range.lowerBound)
+                        try? xml.write(to: dlcListURL, atomically: true, encoding: .utf8)
+                        appendLog("Mod: Auto-registered '\(packName)' into \(dlcListURL.lastPathComponent)")
+                    }
+                }
+            }
         }
     }
 
