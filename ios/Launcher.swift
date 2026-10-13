@@ -484,6 +484,115 @@ struct CheatMenuView: View {
     }
 }
 
+
+struct ModItem: Identifiable {
+    let id = UUID()
+    let name: String
+    let fileName: String
+    let sizeString: String
+    let type: String
+    var isEnabled: Bool
+    let fileURL: URL
+}
+
+final class ModManager: ObservableObject {
+    static let shared = ModManager()
+    @Published var mods: [ModItem] = []
+    @Published var statusMessage: String?
+
+    var modsDir: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("mods")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    init() {
+        scanMods()
+    }
+
+    func scanMods() {
+        let fm = FileManager.default
+        let dir = modsDir
+        guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey]) else {
+            mods = []
+            return
+        }
+
+        var items: [ModItem] = []
+        for url in entries {
+            let name = url.lastPathComponent
+            guard !name.hasPrefix(".") else { continue }
+            let isEnabled = !name.hasSuffix(".disabled")
+            let cleanName = isEnabled ? name : String(name.dropLast(9))
+            let ext = (cleanName as NSString).pathExtension.lowercased()
+            let typeDesc: String
+            switch ext {
+            case "lua": typeDesc = "LUA Script"
+            case "asi": typeDesc = "ASI Plugin"
+            case "ytd": typeDesc = "Texture (YTD)"
+            case "yft": typeDesc = "Vehicle/Model (YFT)"
+            case "ydr": typeDesc = "Object/Prop (YDR)"
+            case "meta", "xml": typeDesc = "Config/Meta"
+            case "zip": typeDesc = "Archive ZIP"
+            default: typeDesc = ext.isEmpty ? "Folder Mod" : ext.uppercased() + " Mod"
+            }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+            items.append(ModItem(name: cleanName, fileName: name, sizeString: sizeStr, type: typeDesc, isEnabled: isEnabled, fileURL: url))
+        }
+        items.sort { $0.name.lowercased() < $1.name.lowercased() }
+        DispatchQueue.main.async {
+            self.mods = items
+        }
+    }
+
+    func toggleMod(_ item: ModItem) {
+        let fm = FileManager.default
+        let currentURL = item.fileURL
+        let newURL: URL
+        if item.isEnabled {
+            newURL = currentURL.deletingLastPathComponent().appendingPathComponent(item.fileName + ".disabled")
+        } else {
+            let newName = item.fileName.hasSuffix(".disabled") ? String(item.fileName.dropLast(9)) : item.fileName
+            newURL = currentURL.deletingLastPathComponent().appendingPathComponent(newName)
+        }
+        try? fm.moveItem(at: currentURL, to: newURL)
+        scanMods()
+    }
+
+    func deleteMod(_ item: ModItem) {
+        try? FileManager.default.removeItem(at: item.fileURL)
+        scanMods()
+    }
+
+    func installMod(from sourceURL: URL) {
+        let scoped = sourceURL.startAccessingSecurityScopedResource()
+        defer { if scoped { sourceURL.stopAccessingSecurityScopedResource() } }
+        let fm = FileManager.default
+        let dest = modsDir.appendingPathComponent(sourceURL.lastPathComponent)
+        if fm.fileExists(atPath: dest.path) {
+            try? fm.removeItem(at: dest)
+        }
+        do {
+            try fm.copyItem(at: sourceURL, to: dest)
+            scanMods()
+            statusMessage = "Đã cài mod: \(sourceURL.lastPathComponent)"
+        } catch {
+            statusMessage = "Lỗi cài mod: \(error.localizedDescription)"
+        }
+    }
+}
+
+func loadControlIcon(named name: String) -> UIImage? {
+    if let img = UIImage(named: name) { return img }
+    if let path = Bundle.main.path(forResource: name, ofType: "png", inDirectory: "ControlIcons"),
+       let img = UIImage(contentsOfFile: path) { return img }
+    if let path = Bundle.main.path(forResource: name, ofType: "png"),
+       let img = UIImage(contentsOfFile: path) { return img }
+    return nil
+}
+
 struct HUDButtonDef: Identifiable {
     let id: Int
     let name: String
@@ -965,8 +1074,12 @@ struct HUDEditorView: View {
 struct LauncherView: View {
     @StateObject private var s = Settings()
     @ObservedObject private var importer = Importer.shared
+    @ObservedObject private var modManager = ModManager.shared
+    @AppStorage("mugoat_language") private var currentLang: String = "vi"
     @State private var error: String?
-    @State private var picking = false
+    @State private var pickingZip = false
+    @State private var pickingFolder = false
+    @State private var pickingMod = false
     @State private var showingCheatSheet = false
     @State private var showingHUDEditor = false
     @State private var showingResetAlert = false
@@ -974,25 +1087,72 @@ struct LauncherView: View {
     var isOverlay: Bool = false
     let play: () -> Void
 
+    func L(_ vi: String, _ en: String) -> String {
+        return currentLang == "en" ? en : vi
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            VStack(spacing: 16) {
-                Text(isOverlay ? "Muguet Menu" : "Muguet").font(.largeTitle.weight(.bold))
+            // Left Column: Branding, Status, Launch / Import Controls
+            VStack(spacing: 14) {
+                // Top Header: Logo + Title + Quick Language Toggle
+                HStack(alignment: .center, spacing: 8) {
+                    if let logo = UIImage(named: "mugoat_logo.png") ?? UIImage(contentsOfFile: Bundle.main.path(forResource: "mugoat_logo", ofType: "png") ?? "") {
+                        Image(uiImage: logo)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 38, height: 38)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .shadow(color: .yellow.opacity(0.4), radius: 4)
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(isOverlay ? "MUGOAT MENU" : "MUGOAT")
+                            .font(.title2.weight(.black))
+                            .foregroundStyle(LinearGradient(colors: [.white, .yellow.opacity(0.9)], startPoint: .top, endPoint: .bottom))
+                        Text(L("Bản lai Muguet & GTA Port", "Hybrid Muguet & GTA Port"))
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            currentLang = (currentLang == "vi" ? "en" : "vi")
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Text(currentLang == "vi" ? "🇻🇳 VI" : "🇬🇧 EN")
+                                .font(.caption.bold())
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.blue.opacity(0.25))
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(Color.blue.opacity(0.6), lineWidth: 1))
+                    }
+                }
+                .padding(.horizontal, 2)
+
                 if !muguet_has_game_code() {
-                    Text("This build has no game code: build it with ./make-ios.sh <game.zip>.")
+                    Text(L("Bản build này chưa có mã game: vui lòng build cùng game.wasm/zip.", "This build has no game code: build it with ./make-ios.sh <game.zip>."))
                         .foregroundStyle(.red).font(.callout).multilineTextAlignment(.center)
                 } else if !importer.ready || importer.progress != nil {
                     importView
                 } else if isOverlay {
                     Button(action: resumeAndSave) {
-                        Text("Tiếp tục (Resume)").font(.title3.weight(.semibold)).frame(maxWidth: 220)
+                        Text(L("Tiếp tục (Resume)", "Resume Game")).font(.title3.weight(.semibold)).frame(maxWidth: 220)
                     }
                     .controlSize(.large)
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
 
                     Button(action: { exit(0) }) {
-                        Text("Thoát hẳn ứng dụng (Exit)").font(.callout.weight(.medium)).frame(maxWidth: 220)
+                        Text(L("Thoát hẳn ứng dụng (Exit)", "Exit Application")).font(.callout.weight(.medium)).frame(maxWidth: 220)
                     }
                     .controlSize(.regular)
                     .buttonStyle(.bordered)
@@ -1000,49 +1160,149 @@ struct LauncherView: View {
                 } else {
                     if let error { Text(error).foregroundStyle(.red).font(.callout).multilineTextAlignment(.center) }
                     playButton
-                    Button("Import other game data…") { picking = true }.font(.caption)
+
+                    HStack(spacing: 10) {
+                        Button(L("Nhập .ZIP khác…", "Import .ZIP…")) { pickingZip = true }
+                            .font(.caption)
+                        Text("•").foregroundStyle(.secondary).font(.caption)
+                        Button(L("Chọn thư mục…", "Pick folder…")) { pickingFolder = true }
+                            .font(.caption)
+                        Text("•").foregroundStyle(.secondary).font(.caption)
+                        Button(L("Kiểm tra lại", "Recheck files")) { importer.refreshReady() }
+                            .font(.caption)
+                    }
                 }
-                Text("proudly made by c22dev").font(.caption).foregroundStyle(.secondary)
-                Text("Rebuild: iOSVN").font(.caption).foregroundStyle(.secondary)
+
+                Spacer()
+
+                VStack(spacing: 2) {
+                    Text("Mugoat iOS · Siêu mượt & Đầy đủ tính năng").font(.caption2.bold()).foregroundStyle(.secondary)
+                    Text("Rebuild by iOSVN · Server AWS Singapore · iOS 16+").font(.caption2).foregroundStyle(.secondary.opacity(0.8))
+                }
             }
-            .padding(24)
+            .padding(20)
             .frame(maxWidth: .infinity)
+
+            // Right Column: Form with All Settings, Mods, Controls, Multiplayer
             Form {
-                Section("Tên nhân vật / Người chơi") {
+                // Section 1: Player Name
+                Section(L("Tên nhân vật / Người chơi", "Player Name / Identity")) {
                     HStack {
                         Image(systemName: "person.crop.circle.fill")
                             .foregroundStyle(.blue)
-                        TextField("Nhập tên nhân vật...", text: $s.name)
+                        TextField(L("Nhập tên nhân vật...", "Enter player name..."), text: $s.name)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                     }
-                    Text("Tên này sẽ hiển thị trên đầu nhân vật của bạn khi chơi cùng bạn bè.")
+                    Text(L("Tên này sẽ hiển thị trên đầu nhân vật của bạn khi chơi cùng bạn bè.", "This name displays above your character in Multiplayer."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                if !s.multiplayer {
-                    Picker("Mode", selection: $s.mode) {
-                        Text("Story Mode (Cốt truyện)").tag(1)
-                        Text("Sandbox (Tự do)").tag(2)
+                // Section 2: Mod Manager Menu
+                Section(L("🎮 Quản lý Mod (Mod Manager)", "🎮 Mod Manager (Lua / Models / Textures)")) {
+                    HStack {
+                        Button(action: { pickingMod = true }) {
+                            Label(L("Thêm Mod (+)", "Install Mod (+)"), systemImage: "plus.circle.fill")
+                                .font(.subheadline.bold())
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+
+                        Spacer()
+
+                        Button(action: { modManager.scanMods() }) {
+                            Label(L("Làm mới", "Refresh"), systemImage: "arrow.clockwise")
+                                .font(.caption.bold())
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if let msg = modManager.statusMessage {
+                        Text(msg)
+                            .font(.caption)
+                            .foregroundStyle(.cyan)
+                    }
+
+                    if modManager.mods.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L("Chưa có mod nào được cài đặt.", "No mods installed yet."))
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(L("Bấm nút '+ Thêm Mod' để chọn file mod (.lua, .ytd, .yft, .meta, .asi, .zip) từ Tệp, hoặc sao chép trực tiếp vào thư mục Files > Trên iPhone > Mugoat > mods.", "Tap '+ Install Mod' to pick mod files (.lua, .ytd, .yft, .meta, .asi, .zip) from Files, or copy directly into Files > Mugoat > mods."))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        ForEach(modManager.mods) { mod in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(mod.name)
+                                        .font(.subheadline.bold())
+                                        .foregroundColor(mod.isEnabled ? .white : .secondary)
+                                    HStack(spacing: 6) {
+                                        Text(mod.type)
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 1)
+                                            .background(Color.purple.opacity(0.25))
+                                            .clipShape(Capsule())
+                                        Text(mod.sizeString)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        if !mod.isEnabled {
+                                            Text(L("(Đã tắt)", "(Disabled)"))
+                                                .font(.caption2.bold())
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { mod.isEnabled },
+                                    set: { _ in modManager.toggleMod(mod) }
+                                ))
+                                .labelsHidden()
+
+                                Button(action: { modManager.deleteMod(mod) }) {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                                .padding(.leading, 6)
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
                 }
 
-                Section("Đồ họa & hiệu năng") {
-                    Toggle("Hiển thị FPS, thời gian khung hình & RAM", isOn: $s.showFPS)
-                    Button("Cấu hình nhẹ · giới hạn 60 FPS") {
+                if !s.multiplayer {
+                    Picker(L("Chế độ chơi", "Game Mode"), selection: $s.mode) {
+                        Text(L("Story Mode (Cốt truyện)", "Story Mode")).tag(1)
+                        Text(L("Sandbox (Tự do)", "Sandbox")).tag(2)
+                    }
+                }
+
+                // Section 3: Graphics & Performance
+                Section(L("Đồ họa & Hiệu năng", "Graphics & Performance")) {
+                    Toggle(L("Hiển thị FPS, thời gian khung hình & RAM", "Show FPS, Frame Time & RAM HUD"), isOn: $s.showFPS)
+
+                    Button(L("Cấu hình nhẹ · giới hạn 60 FPS", "Balanced Preset · 60 FPS Limit")) {
                         s.applyLowRamMode(fpsLimit: 60, renderScale: 0.5)
-                        resetAlertMessage = "Đã chọn cấu hình nhẹ, 50% độ phân giải và giới hạn 60 FPS. Chất lượng đồ họa cần mở lại game để áp dụng đầy đủ."
+                        resetAlertMessage = L("Đã chọn cấu hình nhẹ, 50% độ phân giải và giới hạn 60 FPS.", "Selected balanced preset: 50% scale, 60 FPS limit.")
                         showingResetAlert = true
                     }
+
                     HStack(spacing: 10) {
                         Button(action: {
                             s.apply120FpsBoost()
-                            resetAlertMessage = "Đã chọn giới hạn 120 FPS và độ phân giải 50%. FPS thực tế phụ thuộc máy, nhiệt độ và cảnh trong game."
+                            resetAlertMessage = L("Đã bật Boost 120 FPS và độ phân giải 50%. FPS thực tế phụ thuộc màn hình ProMotion và nhiệt độ máy.", "Enabled 120 FPS boost at 50% resolution scale.")
                             showingResetAlert = true
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "bolt.fill")
-                                Text("Thử 120 FPS").bold()
+                                Text(L("Thử 120 FPS", "120 FPS Boost")).bold()
                             }
                             .font(.subheadline)
                             .frame(maxWidth: .infinity)
@@ -1053,12 +1313,12 @@ struct LauncherView: View {
 
                         Button(action: {
                             s.applyLowRamMode()
-                            resetAlertMessage = "Đã chọn cấu hình nhẹ: giới hạn 30 FPS, độ phân giải 35%. Mở lại game để áp dụng đầy đủ; xem RAM thực tế trên màn hình."
+                            resetAlertMessage = L("Đã chọn cấu hình Potato: giới hạn 30 FPS, độ phân giải 35% cho máy ram thấp hoặc máy cũ.", "Selected Potato mode: 30 FPS limit, 35% scale.")
                             showingResetAlert = true
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "leaf.fill")
-                                Text("Máy cũ · 30 FPS").bold()
+                                Text(L("Potato Mode · 30 FPS", "Potato · 30 FPS")).bold()
                             }
                             .font(.subheadline)
                             .frame(maxWidth: .infinity)
@@ -1069,33 +1329,28 @@ struct LauncherView: View {
                     }
                     .padding(.vertical, 2)
 
-                    Picker("Tốc độ khung hình (Frame Limit)", selection: $s.fps) {
-                        Text("30 fps (Tiết kiệm pin)").tag(30)
-                        Text("60 fps (Mặc định)").tag(60)
-                        Text("120 fps (Mở khóa 120 FPS / ProMotion)").tag(120)
+                    Picker(L("Tốc độ khung hình (Frame Limit)", "Frame Rate Limit"), selection: $s.fps) {
+                        Text("30 fps (" + L("Tiết kiệm pin", "Battery Saver") + ")").tag(30)
+                        Text("60 fps (" + L("Mặc định", "Default") + ")").tag(60)
+                        Text("120 fps (" + L("Mở khóa 120 FPS / ProMotion", "120 FPS ProMotion") + ")").tag(120)
                     }
 
-                    Picker("Độ phân giải (Resolution)", selection: $s.scale) {
-                        Text("35 % (Siêu nhẹ)").tag(0.35)
-                        Text("50 % (Nhẹ)").tag(0.5)
-                        Text("65 % (Cân bằng)").tag(0.65)
-                        Text("75 % (Rõ nét)").tag(0.75)
-                        Text("100 % (Độ phân giải gốc)").tag(1.0)
+                    Picker(L("Độ phân giải (Resolution Scale)", "Resolution Scale"), selection: $s.scale) {
+                        Text("35 % (" + L("Siêu nhẹ", "Potato") + ")").tag(0.35)
+                        Text("50 % (" + L("Nhẹ", "Low") + ")").tag(0.5)
+                        Text("65 % (" + L("Cân bằng", "Balanced") + ")").tag(0.65)
+                        Text("75 % (" + L("Rõ nét", "Crisp") + ")").tag(0.75)
+                        Text("100 % (" + L("Độ phân giải gốc", "Native 100%") + ")").tag(1.0)
                     }
 
-                    Picker("Chất lượng Textures", selection: $s.textures) {
-                        Text("Bình thường / Thấp (Ít tốn RAM)").tag(0)
-                        Text("Cao").tag(1)
-                        Text("Rất cao").tag(2)
+                    Picker(L("Chất lượng Textures", "Texture Quality"), selection: $s.textures) {
+                        Text(L("Bình thường / Thấp (Ít tốn RAM)", "Normal / Low (Low RAM)")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
                     }
 
-                    Toggle("Đồng bộ nhịp màn hình (V-Sync)", isOn: $s.promotionSync)
-                    Text("Giới hạn theo khả năng màn hình. Nếu bật làm FPS thấp hơn, thử tắt để dùng bộ điều nhịp của Muguet. 120 là giới hạn yêu cầu, không phải FPS đo được.")
-                        .font(.caption).foregroundStyle(.secondary)
-
-                    Toggle("Giảm hiệu ứng nặng", isOn: $s.deepOptimization)
-                    Text("Giảm giới hạn bóng, cỏ và hiệu ứng trong cài đặt game. Mở lại game để áp dụng đầy đủ chất lượng đồ họa.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle(L("Đồng bộ nhịp màn hình (V-Sync)", "Display Sync (V-Sync)"), isOn: $s.promotionSync)
+                    Toggle(L("Giảm hiệu ứng nặng", "Deep Optimization (Reduce Heavy Effects)"), isOn: $s.deepOptimization)
 
                     Button(action: {
                         resetGraphicsSettings()
@@ -1118,10 +1373,10 @@ struct LauncherView: View {
                         s.promotionSync = false
                         try? s.save()
                         muguet_reload_settings()
-                        resetAlertMessage = "Đã khôi phục đồ họa về cấu hình an toàn: Shader High, MSAA tắt, giới hạn 60 FPS. Mở lại game để áp dụng đầy đủ."
+                        resetAlertMessage = L("Đã khôi phục đồ họa về cấu hình an toàn: Shader High, MSAA tắt, giới hạn 60 FPS.", "Reset graphics settings to safe default.")
                         showingResetAlert = true
                     }) {
-                        Label("Khôi phục đồ họa gốc (Sửa lỗi màn hình đen)", systemImage: "arrow.counterclockwise.circle.fill")
+                        Label(L("Khôi phục đồ họa gốc (Sửa màn hình đen)", "Reset Graphics to Safe Default"), systemImage: "arrow.counterclockwise.circle.fill")
                             .font(.subheadline.bold())
                             .frame(maxWidth: .infinity)
                     }
@@ -1129,90 +1384,89 @@ struct LauncherView: View {
                     .tint(.red)
                 }
 
-                Section("🎮 Cài đặt Đồ họa GTA V Chi tiết (In-Game Graphics)") {
-                    Text("Thiết lập trực tiếp các thông số đồ họa của GTA V ngay tại đây mà không cần chỉnh trong game.")
-                        .font(.caption).foregroundStyle(.secondary)
-
-                    Picker("Chất lượng Đổ bóng (Shadows)", selection: $s.shadowQuality) {
-                        Text("Bình thường (Mượt nhất)").tag(1)
-                        Text("Cao").tag(2)
-                        Text("Rất cao").tag(3)
+                // Section 4: Granular GTA V In-Game Graphics
+                Section(L("🎮 Cài đặt Đồ họa GTA V Chi tiết", "🎮 Granular In-Game Graphics")) {
+                    Picker(L("Chất lượng Đổ bóng (Shadows)", "Shadow Quality"), selection: $s.shadowQuality) {
+                        Text(L("Bình thường (Mượt nhất)", "Normal (Fastest)")).tag(1)
+                        Text(L("Cao", "High")).tag(2)
+                        Text(L("Rất cao", "Very High")).tag(3)
                     }
 
-                    Picker("Khoảng cách Đổ bóng (Shadow Distance)", selection: $s.shadowDistance) {
-                        Text("Ngắn (0.5× - Tiết kiệm RAM)").tag(0.5)
-                        Text("Tiêu chuẩn (1.0×)").tag(1.0)
-                        Text("Xa (1.5×)").tag(1.5)
+                    Picker(L("Khoảng cách Đổ bóng (Shadow Distance)", "Shadow Distance"), selection: $s.shadowDistance) {
+                        Text(L("Ngắn (0.5× - Tiết kiệm RAM)", "Short (0.5×)")).tag(0.5)
+                        Text(L("Tiêu chuẩn (1.0×)", "Normal (1.0×)")).tag(1.0)
+                        Text(L("Xa (1.5×)", "Far (1.5×)")).tag(1.5)
                     }
 
-                    Picker("Chất lượng Phản chiếu (Reflections)", selection: $s.reflectionQuality) {
-                        Text("Bình thường").tag(1)
-                        Text("Cao").tag(2)
-                        Text("Rất cao").tag(3)
+                    Picker(L("Chất lượng Phản chiếu (Reflections)", "Reflections"), selection: $s.reflectionQuality) {
+                        Text(L("Bình thường", "Normal")).tag(1)
+                        Text(L("Cao", "High")).tag(2)
+                        Text(L("Rất cao", "Very High")).tag(3)
                     }
 
-                    Picker("Chất lượng Cỏ cây & Thảo mộc (Grass)", selection: $s.grassQuality) {
-                        Text("Bình thường (Chống tụt FPS đồi núi)").tag(0)
-                        Text("Cao").tag(1)
-                        Text("Rất cao").tag(2)
+                    Picker(L("Chất lượng Cỏ cây (Grass)", "Grass Quality"), selection: $s.grassQuality) {
+                        Text(L("Bình thường (Chống tụt FPS)", "Normal (Best FPS)")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
                     }
 
-                    Picker("Chất lượng Mặt nước (Water)", selection: $s.waterQuality) {
-                        Text("Bình thường").tag(0)
-                        Text("Cao").tag(1)
-                        Text("Rất cao").tag(2)
+                    Picker(L("Chất lượng Mặt nước (Water)", "Water Quality"), selection: $s.waterQuality) {
+                        Text(L("Bình thường", "Normal")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
                     }
 
-                    Picker("Chất lượng Hạt & Hiệu ứng cháy nổ (Particles)", selection: $s.particleQuality) {
-                        Text("Bình thường").tag(0)
-                        Text("Cao").tag(1)
-                        Text("Rất cao").tag(2)
+                    Picker(L("Chất lượng Hạt & Cháy nổ (Particles)", "Particles"), selection: $s.particleQuality) {
+                        Text(L("Bình thường", "Normal")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
                     }
 
-                    Picker("Hậu kỳ & Ánh sáng (Post FX)", selection: $s.postFx) {
-                        Text("Bình thường (Tối ưu FPS)").tag(0)
-                        Text("Cao (Bloom & Tia nắng)").tag(1)
-                        Text("Rất cao").tag(2)
+                    Picker(L("Hậu kỳ & Ánh sáng (Post FX)", "Post FX"), selection: $s.postFx) {
+                        Text(L("Bình thường", "Normal")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
                     }
 
-                    Picker("Lọc vân bề mặt (Anisotropic Filtering)", selection: $s.anisotropicFiltering) {
-                        Text("Tắt (x0)").tag(0)
+                    Picker(L("Lọc vân bề mặt (Anisotropic)", "Anisotropic Filtering"), selection: $s.anisotropicFiltering) {
+                        Text(L("Tắt (x0)", "Off (x0)")).tag(0)
                         Text("x4").tag(4)
                         Text("x8").tag(8)
-                        Text("x16 (Rõ nét mặt đường)").tag(16)
+                        Text("x16").tag(16)
                     }
 
-                    Toggle("Khử răng cưa viền (FXAA)", isOn: $s.fxaa)
+                    Toggle(L("Khử răng cưa viền (FXAA)", "FXAA Anti-aliasing"), isOn: $s.fxaa)
 
-                    Picker("Mật độ Xe cộ trên đường (Traffic)", selection: $s.cityDensity) {
-                        Text("Vắng vẻ (0% - Mượt nhất)").tag(0.0)
-                        Text("Vừa phải (50%)").tag(0.5)
-                        Text("Đông đúc (100% - Như PC)").tag(1.0)
+                    Picker(L("Mật độ Xe cộ (Traffic)", "Traffic Density"), selection: $s.cityDensity) {
+                        Text(L("Vắng vẻ (0% - Mượt nhất)", "Low (0%)")).tag(0.0)
+                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
+                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
                     }
 
-                    Picker("Mật độ & Đa dạng Người đi bộ (Pedestrians)", selection: $s.pedDensity) {
-                        Text("Thấp (0% - Tiết kiệm RAM)").tag(0.0)
-                        Text("Vừa phải (50%)").tag(0.5)
-                        Text("Đông đúc (100%)").tag(1.0)
+                    Picker(L("Mật độ Người đi bộ (Pedestrians)", "Pedestrian Density"), selection: $s.pedDensity) {
+                        Text(L("Thấp (0% - Tiết kiệm RAM)", "Low (0%)")).tag(0.0)
+                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
+                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
                     }
 
-                    Picker("Tầm nhìn xa & Chi tiết vật thể (LOD Scale)", selection: $s.distanceScaling) {
-                        Text("Tiết kiệm RAM (-0.5)").tag(-0.5)
-                        Text("Tiêu chuẩn (0.0)").tag(0.0)
-                        Text("Tầm nhìn xa (+0.5)").tag(0.5)
+                    Picker(L("Tầm nhìn xa vật thể (LOD Scale)", "Distance Scaling (LOD)"), selection: $s.distanceScaling) {
+                        Text(L("Tiết kiệm RAM (-0.5)", "Potato (-0.5)")).tag(-0.5)
+                        Text(L("Tiêu chuẩn (0.0)", "Default (0.0)")).tag(0.0)
+                        Text(L("Tầm nhìn xa (+0.5)", "Extended (+0.5)")).tag(0.5)
                     }
                 }
 
-                Section("Tùy chỉnh Giao diện Nút Bấm (Touch Controls)") {
+                // Section 5: Touch Controls & HUD Editor
+                Section(L("Tùy chỉnh Nút Bấm GTA Port (HUD Controls)", "GTA Port HUD Controls")) {
                     Button(action: { showingHUDEditor = true }) {
-                        Label("Chỉnh vị trí & Kích thước nút trực quan (HUD Editor)", systemImage: "hand.draw.fill")
+                        Label(L("Chỉnh vị trí & Kích thước nút (HUD Editor)", "Custom HUD Editor (Drag & Resize)"), systemImage: "hand.draw.fill")
                             .font(.subheadline.bold())
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.blue)
 
-                    Button("Khôi phục mặc định nút bấm") {
+                    Button(L("Khôi phục mặc định nút bấm", "Reset HUD Layout to Default")) {
                         s.resetLayout()
                     }
                     .font(.caption)
@@ -1220,72 +1474,69 @@ struct LauncherView: View {
                 }
 
                 HStack {
-                    Text("Look sensitivity")
+                    Text(L("Độ nhạy góc nhìn", "Look sensitivity"))
                     Slider(value: $s.touch, in: 0.25...6.0, step: 0.25)
                     Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 55, alignment: .trailing)
                 }
-                Section("Aiming") {
-                    Picker("Aim button", selection: $s.aimMode) {
-                        Text("Tap to toggle").tag("toggle")
-                        Text("Hold to aim").tag("hold")
+
+                Section(L("Ngắm bắn (Aiming)", "Aiming")) {
+                    Picker(L("Nút ngắm", "Aim button mode"), selection: $s.aimMode) {
+                        Text(L("Chạm để bật/tắt", "Tap to toggle")).tag("toggle")
+                        Text(L("Giữ để ngắm", "Hold to aim")).tag("hold")
                     }
-                    Toggle("Aim while firing", isOn: $s.fireAim)
+                    Toggle(L("Ngắm khi bắn", "Aim while firing"), isOn: $s.fireAim)
                     HStack {
-                        Text("Aim sensitivity")
+                        Text(L("Độ nhạy khi ngắm", "Aim sensitivity"))
                         Slider(value: $s.aimSensitivity, in: 0.1...3.0, step: 0.1)
                         Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit().frame(width: 55, alignment: .trailing)
                     }
-                    Text("Drag on the right FIRE button to adjust aim while shooting. The left FIRE button frees your right thumb to aim.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Toggle("Mute audio", isOn: $s.mute)
 
-                Section("Chơi Online (Multiplayer)") {
-                    Toggle("Bật chế độ Multiplayer", isOn: $s.multiplayer)
+                Toggle(L("Tắt âm thanh (Mute audio)", "Mute audio"), isOn: $s.mute)
+
+                // Section 6: Online Multiplayer
+                Section(L("Chơi Online (Multiplayer)", "Online Multiplayer (AWS Server)")) {
+                    Toggle(L("Bật chế độ Multiplayer", "Enable Multiplayer"), isOn: $s.multiplayer)
                     if s.multiplayer {
-                        Picker("Chế độ phòng", selection: $s.roomMode) {
-                            Text("Tạo phòng").tag("create")
-                            Text("Vào phòng").tag("join")
-                            Text("Công khai").tag("public")
-                            Text("LAN Host").tag("lan")
+                        Picker(L("Chế độ phòng", "Room Mode"), selection: $s.roomMode) {
+                            Text(L("Tạo phòng", "Create")).tag("create")
+                            Text(L("Vào phòng", "Join")).tag("join")
+                            Text(L("Công khai", "Public")).tag("public")
+                            Text(L("LAN Host", "LAN")).tag("lan")
                         }
                         .pickerStyle(.segmented)
 
                         if s.roomMode == "create" {
                             VStack(alignment: .leading, spacing: 12) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("1. Chọn Chế độ phòng:").font(.subheadline.bold())
+                                    Text(L("1. Chọn Chế độ phòng:", "1. Select Game Mode:")).font(.subheadline.bold())
                                     Picker("Mode", selection: $s.mode) {
-                                        Text("Story Mode (Cốt truyện)").tag(1)
-                                        Text("Sandbox (Tự do)").tag(2)
+                                        Text(L("Story Mode", "Story Mode")).tag(1)
+                                        Text(L("Sandbox", "Sandbox")).tag(2)
                                     }
                                     .pickerStyle(.segmented)
                                 }
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("2. Luật sát thương (PvP):").font(.subheadline.bold())
+                                    Text(L("2. Luật sát thương (PvP):", "2. PvP Damage Rules:")).font(.subheadline.bold())
                                     Picker("PvP", selection: $s.pvp) {
-                                        Text("🛡️ Hòa bình (Co-op)").tag(false)
-                                        Text("⚔️ Đấu trường (PvP)").tag(true)
+                                        Text(L("🛡️ Hòa bình (Co-op)", "🛡️ Peaceful (Co-op)")).tag(false)
+                                        Text(L("⚔️ Đấu trường (PvP)", "⚔️ PvP Combat")).tag(true)
                                     }
                                     .pickerStyle(.segmented)
-                                    Text(s.pvp ? "PvP Bật: Người chơi có thể bắn và tiêu diệt nhau." : "Hòa bình: Không gây sát thương lẫn nhau, tránh bắn nhau khi spawn.")
-                                        .font(.caption2).foregroundStyle(.secondary)
                                 }
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("3. Số người chơi tối đa (Server capacity):").font(.subheadline.bold())
-                                    Picker("Giới hạn người chơi", selection: $s.maxPlayers) {
-                                        Text("32 Người chơi").tag(32)
-                                        Text("64 Người chơi").tag(64)
+                                    Text(L("3. Số người chơi tối đa:", "3. Server Capacity:")).font(.subheadline.bold())
+                                    Picker("Capacity", selection: $s.maxPlayers) {
+                                        Text(L("32 Người", "32 Players")).tag(32)
+                                        Text(L("64 Người", "64 Players")).tag(64)
                                     }
                                     .pickerStyle(.segmented)
-                                    Text("Tạo phòng hỗ trợ tối đa \(s.maxPlayers) người chơi trực tuyến cùng lúc.")
-                                        .font(.caption2).foregroundStyle(.secondary)
                                 }
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("4. Mã phòng chia sẻ cho bạn bè:").font(.subheadline.bold())
+                                    Text(L("4. Mã phòng chia sẻ cho bạn bè:", "4. Room Code to Share:")).font(.subheadline.bold())
                                     HStack(spacing: 8) {
                                         Text(s.formattedCreateCode)
                                             .font(.title2.monospaced().bold())
@@ -1294,8 +1545,6 @@ struct LauncherView: View {
                                             .padding(.vertical, 6)
                                             .background(Color.green.opacity(0.15))
                                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                                            .fixedSize(horizontal: true, vertical: false)
-                                            .layoutPriority(2)
 
                                         Spacer(minLength: 4)
 
@@ -1304,127 +1553,73 @@ struct LauncherView: View {
                                         }) {
                                             Image(systemName: "arrow.clockwise")
                                                 .font(.caption.bold())
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 7)
+                                                .padding(6)
                                         }
                                         .buttonStyle(.bordered)
-                                        .help("Đổi mã")
 
                                         Button(action: {
                                             UIPasteboard.general.string = s.formattedCreateCode
                                         }) {
                                             HStack(spacing: 4) {
                                                 Image(systemName: "doc.on.doc")
-                                                Text("Chép")
+                                                Text(L("Chép", "Copy"))
                                             }
                                             .font(.caption.bold())
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 7)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 6)
                                         }
                                         .buttonStyle(.borderedProminent)
-                                        .fixedSize()
                                     }
                                 }
 
                                 HStack {
                                     Image(systemName: "lock.fill").foregroundStyle(.secondary)
-                                    TextField("Mật khẩu phòng (Tùy chọn)", text: $s.roomPass)
+                                    TextField(L("Mật khẩu phòng (Tùy chọn)", "Room Password (Optional)"), text: $s.roomPass)
                                         .textInputAutocapitalization(.never)
                                         .autocorrectionDisabled()
                                 }
-
-                                HStack(spacing: 8) {
-                                    Label(s.mode == 1 ? "Story Mode" : "Sandbox", systemImage: "gamecontroller")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(s.mode == 1 ? .orange : .cyan)
-                                    Text("•")
-                                    Label(s.pvp ? "PvP Bật" : "Hòa bình Co-op", systemImage: s.pvp ? "burst.fill" : "shield.fill")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(s.pvp ? .red : .green)
-                                    Text("•")
-                                    Label(s.roomPass.isEmpty ? "Phòng Mở" : "Có Pass", systemImage: s.roomPass.isEmpty ? "lock.open" : "lock")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(8)
-                                .background(Color.secondary.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                         } else if s.roomMode == "join" {
                             VStack(alignment: .leading, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Nhập mã phòng:").font(.subheadline.bold())
-                                    TextField("Ví dụ: SP-8621 hoặc BX-5520", text: $s.joinCode)
-                                        .font(.title3.monospaced().bold())
-                                        .textInputAutocapitalization(.characters)
-                                        .autocorrectionDisabled()
-                                        .onChange(of: s.joinCode) { val in
-                                            s.parseJoinCode(val)
-                                        }
-                                }
-
-                                let clean = s.joinCode.trimmingCharacters(in: .whitespaces).uppercased()
-                                if !clean.isEmpty {
-                                    HStack(spacing: 8) {
-                                        Label(s.mode == 1 ? "Story Mode" : "Sandbox", systemImage: "gamecontroller")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(s.mode == 1 ? .orange : .cyan)
-                                        Text("•")
-                                        Label(s.pvp ? "PvP Bật" : "Hòa bình Co-op", systemImage: s.pvp ? "burst.fill" : "shield.fill")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(s.pvp ? .red : .green)
-                                        Spacer()
-                                        Text("Đã đồng bộ tự động")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                Text(L("Nhập mã phòng:", "Enter Room Code:")).font(.subheadline.bold())
+                                TextField(L("Ví dụ: SP-8621 hoặc BX-5520", "e.g. SP-8621 or BX-5520"), text: $s.joinCode)
+                                    .font(.title3.monospaced().bold())
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .onChange(of: s.joinCode) { val in
+                                        s.parseJoinCode(val)
                                     }
-                                    .padding(8)
-                                    .background(Color.green.opacity(0.12))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                } else {
-                                    Text("Chế độ chơi (Story / Sandbox) và luật PvP tự động đồng bộ theo mã phòng của chủ phòng.")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
 
                                 HStack {
                                     Image(systemName: "lock.fill").foregroundStyle(.secondary)
-                                    TextField("Mật khẩu phòng (nếu chủ phòng đặt)", text: $s.roomPass)
+                                    TextField(L("Mật khẩu phòng (nếu có)", "Room Password (if set)"), text: $s.roomPass)
                                         .textInputAutocapitalization(.never)
                                         .autocorrectionDisabled()
                                 }
-
-                                Text("Lưu ý: Luật sát thương PvP và Chế độ chơi hoàn toàn tuân theo chủ phòng, không thể tự đổi.")
-                                    .font(.caption2).foregroundStyle(.orange)
                             }
                         } else if s.roomMode == "public" {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Picker("Phân vùng công khai", selection: $s.mode) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Picker("Public Division", selection: $s.mode) {
                                     Text("Story Mode Public").tag(1)
                                     Text("Sandbox Public").tag(2)
                                 }
                                 .pickerStyle(.segmented)
-
-                                HStack {
-                                    Image(systemName: "globe.americas.fill").foregroundStyle(.green)
-                                    Text("Sảnh chung công khai (Hỗ trợ 32 / 64 người/phòng)")
-                                        .fontWeight(.medium)
-                                }
-                                Text("Tự động kết nối vào sảnh chung với người chơi trực tuyến trên server AWS iOSVN. Chế độ Hòa bình bật mặc định.")
+                                Text(L("Tự động kết nối vào sảnh chung trên server AWS iOSVN.", "Connects to public lobby on AWS Singapore server."))
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 8) {
-                                Picker("Chế độ LAN", selection: $s.mode) {
+                                Picker("LAN", selection: $s.mode) {
                                     Text("Story Mode").tag(1)
                                     Text("Sandbox").tag(2)
                                 }
                                 .pickerStyle(.segmented)
-                                Text("Mở phòng trên Wi-Fi (Tối đa \(s.maxPlayers) người): Kết nối qua: \(localIPs().joined(separator: " hoặc "))")
+                                Text(L("Mở phòng Wi-Fi nội bộ: ", "Local Wi-Fi Host: ") + localIPs().joined(separator: " / "))
                                     .font(.callout).textSelection(.enabled)
                             }
                         }
 
-                        DisclosureGroup("Máy chủ (Nâng cao)") {
+                        DisclosureGroup(L("Máy chủ (Nâng cao)", "Server Address (Advanced)")) {
                             HStack {
                                 Text("Server IP:")
                                 TextField("18.143.103.253", text: $s.server)
@@ -1434,39 +1629,41 @@ struct LauncherView: View {
                             }
                             HStack {
                                 Circle().fill(Color.green).frame(width: 8, height: 8)
-                                Text("Server AWS iOSVN Singapore (Ping ~40ms, Hỗ trợ 32 / 64 người)")
+                                Text("AWS Singapore Server (Ping ~40ms · 32/64 Slots)")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
 
+                // Section 7: In-Game Cheats
                 if !s.multiplayer {
-                    Section("Lệnh Cheat GTA V (Chỉ Offline)") {
+                    Section(L("Lệnh Cheat GTA V (Chỉ Offline)", "GTA V Cheats (Offline Only)")) {
                         Button(action: { showingCheatSheet = true }) {
-                            Label("Xem & Kích hoạt Lệnh Cheat", systemImage: "wand.and.stars")
+                            Label(L("Xem & Kích hoạt Lệnh Cheat", "View & Activate Cheats"), systemImage: "wand.and.stars")
                         }
-                        Text("Tra cứu và kích hoạt nhanh các lệnh cheat (Bất tử, full vũ khí, trực thăng, xe đua...). Lệnh cheat tự động bị khóa trong chế độ Online.")
+                        Text(L("Tra cứu và kích hoạt nhanh các lệnh cheat (Bất tử, full vũ khí, trực thăng, xe đua...). Tự động khóa trong chế độ Online.", "Quick cheat activator for single player."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
 
-                Section("Save Data") {
-                    Button("Share / Backup saves") { shareSaves() }
-                    Text("In game: save via Phone > Quick Save, or Pause > Game > Save Game. Saves are stored in Files app > On My iPhone > Muguet > saves.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Diagnostics") {
-                    Button("Share startup / memory logs") { shareDiagnostics() }
-                    Text("After a crash, reopen Muguet and share the previous log. Logs contain connection addresses and runtime errors, not game files.")
-                        .font(.caption).foregroundStyle(.secondary)
+                // Section 8: Save Data & Diagnostics
+                Section(L("Dữ liệu & Chẩn đoán", "Save Data & Logs")) {
+                    Button(L("Chia sẻ / Sao lưu Save Game", "Backup / Share Save Files")) { shareSaves() }
+                    Button(L("Chia sẻ nhật ký chẩn đoán (Crash Logs)", "Share Diagnostic Logs")) { shareDiagnostics() }
                 }
             }
             .frame(maxWidth: .infinity)
         }
         .preferredColorScheme(.dark)
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.zip]) { result in
+        .fileImporter(isPresented: $pickingZip, allowedContentTypes: [.zip]) { result in
             if case .success(let url) = result { importer.run(url) }
+        }
+        .fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { importer.importFolder(from: url) }
+        }
+        .fileImporter(isPresented: $pickingMod, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result { modManager.installMod(from: url) }
         }
         .sheet(isPresented: $showingCheatSheet) {
             CheatMenuView(onApply: { code in
@@ -1476,10 +1673,17 @@ struct LauncherView: View {
         .fullScreenCover(isPresented: $showingHUDEditor) {
             HUDEditorView(settings: s)
         }
-        .alert("Thông báo Đồ họa", isPresented: $showingResetAlert) {
+        .alert(L("Thông báo Đồ họa", "Graphics Notice"), isPresented: $showingResetAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(resetAlertMessage)
+        }
+        .onAppear {
+            importer.refreshReady()
+            modManager.scanMods()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            importer.refreshReady()
         }
     }
 
@@ -1487,21 +1691,44 @@ struct LauncherView: View {
         VStack(spacing: 12) {
             if let p = importer.progress {
                 ProgressView(value: p)
-                Text("Importing… \(Int(p * 100)) %").font(.callout).monospacedDigit()
+                Text("\(L("Đang nhập dữ liệu…", "Importing…")) \(Int(p * 100)) %").font(.callout).monospacedDigit()
             } else {
-                Button("Import game data .zip") { picking = true }
+                HStack(spacing: 10) {
+                    Button(action: { pickingZip = true }) {
+                        Label(L("Chọn file .ZIP", "Pick .ZIP File"), systemImage: "archivebox.fill")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
                     .controlSize(.large)
                     .buttonStyle(.borderedProminent)
+                    .tint(.blue)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("💡 Hướng dẫn cài đặt nhanh qua ứng dụng Tệp:")
+                    Button(action: { pickingFolder = true }) {
+                        Label(L("Chọn Thư Mục Game", "Pick Game Folder"), systemImage: "folder.fill")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.indigo)
+                }
+
+                Button(action: { importer.refreshReady() }) {
+                    Label(L("🔄 Kiểm tra lại dữ liệu game", "🔄 Recheck / Verify Game Files"), systemImage: "arrow.clockwise")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(.bordered)
+                .tint(.green)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("💡 Hướng dẫn cài đặt offline qua ứng dụng Tệp (Files):", "💡 Offline Setup Guide via Files App:"))
                         .font(.caption.bold())
                         .foregroundStyle(.orange)
-                    Text("1. Giải nén file zip chứa data trên máy tính hoặc app Tệp.\n2. Mở app Tệp (Files) > Trên iPhone/iPad > Muguet.\n3. Tạo thư mục tên là 'game' (chữ thường).\n4. Dán 2 thư mục 'data' và 'b' vào bên trong thư mục 'game'.")
+                    Text(L("1. Mở ứng dụng Tệp (Files) > Trên iPhone/iPad > Mugoat.\n2. Tạo thư mục tên là 'game' (chữ thường).\n3. Chép 2 thư mục 'data' và 'b' vào bên trong 'game'.\n4. Bấm nút '🔄 Kiểm tra lại dữ liệu game' ở trên.", "1. Open Files app > On My iPhone > Mugoat.\n2. Create a folder named 'game'.\n3. Copy 'data' and 'b' folders inside 'game'.\n4. Tap '🔄 Recheck Game Files' above."))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Divider().padding(.vertical, 2)
-                    Text("📦 Lưu ý dung lượng: Game đầy đủ chiếm ~21 GB. Nếu giải nén trực tiếp trên iPhone/iPad cần trống tối thiểu 42 GB (21 GB zip + 21 GB giải nén; sau khi xong xóa file zip đi còn 21 GB). Giải nén trước trên máy tính rồi chép vào sẽ chỉ tốn 21 GB bộ nhớ máy.")
+                    Divider().padding(.vertical, 1)
+                    Text(L("📦 Dung lượng: Game đầy đủ chiếm ~21 GB. Nên giải nén trước trên máy tính rồi chép vào để tiết kiệm bộ nhớ máy.", "📦 Storage: Full game is ~21 GB. Unzipping on PC and copying saves iPhone storage."))
                         .font(.caption2)
                         .foregroundStyle(.yellow)
                 }
@@ -1514,19 +1741,12 @@ struct LauncherView: View {
     }
 
     @ViewBuilder var playButton: some View {
-        let button = Button(action: start) {
-            Text("Play").font(.title3.weight(.semibold)).frame(maxWidth: 220)
+        Button(action: start) {
+            Text(L("Chơi ngay (Play)", "Play")).font(.title3.weight(.bold)).frame(maxWidth: 220)
         }
         .controlSize(.large)
-        #if compiler(>=6.2)
-        if #available(iOS 26.0, *) {
-            button.buttonStyle(.glassProminent)
-        } else {
-            button.buttonStyle(.borderedProminent)
-        }
-        #else
-        button.buttonStyle(.borderedProminent)
-        #endif
+        .buttonStyle(.borderedProminent)
+        .tint(.green)
     }
 
     func resumeAndSave() {
@@ -1540,12 +1760,12 @@ struct LauncherView: View {
         if s.multiplayer && s.roomMode == "join" {
             let digits = s.joinCode.filter { $0.isNumber }
             if digits.isEmpty {
-                error = "Nhập mã phòng (vd: SP-8621) để vào chơi cùng bạn bè."
+                error = L("Nhập mã phòng (vd: SP-8621) để vào chơi cùng bạn bè.", "Enter a valid room code (e.g. SP-8621) to join.")
                 return
             }
         }
         if s.multiplayer && s.roomMode != "lan" && s.server.trimmingCharacters(in: .whitespaces).isEmpty {
-            error = "Nhập địa chỉ máy chủ để kết nối."
+            error = L("Nhập địa chỉ máy chủ để kết nối.", "Enter a valid server address.")
             return
         }
         if s.name.trimmingCharacters(in: .whitespaces).isEmpty {

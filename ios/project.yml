@@ -1,22 +1,24 @@
 # muguet - project.yml
 # Constantin Clerc (c22dev) - 0.1
 
-name: Muguet
+name: Mugoat
 options:
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "16.0"
 targets:
-  Muguet:
+  Mugoat:
     type: application
     platform: iOS
     sources:
       - path: stub.c
       - path: LaunchScreen.storyboard
       - path: ../assets/muguet.icon
+      - path: ControlIcons
+      - path: ../assets/mugoat_logo.png
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ch.cclerc.muguet.ios
-        PRODUCT_NAME: Muguet
+        PRODUCT_BUNDLE_IDENTIFIER: vn.iosvn.mugoat
+        PRODUCT_NAME: Mugoat
         EXECUTABLE_NAME: muguet
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Muguet.entitlements
@@ -32,5 +34,6 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          xcrun vtool -set-build-version ios 15.0 26.0 -replace -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" \
+          xcrun vtool -set-build-version ios 16.0 26.0 -replace -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" \
             "$SRCROOT/../target/ios/aarch64-apple-ios/release/muguet"
+

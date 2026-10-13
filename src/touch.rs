@@ -222,6 +222,7 @@ enum Grip {
 struct Btn {
     view: Retained<AnyObject>,
     label: Retained<AnyObject>,
+    icon_view: Option<Retained<AnyObject>>,
     center: (f64, f64),
     radius: f64,
 }
@@ -299,6 +300,48 @@ fn label(parent: &AnyObject, r: f64) -> Retained<AnyObject> {
 fn set_text(l: &AnyObject, text: &str) {
     unsafe { let _: () = msg_send![l, setText: &*NSString::from_str(text)]; }
 }
+fn image_view(parent: &AnyObject, r: f64) -> Option<Retained<AnyObject>> {
+    unsafe {
+        let iv: Retained<AnyObject> = msg_send![class!(UIImageView), new];
+        let pad = r * 0.42;
+        let sz = 2.0 * r - 2.0 * pad;
+        let _: () = msg_send![&*iv, setFrame: rect(pad, pad, sz, sz)];
+        let _: () = msg_send![&*iv, setUserInteractionEnabled: false];
+        let _: () = msg_send![&*iv, setContentMode: 1isize];
+        let tint = color(1.0, 0.95);
+        let _: () = msg_send![&*iv, setTintColor: &*tint];
+        let _: () = msg_send![parent, addSubview: &*iv];
+        Some(iv)
+    }
+}
+fn set_icon(iv: &AnyObject, name: &str) -> bool {
+    unsafe {
+        let ns_name = NSString::from_str(name);
+        let img: *mut AnyObject = msg_send![class!(UIImage), imageNamed: &*ns_name];
+        if img.is_null() { return false; }
+        let _: () = msg_send![iv, setImage: img];
+        true
+    }
+}
+fn button_icon_name(idx: usize, in_car: bool) -> Option<&'static str> {
+    match idx {
+        0 => Some(if in_car { "icon_gas" } else { "icon_fire" }),
+        1 => Some(if in_car { "icon_brake" } else { "icon_aim" }),
+        2 => Some(if in_car { "icon_handbrake" } else { "icon_jump" }),
+        3 => Some("icon_enter_exit"),
+        4 => Some(if in_car { "icon_horn" } else { "icon_reload" }),
+        5 => Some("icon_weapons"),
+        6 => Some("icon_cover"),
+        8 => Some("icon_camera"),
+        9 => Some("icon_settings"),
+        10 => Some("icon_pause"),
+        11 => Some("icon_phone"),
+        13 => Some("icon_special"),
+        14 => Some("icon_look"),
+        15 => Some("icon_fire"),
+        _ => None,
+    }
+}
 fn set_hidden(v: &AnyObject, hidden: bool) {
     unsafe { let _: () = msg_send![v, setHidden: hidden]; }
 }
@@ -350,7 +393,8 @@ pub fn install(window: &Window) {
             center.1 += c_dy;
             let view = circle(&root, center, r, 1.0, button_opacity());
             let label = label(&view, r);
-            Btn { view, label, center, radius: r }
+            let icon_view = if !s.nav { image_view(&view, r) } else { None };
+            Btn { view, label, icon_view, center, radius: r }
         })
         .collect();
     let (j_dx, j_dy, j_scale) = custom_button_layout(16);
@@ -454,7 +498,25 @@ impl Overlay {
             let act = self.spec_act(i);
             let b = &self.buttons[i];
             set_hidden(&b.view, act.is_none());
-            if let Some((text, _)) = act { set_text(&b.label, text); }
+            if let Some((text, _)) = act {
+                let mut has_icon = false;
+                if let Some(iv) = &b.icon_view {
+                    if let Some(icon_name) = button_icon_name(i, self.in_car) {
+                        if set_icon(iv, icon_name) {
+                            set_hidden(iv, false);
+                            set_hidden(&b.label, true);
+                            has_icon = true;
+                        }
+                    }
+                    if !has_icon {
+                        set_hidden(iv, true);
+                    }
+                }
+                if !has_icon {
+                    set_text(&b.label, text);
+                    set_hidden(&b.label, false);
+                }
+            }
         }
         set_hidden(&self.stick_base, self.direct_touch());
         set_hidden(&self.stick_knob, self.direct_touch());
@@ -487,6 +549,11 @@ impl Overlay {
                 let layer: Retained<AnyObject> = msg_send![&*b.view, layer];
                 let _: () = msg_send![&*layer, setCornerRadius: b.radius];
                 let _: () = msg_send![&*b.label, setFrame: rect(0.0, 0.0, b.radius * 2.0, b.radius * 2.0)];
+                if let Some(iv) = &b.icon_view {
+                    let pad = b.radius * 0.42;
+                    let sz = 2.0 * b.radius - 2.0 * pad;
+                    let _: () = msg_send![&**iv, setFrame: rect(pad, pad, sz, sz)];
+                }
             }
         }
 

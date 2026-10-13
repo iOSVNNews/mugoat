@@ -1,9 +1,9 @@
-name: Build Mugoat Native IPA
+name: Build Mugoat Single IPA
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   mugoat:
-    uses: ./.github/workflows/build-mugoat-native.yml
+    uses: ./.github/workflows/build-muguet-wgpu.yml
     secrets: inherit

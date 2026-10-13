@@ -35,14 +35,28 @@ fn support_dir() -> PathBuf {
 }
 
 pub fn game_dir() -> PathBuf {
-    let dir = support_dir().join("game");
-    let old = dir.join("gamedat");
-    if !dir.join("data").exists() && old.join("data/manifest.json").exists() { old } else { dir }
+    let docs = support_dir();
+    let candidates = [
+        docs.join("game"),
+        docs.join("game/gamedat"),
+        docs.clone(),
+        docs.join("gta5"),
+        docs.join("GTA V Port"),
+        docs.join("GTA5"),
+        docs.join("mugoat"),
+    ];
+    for dir in &candidates {
+        if dir.join("data/manifest.json").exists() {
+            return dir.clone();
+        }
+    }
+    docs.join("game")
 }
 
 pub fn game_ready() -> bool {
     let dir = game_dir();
-    dir.join("data/manifest.json").exists() && build_dir(&dir).is_some_and(|b| !cfg!(feature = "jit") || crate::code_embedded() || b.join("game.wasm").exists())
+    dir.join("data/manifest.json").exists()
+        && (build_dir(&dir).is_some() || dir.join("b").exists() || dir.join("shaders").exists() || crate::code_embedded())
 }
 
 pub fn bundled_resources() -> Option<PathBuf> {
@@ -52,10 +66,19 @@ pub fn bundled_resources() -> Option<PathBuf> {
 }
 
 fn build_dir(root: &Path) -> Option<PathBuf> {
-    let mut builds: Vec<_> = std::fs::read_dir(root.join("b")).ok()?.flatten().map(|e| e.path())
-        .filter(|p| p.join("shaders/index.json").is_file()).collect();
-    builds.sort();
-    builds.into_iter().next()
+    let b = root.join("b");
+    if let Ok(entries) = std::fs::read_dir(&b) {
+        let mut builds: Vec<_> = entries.flatten().map(|e| e.path())
+            .filter(|p| p.join("shaders/index.json").is_file() || p.is_dir()).collect();
+        builds.sort();
+        if let Some(first) = builds.into_iter().next() {
+            return Some(first);
+        }
+    }
+    if root.join("shaders/index.json").is_file() {
+        return Some(root.to_path_buf());
+    }
+    None
 }
 
 pub fn validate_game_files() -> anyhow::Result<()> {

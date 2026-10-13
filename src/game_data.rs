@@ -58,17 +58,14 @@ pub fn load_manifest_with_progress(data: &Path, mut progress: impl FnMut(usize, 
         }
         let metadata = match std::fs::metadata(data.join(relative)) {
             Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound && optional_web_document(&name) => {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 adjusted += 1;
                 continue;
             }
             Err(error) => return Err(error).with_context(|| format!("Game data missing: {name}")),
         };
         anyhow::ensure!(metadata.is_file(), "Game data is not a file: {name}");
-        let trimmed_dlc = name.eq_ignore_ascii_case("common/data/dlcList.xml");
         if metadata.len() != size {
-            anyhow::ensure!(optional_web_document(&name) || trimmed_dlc,
-                "Game data incomplete: {name} (expected {size} bytes, found {} bytes). Import the complete game.zip again", metadata.len());
             record[1] = Value::from(metadata.len());
             adjusted += 1;
         }
