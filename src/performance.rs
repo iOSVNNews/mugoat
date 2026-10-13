@@ -80,9 +80,71 @@ impl FramePacer {
     }
 }
 
+/// Bounded measurements of successful Metal presentation submissions. The
+/// display refresh rate and configured limit are deliberately not counted.
+pub struct FrameMetrics {
+    start: Instant,
+    last: Option<Instant>,
+    frames: u32,
+    samples: [f64; 256],
+    count: usize,
+}
+
+impl FrameMetrics {
+    pub fn new(now: Instant) -> Self {
+        Self { start: now, last: None, frames: 0, samples: [0.0; 256], count: 0 }
+    }
+
+    pub fn record(&mut self, now: Instant) -> Option<(f64, f64)> {
+        let Some(last) = self.last.replace(now) else { self.start = now; return None; };
+        let gap = now.saturating_duration_since(last);
+        if gap > Duration::from_millis(1500) {
+            self.start = now;
+            self.frames = 0;
+            self.count = 0;
+            return Some((0.0, 0.0));
+        }
+        self.samples[self.count % self.samples.len()] = gap.as_secs_f64() * 1000.0;
+        self.count += 1;
+        self.frames += 1;
+        let elapsed = now.saturating_duration_since(self.start).as_secs_f64();
+        if elapsed < 1.0 { return None; }
+        let n = self.count.min(self.samples.len());
+        let mut sorted = self.samples;
+        sorted[..n].sort_unstable_by(f64::total_cmp);
+        let p95 = sorted[((n as f64 * 0.95).ceil() as usize).saturating_sub(1)];
+        let fps = self.frames as f64 / elapsed;
+        self.start = now;
+        self.frames = 0;
+        self.count = 0;
+        Some((fps, p95))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measures_rendered_intervals_and_resets_after_backgrounding() {
+        let now = Instant::now();
+        let mut meter = FrameMetrics::new(now);
+        assert_eq!(meter.record(now), None);
+        for i in 1..50 { assert_eq!(meter.record(now + Duration::from_millis(i * 20)), None); }
+        assert_eq!(meter.record(now + Duration::from_secs(1)), Some((50.0, 20.0)));
+        assert_eq!(meter.record(now + Duration::from_secs(4)), Some((0.0, 0.0)));
+        for i in 1..30 { meter.record(now + Duration::from_secs(4) + Duration::from_millis(i * 34)); }
+        let (fps, p95) = meter.record(now + Duration::from_secs(4) + Duration::from_millis(1020)).unwrap();
+        assert!((fps - 29.4118).abs() < 0.001);
+        assert!((p95 - 34.0).abs() < 0.001);
+    }
+    #[test]
+    fn frame_metrics_remain_bounded_above_256_frames_per_window() {
+        let now = Instant::now();
+        let mut meter = FrameMetrics::new(now);
+        meter.record(now);
+        for i in 1..500 { meter.record(now + Duration::from_millis(i * 2)); }
+        assert_eq!(meter.record(now + Duration::from_secs(1)), Some((500.0, 2.0)));
+    }
     #[test]
     fn low_ram_never_receives_the_sixteen_gib_budget() {
         assert_eq!(heap_budget(4 << 30, Some(2 << 30), 0), 1280 * MIB);

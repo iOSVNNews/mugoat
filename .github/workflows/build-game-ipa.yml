@@ -62,7 +62,7 @@ jobs:
           mkdir -p input
           MUGUET_WASM_DEST="$GITHUB_WORKSPACE/input/game.wasm" node ci/tools/download-wasm.cjs
 
-      - name: Test memory budgets, frame pacing and precise aim
+      - name: Test memory budgets, rendered FPS, frame pacing and precise aim
         working-directory: source
         shell: bash
         run: |
@@ -131,7 +131,7 @@ jobs:
             echo "Muguet with game code precompiled for arm64 iOS."
             echo "Source: https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA"
             echo "Rebuild: iOSVN; original author credit c22dev preserved."
-            echo "Features: 30/60/120 FPS; precise touch aim; asynchronous startup; adaptive heap ceiling up to 16 GiB; memory-pressure cache cleanup."
+            echo "Features: rendered FPS/P95/memory HUD; 30/60/120 FPS limits; device refresh-rate cap; lightweight presets; adaptive iOS heap ceiling up to 3 GiB; memory-pressure cache cleanup."
             echo "Game WASM SHA-256: 11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0"
             echo "Game code: INCLUDED in __GAME executable segment; no JIT required."
             echo "Game data and shaders: NOT INCLUDED; import your compatible game.zip in the app."
@@ -147,7 +147,7 @@ jobs:
       - name: Encrypt the output bundle
         working-directory: source
         env:
-          MUGUET_ARTIFACT_KEY: ${{ secrets.MUGUET_ARTIFACT_KEY_V3 }}
+          MUGUET_ARTIFACT_KEY: ${{ secrets.MUGUET_ARTIFACT_KEY_V4 }}
         shell: bash
         run: |
           set -euo pipefail

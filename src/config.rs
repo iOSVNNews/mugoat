@@ -406,7 +406,7 @@ pub extern "C" fn muguet_apply_low_ram_preset() -> bool {
     let default_dir = base.join("userdata/Documents/Rockstar Games/GTA V");
     let _ = std::fs::create_dir_all(&default_dir);
     let _ = std::fs::write(default_dir.join("settings.xml"), LOW_RAM_POTATO_SETTINGS_XML);
-    eprintln!("[config] applied Low-RAM Potato Mode preset (target ~800MB - 1GB RAM)");
+    eprintln!("[config] applied lightweight graphics preset; memory use depends on scene and device");
     true
 }
 

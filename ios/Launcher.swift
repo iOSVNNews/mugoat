@@ -12,6 +12,7 @@ final class Settings: ObservableObject {
     @Published var mode = 2
     @Published var scale = 0.5
     @Published var fps = 60
+    @Published var showFPS = true
     @Published var textures = 0
     @Published var touch = 1.5
     @Published var aimSensitivity = 0.8
@@ -76,9 +77,9 @@ final class Settings: ObservableObject {
         muguet_reload_settings()
     }
 
-    func applyLowRamMode() {
-        fps = 30
-        scale = 0.35
+    func applyLowRamMode(fpsLimit: Int = 30, renderScale: Double = 0.35) {
+        fps = fpsLimit
+        scale = renderScale
         textures = 0
         shadowQuality = 1
         shadowDistance = 0.5
@@ -112,6 +113,7 @@ final class Settings: ObservableObject {
         if let v = json["start_mode"] as? Int, (1...2).contains(v) { mode = v }
         if let v = json["scale"] as? Double { scale = v }
         if let v = json["fps_limit"] as? Int, [30, 60, 120].contains(v) { fps = v }
+        if let v = json["show_fps"] as? Bool { showFPS = v }
         if let v = json["max_players"] as? Int, [16, 32, 64].contains(v) { maxPlayers = v }
         if let v = json["texture_quality"] as? Int, (0...2).contains(v) { textures = v }
         if let v = json["touch_sensitivity"] as? Double { touch = max(0.1, min(10.0, v)) }
@@ -233,6 +235,7 @@ final class Settings: ObservableObject {
 
         json["scale"] = scale
         json["fps_limit"] = fps
+        json["show_fps"] = showFPS
         json["texture_quality"] = textures
         json["shadow_quality"] = shadowQuality
         json["shadow_distance"] = shadowDistance
@@ -267,6 +270,7 @@ final class Settings: ObservableObject {
         if json["extra_args"] == nil { json["extra_args"] = [String]() }
         let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL)
+        PerformanceHUD.shared.setVisible(showFPS)
     }
 
     func resetLayout() {
@@ -1023,16 +1027,22 @@ struct LauncherView: View {
                     }
                 }
 
-                Section("Cấu hình Đồ họa & Kích hoạt 120 FPS") {
+                Section("Đồ họa & hiệu năng") {
+                    Toggle("Hiển thị FPS, thời gian khung hình & RAM", isOn: $s.showFPS)
+                    Button("Cấu hình nhẹ · giới hạn 60 FPS") {
+                        s.applyLowRamMode(fpsLimit: 60, renderScale: 0.5)
+                        resetAlertMessage = "Đã chọn cấu hình nhẹ, 50% độ phân giải và giới hạn 60 FPS. Chất lượng đồ họa cần mở lại game để áp dụng đầy đủ."
+                        showingResetAlert = true
+                    }
                     HStack(spacing: 10) {
                         Button(action: {
                             s.apply120FpsBoost()
-                            resetAlertMessage = "Đã kích hoạt cấu hình 120 FPS Siêu Mượt!"
+                            resetAlertMessage = "Đã chọn giới hạn 120 FPS và độ phân giải 50%. FPS thực tế phụ thuộc máy, nhiệt độ và cảnh trong game."
                             showingResetAlert = true
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "bolt.fill")
-                                Text("120 FPS Siêu Mượt").bold()
+                                Text("Thử 120 FPS").bold()
                             }
                             .font(.subheadline)
                             .frame(maxWidth: .infinity)
@@ -1043,12 +1053,12 @@ struct LauncherView: View {
 
                         Button(action: {
                             s.applyLowRamMode()
-                            resetAlertMessage = "Đã kích hoạt Cấu hình Siêu Tiết Kiệm RAM (~800MB)!"
+                            resetAlertMessage = "Đã chọn cấu hình nhẹ: giới hạn 30 FPS, độ phân giải 35%. Mở lại game để áp dụng đầy đủ; xem RAM thực tế trên màn hình."
                             showingResetAlert = true
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "leaf.fill")
-                                Text("Tiết Kiệm RAM").bold()
+                                Text("Máy cũ · 30 FPS").bold()
                             }
                             .font(.subheadline)
                             .frame(maxWidth: .infinity)
@@ -1067,7 +1077,7 @@ struct LauncherView: View {
 
                     Picker("Độ phân giải (Resolution)", selection: $s.scale) {
                         Text("35 % (Siêu nhẹ)").tag(0.35)
-                        Text("50 % (Khuyên dùng cho 120 FPS)").tag(0.5)
+                        Text("50 % (Nhẹ)").tag(0.5)
                         Text("65 % (Cân bằng)").tag(0.65)
                         Text("75 % (Rõ nét)").tag(0.75)
                         Text("100 % (Độ phân giải gốc)").tag(1.0)
@@ -1079,19 +1089,19 @@ struct LauncherView: View {
                         Text("Rất cao").tag(2)
                     }
 
-                    Toggle("Khóa nhịp ProMotion V-Sync 120Hz (CADisplayLink)", isOn: $s.promotionSync)
-                    Text("Đồng bộ chính xác với tần số quét 60Hz/120Hz của màn hình iPhone/iPad để triệt tiêu khựng hình và giữ khung hình 120 FPS mượt nhất.")
+                    Toggle("Đồng bộ nhịp màn hình (V-Sync)", isOn: $s.promotionSync)
+                    Text("Giới hạn theo khả năng màn hình. Nếu bật làm FPS thấp hơn, thử tắt để dùng bộ điều nhịp của Muguet. 120 là giới hạn yêu cầu, không phải FPS đo được.")
                         .font(.caption).foregroundStyle(.secondary)
 
-                    Toggle("Tối ưu đồ họa sâu (Deep Optimization 60-120 FPS Boost)", isOn: $s.deepOptimization)
-                    Text("Tự động khống chế bóng đổ, cỏ rậm và khử răng cưa trong GTA V settings.xml để duy trì FPS tối đa khi máy nóng.")
+                    Toggle("Giảm hiệu ứng nặng", isOn: $s.deepOptimization)
+                    Text("Giảm giới hạn bóng, cỏ và hiệu ứng trong cài đặt game. Mở lại game để áp dụng đầy đủ chất lượng đồ họa.")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Button(action: {
                         resetGraphicsSettings()
                         s.scale = 0.5
                         s.textures = 0
-                        s.fps = 120
+                        s.fps = 60
                         s.shadowQuality = 1
                         s.shadowDistance = 1.0
                         s.reflectionQuality = 1
@@ -1105,10 +1115,10 @@ struct LauncherView: View {
                         s.pedDensity = 0.5
                         s.distanceScaling = 0.0
                         s.deepOptimization = true
-                        s.promotionSync = true
+                        s.promotionSync = false
                         try? s.save()
                         muguet_reload_settings()
-                        resetAlertMessage = "Đã khôi phục cài đặt đồ họa Rockstar GTA V về mặc định an toàn (Shader High, MSAA Tắt, Bóng Normal, 120 FPS). Lỗi màn hình đen do Max Setting đã được xử lý triệt để!"
+                        resetAlertMessage = "Đã khôi phục đồ họa về cấu hình an toàn: Shader High, MSAA tắt, giới hạn 60 FPS. Mở lại game để áp dụng đầy đủ."
                         showingResetAlert = true
                     }) {
                         Label("Khôi phục đồ họa gốc (Sửa lỗi màn hình đen)", systemImage: "arrow.counterclockwise.circle.fill")
@@ -1550,25 +1560,97 @@ struct LauncherView: View {
 @_cdecl("muguet_physical_memory")
 public func muguetPhysicalMemory() -> UInt64 { ProcessInfo.processInfo.physicalMemory }
 
+@_silgen_name("muguet_frame_stats")
+private func muguetFrameStats() -> UInt64
+@_silgen_name("muguet_frame_size")
+private func muguetFrameSize() -> UInt64
+@_silgen_name("muguet_memory_mb")
+private func muguetMemoryMB() -> UInt64
+
+private final class PerformanceHUD {
+    static let shared = PerformanceHUD()
+    private let label = UILabel()
+    private var timer: Timer?
+    private weak var parent: UIView?
+    private var visible = true
+    private var wasActive = false
+
+    func install(in view: UIView) {
+        guard parent !== view else { return }
+        label.removeFromSuperview()
+        parent = view
+        label.text = "— FPS"
+        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+        label.layer.cornerRadius = 7
+        label.clipsToBounds = true
+        label.numberOfLines = 2
+        label.textAlignment = .center
+        label.isUserInteractionEnabled = false
+        label.accessibilityLabel = "Hiệu năng game"
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            label.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            label.widthAnchor.constraint(equalToConstant: 230),
+            label.heightAnchor.constraint(equalToConstant: 38)
+        ])
+        setVisible(Settings().showFPS)
+    }
+
+    func setVisible(_ enabled: Bool) {
+        visible = enabled
+        label.isHidden = !enabled
+        timer?.invalidate()
+        timer = nil
+        guard enabled, parent != nil else { return }
+        let next = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.update() }
+        timer = next
+        RunLoop.main.add(next, forMode: .common)
+    }
+
+    private func update() {
+        let active = UIApplication.shared.applicationState == .active
+        label.isHidden = !visible || !active
+        // Don't reuse an old measurement on the first tick after resuming.
+        defer { wasActive = active }
+        guard active else { return }
+        parent?.bringSubviewToFront(label)
+        let stats = wasActive ? muguetFrameStats() : 0
+        let fps = Double(stats >> 32) / 1000.0
+        let p95 = Double(stats & 0xffffffff) / 1000.0
+        let size = muguetFrameSize()
+        let heat = ProcessInfo.processInfo.thermalState
+        let thermal = heat == .critical ? " · Rất nóng" : heat == .serious ? " · Nóng" : ""
+        label.text = (fps > 0 ? String(format: "%.1f FPS · P95 %.1f ms", fps, p95) : "— FPS · Đang chờ khung hình") +
+            "\n\(size >> 32)×\(size & 0xffffffff) · \(muguetMemoryMB()) MB\(thermal)"
+    }
+}
+
 private final class RefreshHint: NSObject {
     static let shared = RefreshHint()
     var link: CADisplayLink?
     private let condition = NSCondition()
     private var vsyncCount: UInt64 = 0
-    var lockedPacingEnabled: Bool = false
+    private var lockedPacingEnabled: Bool = false
 
     @objc func tick(_ link: CADisplayLink) {
-        guard lockedPacingEnabled else { return }
         condition.lock()
+        defer { condition.unlock() }
+        guard lockedPacingEnabled else { return }
         vsyncCount &+= 1
         condition.broadcast()
-        condition.unlock()
     }
 
     func set(_ requested: UInt32, lockedPacing: Bool = false) {
+        condition.lock()
         self.lockedPacingEnabled = lockedPacing
+        condition.broadcast()
+        condition.unlock()
         let screenMax = Float(UIScreen.main.maximumFramesPerSecond)
-        let maximum = max(120.0, screenMax)
+        let maximum = max(1.0, screenMax)
         let rate = requested == 0 ? maximum : min(maximum, Float(requested))
         if link == nil {
             link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -1582,26 +1664,25 @@ private final class RefreshHint: NSObject {
     }
 
     func waitVsync(timeoutMs: UInt32) -> Bool {
-        guard lockedPacingEnabled else { return true }
         condition.lock()
+        defer { condition.unlock() }
+        guard lockedPacingEnabled else { return false }
         let current = vsyncCount
         let deadline = Date(timeIntervalSinceNow: Double(timeoutMs) / 1000.0)
         var signaled = false
-        while vsyncCount == current {
+        while lockedPacingEnabled && vsyncCount == current {
             if !condition.wait(until: deadline) {
                 break
             }
             signaled = true
         }
-        condition.unlock()
-        return signaled
+        return signaled && vsyncCount != current
     }
 }
 
 @_cdecl("muguet_set_refresh_rate")
 public func muguetSetRefreshRate(_ fps: UInt32) {
-    let settings = Settings()
-    DispatchQueue.main.async { RefreshHint.shared.set(fps, lockedPacing: settings.promotionSync) }
+    DispatchQueue.main.async { RefreshHint.shared.set(fps, lockedPacing: Settings().promotionSync) }
 }
 
 @_cdecl("muguet_wait_vsync")
@@ -1732,8 +1813,12 @@ public func muguetShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done
     weak var sheet: UIViewController?
     let host = UIHostingController(rootView: LauncherView(isOverlay: false, play: {
         if let sheet {
-            sheet.dismiss(animated: true, completion: { done() })
+            sheet.dismiss(animated: true, completion: {
+                PerformanceHUD.shared.install(in: parent.view)
+                done()
+            })
         } else {
+            PerformanceHUD.shared.install(in: parent.view)
             done()
         }
     }))

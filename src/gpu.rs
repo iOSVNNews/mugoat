@@ -40,6 +40,23 @@ pub static OCCLUDED: AtomicBool = AtomicBool::new(false);
 pub static SUSPENDED: AtomicBool = AtomicBool::new(false);
 
 pub static PRESENTS: AtomicU64 = AtomicU64::new(0);
+static FRAME_STATS: AtomicU64 = AtomicU64::new(0);
+static FRAME_SIZE: AtomicU64 = AtomicU64::new(0);
+static LAST_PRESENT_MS: AtomicU64 = AtomicU64::new(0);
+static METRICS_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+#[no_mangle]
+pub extern "C" fn muguet_frame_stats() -> u64 {
+    let last = LAST_PRESENT_MS.load(Ordering::Relaxed);
+    if last == 0 || METRICS_CLOCK.elapsed().as_millis() as u64 > last.saturating_add(1500) { return 0; }
+    FRAME_STATS.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn muguet_frame_size() -> u64 { FRAME_SIZE.load(Ordering::Relaxed) }
+
+#[no_mangle]
+pub extern "C" fn muguet_memory_mb() -> u64 { crate::footprint_mb() }
 
 pub fn request_memory_cleanup() {
     crate::performance::MEMORY_PRESSURE.store(true, Ordering::Relaxed);
@@ -823,10 +840,12 @@ pub struct Gpu {
     fps_n0: u64,
     fps_d0: u64,
     frame_pacer: crate::performance::FramePacer,
+    frame_metrics: crate::performance::FrameMetrics,
     last_memory_check: Instant,
     last_cleanup: Instant,
     pressure_until: Option<Instant>,
     requested_refresh: u32,
+    requested_sync: bool,
     errors: Arc<AtomicU64>,
 
     inflight: Arc<AtomicU64>,
@@ -950,8 +969,9 @@ impl Gpu {
             frame_slot_done: (0..FRAME_SLOTS).map(|_| None).collect(), last_submit: None, vb_avail: [0; 16],
             dbg_idx: if dbg != 0 { dbg + 424 } else { 0 },
             draws: 0, skipped: 0, presents: 0, pipe_creates: 0, fps_t0: Instant::now(), fps_n0: 0, fps_d0: 0,
-            frame_pacer: Default::default(), last_memory_check: Instant::now(), last_cleanup: Instant::now() - Duration::from_secs(60), pressure_until: None,
+            frame_pacer: Default::default(), frame_metrics: crate::performance::FrameMetrics::new(Instant::now()), last_memory_check: Instant::now(), last_cleanup: Instant::now() - Duration::from_secs(60), pressure_until: None,
             requested_refresh: 0,
+            requested_sync: false,
             errors, inflight: Arc::new(AtomicU64::new(0)), submits: 0, submits0: 0, passes: 0, passes0: 0,
         })
     }
@@ -3164,8 +3184,10 @@ impl Gpu {
     fn present(&mut self, id: u32) {
         let now = Instant::now();
         let fps = if self.pressure_until.is_some_and(|until| now < until) { 30 } else { crate::performance::frame_limit() };
-        if fps != self.requested_refresh {
+        let sync = crate::performance::promotion_sync_enabled();
+        if fps != self.requested_refresh || sync != self.requested_sync {
             self.requested_refresh = fps;
+            self.requested_sync = sync;
             #[cfg(target_os = "ios")]
             {
                 extern "C" { fn muguet_set_refresh_rate(fps: u32); }
@@ -3175,10 +3197,16 @@ impl Gpu {
         let delay = self.frame_pacer.delay(now, fps);
         #[cfg(target_os = "ios")]
         {
-            if crate::performance::promotion_sync_enabled() {
+            if sync {
                 extern "C" { fn muguet_wait_vsync(timeout_ms: u32) -> bool; }
                 let timeout = if fps >= 120 { 12 } else { 20 };
-                unsafe { muguet_wait_vsync(timeout); };
+                let synchronized = unsafe { muguet_wait_vsync(timeout) };
+                // A delayed main thread must not turn a timed-out VSync wait
+                // into an uncapped rendering loop.
+                if !synchronized {
+                    let remaining = delay.saturating_sub(now.elapsed());
+                    if !remaining.is_zero() { std::thread::sleep(remaining); }
+                }
             } else if !delay.is_zero() {
                 std::thread::sleep(delay);
             }
@@ -3248,6 +3276,12 @@ impl Gpu {
                 self.flush();
                 self.queue.present(frame);
                 PRESENTS.fetch_add(1, Ordering::Relaxed);
+                let presented_at = Instant::now();
+                LAST_PRESENT_MS.store((METRICS_CLOCK.elapsed().as_millis() as u64).max(1), Ordering::Relaxed);
+                FRAME_SIZE.store(((w as u64) << 32) | h as u64, Ordering::Relaxed);
+                if let Some((rate, p95_ms)) = self.frame_metrics.record(presented_at) {
+                    FRAME_STATS.store(((rate * 1000.0).round() as u64) << 32 | (p95_ms * 1000.0).round() as u64, Ordering::Relaxed);
+                }
             } else {
                 self.flush();
             }
@@ -3270,16 +3304,23 @@ impl Gpu {
     }
 
     fn prune_graphics_cache(&mut self) {
+        // Most frames stay within the cache budgets. Avoid walking and sorting
+        // thousands of entries every 120 frames when there is nothing to evict.
+        if self.bind_groups.len() <= BG_LIMIT && self.pipelines.len() <= PIPE_LIMIT { return; }
         let recent = self.presents.saturating_sub(2);
+        if self.bind_groups.len() > BG_LIMIT {
         let mut groups: Vec<_> = self.bind_groups.iter().filter(|(_, (_, _, seen))| *seen < recent)
             .map(|(key, (_, _, seen))| (key.clone(), *seen)).collect();
         groups.sort_unstable_by_key(|(_, seen)| *seen);
         for (key, _) in groups.into_iter().take(self.bind_groups.len().saturating_sub(BG_LIMIT)) { self.bind_groups.remove(&key); }
+        }
+        if self.pipelines.len() > PIPE_LIMIT {
         let mut pipes: Vec<_> = self.pipelines.iter().filter_map(|(key, entry)| match entry {
             PipeEntry::Done(_, seen) if *seen < recent => Some((key.clone(), *seen)), _ => None,
         }).collect();
         pipes.sort_unstable_by_key(|(_, seen)| *seen);
         for (key, _) in pipes.into_iter().take(self.pipelines.len().saturating_sub(PIPE_LIMIT)) { self.pipelines.remove(&key); }
+        }
     }
 
     fn check_memory(&mut self) {
