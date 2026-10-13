@@ -1,4 +1,4 @@
-name: Build Mugoat IPA
+name: Reference only - legacy Rust wgpu build
 
 on:
   workflow_dispatch:

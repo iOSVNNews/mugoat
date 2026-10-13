@@ -29,6 +29,9 @@ settings:
       - $(SRCROOT)/Tools/simde
       - $(SRCROOT)/App/GameInstaller
       - $(SRCROOT)/Vendor/libarchive.xcframework/ios-arm64/Headers
+    LIBRARY_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/Build/Online
     OTHER_CFLAGS:
       - $(inherited)
       - -include

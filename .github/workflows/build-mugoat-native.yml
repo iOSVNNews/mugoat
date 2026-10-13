@@ -62,7 +62,7 @@ jobs:
           find native-port -type f \( -name '*.sh' -o -name '*.py' -o -name '*.entitlements' -o -name '*.plist' -o -name '*.yml' -o -name '*.c' -o -name '*.h' -o -name '*.mm' -o -name '*.swift' \) -exec sed -i '' 's/\r$//' {} +
           chmod +x native-port/build_ipa.sh
           plutil -lint native-port/app/App/Free.entitlements native-port/app/App/Full.entitlements
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         id: native-cache
         with:
           path: |
@@ -71,7 +71,7 @@ jobs:
             native-port/app/GeneratedResources
             native-port/app/Build/MetalShaders
             native-port/app/Build/Release
-          key: mugoat-hybrid-ios160-v1-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml', 'src/mp.rs') }}
+          key: mugoat-hybrid-ios160-v2-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'src/mp.rs') }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -150,3 +150,14 @@ jobs:
           name: Mugoat-compiler-logs
           path: native-port/app/Build/xcodebuild.log
           if-no-files-found: ignore
+      - name: Preserve validated native compilation even if packaging fails
+        uses: actions/cache/save@v4
+        if: always() && steps.native-cache.outputs.cache-hit != 'true' && hashFiles('native-port/app/Generated/native-prepared-v1.txt') != ''
+        with:
+          path: |
+            native-port/app/Tools
+            native-port/app/Generated
+            native-port/app/GeneratedResources
+            native-port/app/Build/MetalShaders
+            native-port/app/Build/Release
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
