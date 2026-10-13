@@ -141,7 +141,7 @@ struct CheatMenuView: View {
                         TextField("Nhập mã lệnh (vd: PAINKILLER)", text: $customCode)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
-                        Button("Áp dụng") {
+                        Button(L10n.text("Áp dụng")) {
                             let c = customCode.trimmingCharacters(in: .whitespaces).uppercased()
                             guard !c.isEmpty else { return }
                             apply(c, forcedMode: .console)
@@ -169,7 +169,7 @@ struct CheatMenuView: View {
                                     }
                                     Spacer()
                                     Button(action: { apply(item.code) }) {
-                                        Text("Bật").font(.caption.weight(.bold)).padding(.horizontal, 10).padding(.vertical, 4)
+                                        Text(L10n.text("Bật")).font(.caption.weight(.bold)).padding(.horizontal, 10).padding(.vertical, 4)
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .tint(.blue)
@@ -184,7 +184,7 @@ struct CheatMenuView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Đóng") { dismiss() }
+                    Button(L10n.text("Đóng")) { dismiss() }
                 }
             }
             .overlay(alignment: .bottom) {

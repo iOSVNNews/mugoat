@@ -16,23 +16,23 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     private let statusIcon = UIImageView()
     private let statusTitle = UILabel()
     private let statusDetail = UILabel()
-    private let detailsButton = Theme.glassButton("Xem chi tiết lỗi", symbol: "list.bullet")
-    private let anywayButton = Theme.glassButton("Vẫn thử mở game", symbol: "exclamationmark.triangle")
+    private let detailsButton = Theme.glassButton(L10n.text("Xem chi tiết lỗi"), symbol: "list.bullet")
+    private let anywayButton = Theme.glassButton(L10n.text("Vẫn thử mở game"), symbol: "exclamationmark.triangle")
     private let linkField = UITextField()
-    private let linkButton = Theme.primaryButton("Tiếp tục", symbol: "arrow.down.circle.fill")
+    private let linkButton = Theme.primaryButton(L10n.text("Tiếp tục"), symbol: "arrow.down.circle.fill")
     private let archivesStack = UIStackView()
     private let progressPanel = Theme.panel()
     private let progressBar = UIProgressView(progressViewStyle: .default)
     private let progressTitle = UILabel()
     private let progressDetail = UILabel()
-    private let cancelButton = Theme.glassButton("Hủy", symbol: "xmark")
+    private let cancelButton = Theme.glassButton(L10n.text("Hủy"), symbol: "xmark")
     private var lastReport: GameFiles.Report?
     private var pickingArchive = false
     private var install: GameInstallManager { .shared }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Dữ liệu game"
+        title = L10n.text("Dữ liệu game")
         view.backgroundColor = Theme.night
         let backdrop = Theme.backdrop(image: "SettingsBackground", darken: 0.8)
         backdrop.frame = view.bounds
@@ -109,7 +109,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
         row.spacing = 14
         row.alignment = .top
         detailsButton.addAction(UIAction { [weak self] _ in self?.showDetails() }, for: .touchUpInside)
-        let check = Theme.glassButton("Check every file again", symbol: "checkmark.shield")
+        let check = Theme.glassButton(L10n.text("Check every file again"), symbol: "checkmark.shield")
         check.addAction(UIAction { [weak self] _ in self?.refresh(recheck: true) }, for: .touchUpInside)
         anywayButton.addAction(UIAction { [weak self] _ in self?.confirmPlayAnyway() }, for: .touchUpInside)
         anywayButton.isHidden = true
@@ -119,15 +119,15 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     }
 
     private func findSection() -> UIView {
-        let find = Theme.glassButton("Look again", symbol: "magnifyingglass")
+        let find = Theme.glassButton(L10n.text("Look again"), symbol: "magnifyingglass")
         find.addAction(UIAction { [weak self] _ in self?.lookInAppFolder() }, for: .touchUpInside)
-        let pick = Theme.glassButton("Choose a folder…", symbol: "folder")
+        let pick = Theme.glassButton(L10n.text("Choose a folder…"), symbol: "folder")
         pick.addAction(UIAction { [weak self] _ in self?.pickFolder() }, for: .touchUpInside)
         let buttons = UIStackView(arrangedSubviews: [find, pick, UIView()])
         buttons.spacing = 10
-        return card("Already on this iPhone", [
-            note("Easiest: in the Files app, move your unpacked game folder into On My iPhone › Mugoat. The app finds it there by itself, however deep it is."),
-            note("Somewhere else? Choose any folder above it, even On My iPhone itself, and the app searches everything inside."),
+        return card(L10n.text("Already on this iPhone"), [
+            note(L10n.text("Easiest: in the Files app, move your unpacked game folder into On My iPhone › Mugoat. The app finds it there by itself, however deep it is.")),
+            note(L10n.text("Somewhere else? Choose any folder above it, even On My iPhone itself, and the app searches everything inside.")),
             buttons
         ])
     }
@@ -149,12 +149,12 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
         linkField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
         linkField.leftViewMode = .always
         linkField.heightAnchor.constraint(equalToConstant: 46).isActive = true
-        linkField.accessibilityLabel = "Link to your game files"
+        linkField.accessibilityLabel = L10n.text("Link to your game files")
         linkButton.addAction(UIAction { [weak self] _ in self?.useLink() }, for: .touchUpInside)
-        return card("From a link", [
+        return card(L10n.text("From a link"), [
             note("Paste a direct link to your game archive (zip or rar): the app downloads it, unpacks it as it goes, checks every file and deletes the archive. It needs about \(GameFiles.Report.size(Self.gameBytes)) free, not double. Keep the app open while it works."),
-            note("A download page where you tap Download first works too: it opens here in a browser, and the app takes the download over."),
-            note("Or the address of your own game server (for example your computer over Tailscale): the game then streams its files from there."),
+            note(L10n.text("A download page where you tap Download first works too: it opens here in a browser, and the app takes the download over.")),
+            note(L10n.text("Or the address of your own game server (for example your computer over Tailscale): the game then streams its files from there.")),
             linkField, linkButton
         ])
     }
@@ -162,11 +162,11 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     private func archiveSection() -> UIView {
         archivesStack.axis = .vertical
         archivesStack.spacing = 8
-        let pick = Theme.glassButton("Choose an archive…", symbol: "doc.zipper")
+        let pick = Theme.glassButton(L10n.text("Choose an archive…"), symbol: "doc.zipper")
         pick.addAction(UIAction { [weak self] _ in self?.pickArchive() }, for: .touchUpInside)
         let buttons = UIStackView(arrangedSubviews: [pick, UIView()])
-        return card("From an archive in Files", [
-            note("Got a .zip or .rar of the game (or all parts of a multi-part one) in Files? The app unpacks it straight into its own folder and checks every file. No separate unzip app needed."),
+        return card(L10n.text("From an archive in Files"), [
+            note(L10n.text("Got a .zip or .rar of the game (or all parts of a multi-part one) in Files? The app unpacks it straight into its own folder and checks every file. No separate unzip app needed.")),
             archivesStack, buttons
         ])
     }
@@ -217,7 +217,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
             let explanation = problem.explanation
             setStatus(false, title: explanation.title, detail: "Found a game folder in Mugoat, but it can't be used yet. " + explanation.message)
         } else if !server.isEmpty {
-            setStatus(true, title: "Streaming from your server", detail: server)
+            setStatus(true, title: L10n.text("Streaming from your server"), detail: server)
         } else if lookedAgain {
             setStatus(false, title: "Nothing in this app's folder", detail: "The app looked through every folder in On My iPhone › Mugoat and found no game. If your game is somewhere else (another folder, or another app's folder), tap Choose a folder… below and pick it, or pick On My iPhone itself to search everything. iOS only lets an app into other folders once you pick them.")
         } else {
@@ -253,7 +253,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     private func confirmPlayAnyway() {
         guard let report = lastReport else { return }
         let alert = UIAlertController(title: "Play with \(report.problems.count) problem \(report.problems.count == 1 ? "file" : "files")?", message: "The game starts, but it may crash or show missing things wherever it needs those files. Fixing the folder (unpacking again) is the real cure.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.text("Cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: "Play anyway", style: .destructive) { [weak self] _ in
             guard let self else { return }
             DispatchQueue.global(qos: .userInitiated).async {
@@ -380,7 +380,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
                 guard let self else { return }
                 if isGameList {
                     self.onServer?(server)
-                    self.setStatus(true, title: "Streaming from your server", detail: "\(server) answers with the game's file list. The game reads its files from there while you play.")
+                    self.setStatus(true, title: L10n.text("Streaming from your server"), detail: "\(server) answers with the game's file list. The game reads its files from there while you play.")
                     self.onChange?()
                 } else {
                     self.openOrInstall(url)
@@ -422,7 +422,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
         if case let .file(url, true) = source, !confirmed {
             // Unpacking frees the archive as it goes (that's how it fits next to the game).
             let alert = UIAlertController(title: "Unpack \(url.lastPathComponent)?", message: "To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again.", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: L10n.text("Cancel"), style: .cancel))
             alert.addAction(UIAlertAction(title: "Unpack", style: .default) { [weak self] _ in self?.startInstall(source, confirmed: true) })
             present(alert, animated: true)
             return

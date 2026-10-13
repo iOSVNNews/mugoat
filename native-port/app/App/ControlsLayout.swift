@@ -94,7 +94,7 @@ final class ControlsLayoutEditorController: UIViewController {
         reset.setTitle("Reset", for: .normal)
         reset.addAction(UIAction { [weak self] _ in self?.resetGroup() }, for: .touchUpInside)
         let done = UIButton(type: .system)
-        done.setTitle("Done", for: .normal)
+        done.setTitle(L10n.text("Done"), for: .normal)
         done.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         done.addAction(UIAction { [weak self] _ in self?.finish() }, for: .touchUpInside)
         for item in [groupPicker, sizeSlider, hideButton, reset, done] as [UIView] { toolbar.addArrangedSubview(item) }

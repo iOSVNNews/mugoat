@@ -6,11 +6,11 @@ enum GameMode: Int, CaseIterable {
     case story = 1
     case sandbox = 2
 
-    var title: String { self == .story ? "Cốt truyện" : "Tự do" }
+    var title: String { self == .story ? L10n.text("Cốt truyện") : L10n.text("Tự do") }
     var detail: String {
         switch self {
-        case .story: return "Tiếp tục bản lưu gần nhất hoặc bắt đầu cốt truyện mới."
-        case .sandbox: return "Khám phá bản đồ và thử mọi vũ khí trong chế độ tự do."
+        case .story: return L10n.text("Tiếp tục bản lưu gần nhất hoặc bắt đầu cốt truyện mới.")
+        case .sandbox: return L10n.text("Khám phá bản đồ và thử mọi vũ khí trong chế độ tự do.")
         }
     }
 }
@@ -83,15 +83,15 @@ final class GameSettings {
         get { defaults.object(forKey: "targetingMode") as? Int ?? 1 }
         set { defaults.set(newValue, forKey: "targetingMode") }
     }
-    static let targetingTitles = ["Traditional lock-on", "Assisted aim", "Assisted free aim", "Free aim"]
+    static let targetingTitles = [L10n.text("Traditional lock-on"), L10n.text("Assisted aim"), L10n.text("Assisted free aim"), L10n.text("Free aim")]
 
     /// nil until the player has chosen on the launch screen.
-    /// Sandbox map: 0 the GTA V map, 1 the test level the game files include (env_test).
+    /// Only the Los Santos map is exposed in Mugoat.
     var sandboxMap: Int {
-        get { defaults.integer(forKey: "sandboxMap") == 1 ? 1 : 0 }
-        set { defaults.set(newValue == 1 ? 1 : 0, forKey: "sandboxMap") }
+        get { 0 }
+        set { defaults.set(0, forKey: "sandboxMap") }
     }
-    static let sandboxMapTitles = ["GTA V", "GTA VI test map"]
+    static let sandboxMapTitles = ["Los Santos"]
     var gameModeChoice: GameMode? {
         get { (defaults.object(forKey: "gameMode") as? Int).flatMap(GameMode.init) }
         set { defaults.set(newValue?.rawValue, forKey: "gameMode") }
@@ -142,7 +142,7 @@ final class GameSettings {
         }
         set { defaults.set(newValue, forKey: "frameRateCap") }
     }
-    static func frameRateTitle(_ cap: Int) -> String { cap == 0 ? "Unlocked" : "\(cap) FPS" }
+    static func frameRateTitle(_ cap: Int) -> String { cap == 0 ? L10n.text("Unlocked") : "\(cap) FPS" }
 
     // Crash fallback: a launch that never reached a stable world is treated
     // as a memory kill, and the last preset that worked is restored.

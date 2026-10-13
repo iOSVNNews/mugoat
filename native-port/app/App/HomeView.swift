@@ -6,10 +6,12 @@ import UIKit
 final class HomeView: UIView {
     enum FilesState { case ready, attention, problem, busy }
 
-    let playButton = Theme.primaryButton("Vào game", symbol: "play.fill")
-    let settingsButton = Theme.glassButton("Đồ họa & FPS", symbol: "slider.horizontal.3")
-    let layoutButton = Theme.glassButton("Bố trí điều khiển", symbol: "hand.tap.fill")
-    let cheatButton = Theme.glassButton("Tiện ích game", symbol: "sparkles")
+    let playButton = Theme.primaryButton(L10n.text("Vào game"), symbol: "play.fill")
+    let settingsButton = Theme.glassButton(L10n.text("Đồ họa & FPS"), symbol: "slider.horizontal.3")
+    let layoutButton = Theme.glassButton(L10n.text("Bố trí điều khiển"), symbol: "hand.tap.fill")
+    let cheatButton = Theme.glassButton(L10n.text("Tiện ích game"), symbol: "sparkles")
+    let saveButton = Theme.glassButton(L10n.text("Save game"), symbol: "externaldrive.fill")
+    let languageButton = Theme.glassButton("VI", symbol: "globe")
     let preloadLabel = UILabel()
     let controllerLabel = UILabel()
     /// Taps on the game files card.
@@ -51,13 +53,15 @@ final class HomeView: UIView {
         title.adjustsFontSizeToFitWidth = true
         title.minimumScaleFactor = 0.7
         let subtitle = UILabel()
-        subtitle.text = "iOSVN  /  CHƠI THEO CÁCH CỦA BẠN"
+        subtitle.text = L10n.text("iOSVN  /  CHƠI THEO CÁCH CỦA BẠN")
         subtitle.font = Theme.body(10, .semibold)
         subtitle.textColor = Theme.secondaryText
         let titles = UIStackView(arrangedSubviews: [title, subtitle])
         titles.axis = .vertical
         titles.spacing = 2
-        let header = UIStackView(arrangedSubviews: [icon, titles])
+        languageButton.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
+        languageButton.setContentHuggingPriority(.required, for: .horizontal)
+        let header = UIStackView(arrangedSubviews: [icon, titles, languageButton])
         header.spacing = 14
         header.alignment = .center
 
@@ -78,16 +82,16 @@ final class HomeView: UIView {
         modeDetail.minimumScaleFactor = 0.8
 
         let toolsTitle = UILabel()
-        toolsTitle.text = "Thiết lập trải nghiệm"
+        toolsTitle.text = L10n.text("Thiết lập trải nghiệm")
         toolsTitle.font = Theme.display(19, .bold)
         toolsTitle.textColor = Theme.text
         let toolsHint = UILabel()
-        toolsHint.text = "Chọn cấu hình phù hợp với máy của bạn."
+        toolsHint.text = L10n.text("Chọn cấu hình phù hợp với máy của bạn.")
         toolsHint.font = Theme.body(13)
         toolsHint.textColor = Theme.secondaryText
         toolsHint.numberOfLines = 0
         let guideLabel = UILabel()
-        guideLabel.text = "01  Chọn dữ liệu game\n02  Chọn chế độ chơi\n03  Bấm Vào game"
+        guideLabel.text = L10n.text("01  Chọn dữ liệu game\n02  Chọn chế độ chơi\n03  Bấm Vào game")
         guideLabel.font = Theme.body(13, .medium)
         guideLabel.textColor = Theme.secondaryText
         guideLabel.numberOfLines = 0
@@ -95,7 +99,7 @@ final class HomeView: UIView {
         versionLabel.text = "Mugoat · iOSVN · \(Theme.appVersion)"
         versionLabel.font = Theme.body(11)
         versionLabel.textColor = Theme.tertiaryText
-        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, cheatButton, guideLabel, versionLabel])
+        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, saveButton, cheatButton, guideLabel, versionLabel])
         secondary.axis = .vertical
         secondary.spacing = 12
         secondary.setCustomSpacing(6, after: toolsTitle)
@@ -114,7 +118,7 @@ final class HomeView: UIView {
         mapLabel.font = Theme.body(13, .semibold)
         mapLabel.textColor = Theme.secondaryText
         mapRow.addArrangedSubview(mapLabel)
-        for (index, title) in GameSettings.sandboxMapTitles.enumerated() {
+        for (index, title) in ["Los Santos"].enumerated() {
             var config = UIButton.Configuration.gray()
             config.title = title
             config.cornerStyle = .capsule
@@ -149,7 +153,11 @@ final class HomeView: UIView {
         scroll.addSubview(column)
         log.translatesAutoresizingMaskIntoConstraints = false
         addSubview(log)
-        addSubview(secondary)
+        let toolsScroll = UIScrollView()
+        toolsScroll.showsVerticalScrollIndicator = false
+        toolsScroll.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(toolsScroll)
+        toolsScroll.addSubview(secondary)
         let guide = safeAreaLayoutGuide
         let width = column.widthAnchor.constraint(equalTo: guide.widthAnchor, multiplier: 0.56)
         width.priority = .defaultHigh
@@ -167,11 +175,15 @@ final class HomeView: UIView {
             width,
             column.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
             column.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            secondary.leadingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: 30),
-            secondary.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -24),
-            secondary.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
-            secondary.topAnchor.constraint(greaterThanOrEqualTo: guide.topAnchor, constant: 12),
-            secondary.bottomAnchor.constraint(lessThanOrEqualTo: guide.bottomAnchor, constant: -12),
+            toolsScroll.leadingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: 30),
+            toolsScroll.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -24),
+            toolsScroll.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
+            toolsScroll.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -12),
+            secondary.leadingAnchor.constraint(equalTo: toolsScroll.contentLayoutGuide.leadingAnchor),
+            secondary.trailingAnchor.constraint(equalTo: toolsScroll.contentLayoutGuide.trailingAnchor),
+            secondary.widthAnchor.constraint(equalTo: toolsScroll.frameLayoutGuide.widthAnchor),
+            secondary.topAnchor.constraint(equalTo: toolsScroll.contentLayoutGuide.topAnchor),
+            secondary.bottomAnchor.constraint(equalTo: toolsScroll.contentLayoutGuide.bottomAnchor),
             log.leadingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: 20),
             log.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
             log.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
@@ -237,8 +249,8 @@ final class HomeView: UIView {
 
     /// Shows where the game files are and whether they're ready.
     func setFiles(_ state: FilesState, title: String, detail: String) {
-        filesTitle.text = title
-        filesDetail.text = detail
+        filesTitle.text = L10n.text(title)
+        filesDetail.text = L10n.text(detail)
         filesDetail.isHidden = detail.isEmpty
         filesSpinner.isHidden = state != .busy
         filesIcon.isHidden = state == .busy
@@ -257,8 +269,8 @@ final class HomeView: UIView {
     /// Marks the chosen mode (nil: none yet) and shows its description.
     /// Shows the map choice (Sandbox) instead of the mode description, with `index` selected.
     func setMap(_ index: Int, visible: Bool, enabled: Bool) {
-        mapRow.isHidden = !visible
-        modeDetail.isHidden = visible
+        mapRow.isHidden = true
+        modeDetail.isHidden = false
         for (i, chip) in mapChips.enumerated() {
             let selected = i == index
             chip.isEnabled = enabled
@@ -273,7 +285,7 @@ final class HomeView: UIView {
 
     func setMode(_ index: Int?, detail: String, enabled: Bool) {
         for (i, card) in modeCards.enumerated() { card.isSelected = i == index; card.isEnabled = enabled }
-        modeDetail.text = detail
+        modeDetail.text = L10n.text(detail)
     }
 
     private func pin(_ view: UIView, to parent: UIView) {

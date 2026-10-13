@@ -108,7 +108,7 @@ final class GameInstallRun {
         case .verifying:
             return GameInstallUpdate(title: "Checking every file…", detail: "", fraction: 1)
         case .finished:
-            return GameInstallUpdate(title: "Done", detail: "", fraction: 1)
+            return GameInstallUpdate(title: L10n.text("Done"), detail: "", fraction: 1)
         case .downloading, .unpacking:
             detail.append("\(size(p.extractedBytes)) of \(size(p.totalBytes)) unpacked · \(p.filesDone) of \(p.filesTotal) files")
             if p.downloadedBytes > 0 {

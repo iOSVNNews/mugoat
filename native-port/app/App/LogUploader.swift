@@ -16,7 +16,7 @@ enum LogUploader {
             body.append(data.count > perLog ? data.suffix(perLog) : data)
             body.append("\n".data(using: .utf8)!)
         }
-        guard !body.isEmpty else { DispatchQueue.main.async { done(("No log yet", "Start the game once, then try again.")) }; return }
+        guard !body.isEmpty else { DispatchQueue.main.async { done((L10n.text("No log yet"), L10n.text("Start the game once, then try again."))) }; return }
         var request = URLRequest(url: endpoint, timeoutInterval: 60)
         request.httpMethod = "POST"
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")

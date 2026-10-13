@@ -8,13 +8,13 @@ import os
 enum GraphicsPreset: Int, CaseIterable {
     case battery, performance, balanced, quality, ultra, max
 
-    var title: String { ["Tiết kiệm pin", "Ưu tiên mượt", "Cân bằng", "Rõ nét", "Cao", "Tối đa"][rawValue] }
+    var title: String { [L10n.text("Tiết kiệm pin"), L10n.text("Ưu tiên mượt"), L10n.text("Cân bằng"), L10n.text("Rõ nét"), L10n.text("Cao"), L10n.text("Tối đa")][rawValue] }
     /// Render height in pixels; width follows the screen's shape.
     var height: Int { [432, 540, 720, 900, 1080, 1290][rawValue] }
     var detail: String {
-        ["432p · ít tốn RAM và pin", "540p · giảm hiệu ứng nặng", "720p · cân bằng hình ảnh và tốc độ",
-         "900p · tăng chi tiết và khoảng nhìn", "1080p · bóng và phản chiếu cao",
-         "1290p · nhiều chi tiết, cần nhiều RAM hơn"][rawValue]
+        [L10n.text("432p · ít tốn RAM và pin"), L10n.text("540p · giảm hiệu ứng nặng"), L10n.text("720p · cân bằng hình ảnh và tốc độ"),
+         L10n.text("900p · tăng chi tiết và khoảng nhìn"), L10n.text("1080p · bóng và phản chiếu cao"),
+         L10n.text("1290p · nhiều chi tiết, cần nhiều RAM hơn")][rawValue]
     }
 
     /// Engine command-line options. Shader quality never goes below 1 (the

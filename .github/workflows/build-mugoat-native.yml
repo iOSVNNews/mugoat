@@ -30,10 +30,12 @@ jobs:
               subprocess.run(['xcrun','simctl','boot',udid],check=True)
               subprocess.run(['xcrun','simctl','bootstatus',udid,'-b'],check=True)
               subprocess.run(['xcrun','simctl','install',udid,'Build/Build/Products/Debug-iphonesimulator/MugoatPreview.app'],check=True)
-              subprocess.run(['xcrun','simctl','launch',udid,'vn.iosvn.mugoat.preview'],check=True)
               import time
-              time.sleep(3)
-              subprocess.run(['xcrun','simctl','io',udid,'screenshot',name.replace(' ','-')+'.png'],check=True)
+              for language in ['vi','en']:
+                  subprocess.run(['xcrun','simctl','launch',udid,'vn.iosvn.mugoat.preview','--language',language],check=True)
+                  time.sleep(3)
+                  subprocess.run(['xcrun','simctl','io',udid,'screenshot',name.replace(' ','-')+'-'+language+'.png'],check=True)
+                  subprocess.run(['xcrun','simctl','terminate',udid,'vn.iosvn.mugoat.preview'],check=True)
               subprocess.run(['xcrun','simctl','shutdown',udid],check=True)
           PY
       - uses: actions/upload-artifact@v4
@@ -80,6 +82,9 @@ jobs:
           "$RUNNER_TEMP/mugoat-fps-tests"
           clang++ -std=c++20 -I Source Tests/frame_metrics.cpp -o "$RUNNER_TEMP/mugoat-frame-tests"
           "$RUNNER_TEMP/mugoat-frame-tests"
+          cp Resources/Localizations.json "$RUNNER_TEMP/Localizations.json"
+          swiftc App/Localization.swift App/SaveStore.swift Tests/save_store.swift -o "$RUNNER_TEMP/mugoat-save-tests"
+          "$RUNNER_TEMP/mugoat-save-tests"
       - name: Compile native ARM64 engine and package both IPAs
         working-directory: native-port
         env:

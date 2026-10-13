@@ -107,7 +107,7 @@ final class ControlButton: UIView {
         layer.borderColor = UIColor.white.withAlphaComponent(pressed ? 0.9 : 0.28).cgColor
         icon.tintColor = pressed ? UIColor.black.withAlphaComponent(0.9) : UIColor.white.withAlphaComponent(0.92)
         ring.opacity = active && !pressed ? 1 : 0
-        accessibilityValue = pressed ? "Held" : active ? "On" : nil
+        accessibilityValue = pressed ? "Held" : active ? L10n.text("On") : nil
     }
 
     func setPressed(_ value: Bool) {
@@ -300,8 +300,8 @@ final class TouchControlsView: UIView {
     private let camera = ControlButton("camera", icon: "camera", label: "Change camera")
     private let phone = ControlButton("phone", icon: "phone", label: "Phone")
     private let pause = ControlButton("pause", icon: "pause", label: "Pause menu")
-    private let settings = ControlButton("settings", icon: "settings", label: "Settings")
-    private let cheat = ControlButton("cheat", icon: "cheat", label: "Lệnh cheat")
+    private let settings = ControlButton("settings", icon: "settings", label: L10n.text("Settings"))
+    private let cheat = ControlButton("cheat", icon: "cheat", label: L10n.text("Lệnh cheat"))
     private let lights = ControlButton("lights", icon: "lights", label: "Headlights")
     private let radio = ControlButton("radio", icon: "radio", label: "Radio")
     // Menu and phone dock
@@ -310,7 +310,7 @@ final class TouchControlsView: UIView {
     private let left = ControlButton("left", icon: "left", label: "Left")
     private let right = ControlButton("right", icon: "right", label: "Right")
     private let accept = ControlButton("accept", icon: "accept", label: "Select")
-    private let back = ControlButton("back", icon: "back", label: "Back")
+    private let back = ControlButton("back", icon: "back", label: L10n.text("Back"))
     private let tabLeft = ControlButton("tabLeft", icon: "tab_left", label: "Previous tab")
     private let tabRight = ControlButton("tabRight", icon: "tab_right", label: "Next tab")
 

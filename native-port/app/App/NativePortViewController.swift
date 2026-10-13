@@ -91,18 +91,18 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         metalView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(metalView)
 
-        controllerLabel.text = "Điều khiển: cảm ứng"
+        controllerLabel.text = L10n.text("Điều khiển: cảm ứng")
         // Progress text (preparing assets, loading) shows on the disabled Play button.
         let playStyle = launchButton.configurationUpdateHandler
         launchButton.configurationUpdateHandler = { [weak self] button in
             playStyle?(button)
             // Before Play is pressed a disabled button still says Play (files or mode missing).
-            let title = button.isEnabled || !(self?.engineStarted ?? false) ? "Vào game" : button.title(for: .disabled) ?? "Đang tải…"
+            let title = button.isEnabled || !(self?.engineStarted ?? false) ? L10n.text("Vào game") : button.title(for: .disabled) ?? L10n.text("Đang tải…")
             var text = AttributedString(title)
             text.font = Theme.display(20, .heavy)
             text.foregroundColor = button.isEnabled ? UIColor(red: 0.02, green: 0.13, blue: 0.15, alpha: 1) : UIColor(white: 1, alpha: 0.7)
             button.configuration?.attributedTitle = text
-            button.configuration?.image = title == "Vào game" ? UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(weight: .heavy)) : nil
+            button.configuration?.image = title == L10n.text("Vào game") ? UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(weight: .heavy)) : nil
         }
         launchButton.addTarget(self, action: #selector(startEngine), for: .touchUpInside)
         output.isEditable = false
@@ -114,6 +114,12 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         home.settingsButton.addAction(UIAction { [weak self] _ in self?.showSettings() }, for: .touchUpInside)
         home.layoutButton.addAction(UIAction { [weak self] _ in self?.showLayoutEditor() }, for: .touchUpInside)
         home.cheatButton.addAction(UIAction { [weak self] _ in self?.showCheatMenu() }, for: .touchUpInside)
+        home.saveButton.addAction(UIAction { [weak self] _ in self?.showSaves() }, for: .touchUpInside)
+        home.languageButton.configuration?.title = L10n.language.uppercased()
+        home.languageButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            LocalizedUI.chooseLanguage(from: self) { [weak self] in self?.refreshLanguage() }
+        }, for: .touchUpInside)
         home.onFiles = { [weak self] in self?.showGameFiles() }
         home.onMap = { [weak self] index in
             guard let self, !self.engineStarted else { return }
@@ -213,7 +219,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(lookForGameFiles), name: UIApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(installChanged), name: .gameInstallChanged, object: nil)
         displayLink = CADisplayLink(target: self, selector: #selector(pollController))
-        // ProMotion screens only run above 60 Hz when the app asks: "Unlocked" asks for up to 120.
+        // ProMotion screens only run above 60 Hz when the app asks: L10n.text("Unlocked") asks for up to 120.
         if GameSettings.shared.frameRateCap == 0 {
             let top = Float(UIScreen.main.maximumFramesPerSecond)
             displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, top), maximum: top, preferred: top)
@@ -234,7 +240,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             touchControls.isHidden = false
         }
         NotificationCenter.default.addObserver(self, selector: #selector(preloadChanged), name: .assetPreloadChanged, object: nil)
-        // Continue an unfinished "Download all game files" after a relaunch.
+        // Continue an unfinished L10n.text("Download all game files") after a relaunch.
         AssetPreloader.shared.resumeIfNeeded()
         if ProcessInfo.processInfo.arguments.contains("--preload-autostart") {
             // Debug: start the download without tapping (simulator checks).
@@ -273,7 +279,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 launchButton.setTitle("Preparing assets… \(parts[1])% · \(size)", for: .disabled); launchButton.setNeedsUpdateConfiguration()
             }
         }
-        if line == "ASSET_WARM_COMPLETE" { launchButton.setTitle("Đang tải…", for: .disabled); launchButton.setNeedsUpdateConfiguration() }
+        if line == "ASSET_WARM_COMPLETE" { launchButton.setTitle(L10n.text("Đang tải…"), for: .disabled); launchButton.setNeedsUpdateConfiguration() }
         if line == "WORLD_READY", ProcessInfo.processInfo.arguments.contains("--capture-world") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 35) { PGCaptureNativeFrame("optimized-world") }
         }
@@ -329,7 +335,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     /// The launch screen asks for a mode once; after that it remembers it.
     private func refreshModeChoice() {
         let choice = GameSettings.shared.gameModeChoice
-        home.setMode(choice.flatMap { GameMode.allCases.firstIndex(of: $0) }, detail: choice?.detail ?? "Choose Story mode or Sandbox to play.", enabled: !engineStarted)
+        home.setMode(choice.flatMap { GameMode.allCases.firstIndex(of: $0) }, detail: choice?.detail ?? L10n.text("Choose Story mode or Sandbox to play."), enabled: !engineStarted)
         home.setMap(GameSettings.shared.sandboxMap, visible: choice == .sandbox, enabled: !engineStarted)
         updatePlayEnabled()
     }
@@ -362,7 +368,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         appendLog("Graphics: " + GraphicsConfiguration.apply(GameSettings.shared, screen: view.bounds.size))
         appendLog("Device: " + GameSettings.shared.tier.summary)
         GameSettings.shared.markBootStarted()
-        launchButton.setTitle("Đang tải…", for: .disabled); launchButton.setNeedsUpdateConfiguration()
+        launchButton.setTitle(L10n.text("Đang tải…"), for: .disabled); launchButton.setNeedsUpdateConfiguration()
         appendLog("Native touch controls support held buttons, sprint and weapon selection.")
         startAudio()
         let (root, rootNote) = EnginePaths.filesRoot()
@@ -377,8 +383,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         if GameFolder.isChosen {
             guard let data = GameFolder.open() else {
                 appendLog("The game folder on this iPhone can't be opened any more. Choose it again.")
-                showWhenFree(title: "Game files not found", message: "The game folder was moved or deleted. Put it back in Files › On My iPhone › Mugoat, or pick it again.")
-                GameFolder.clear(); updateServerStatus(); launchButton.isEnabled = true; launchButton.setTitle("Vào game", for: .normal)
+                showWhenFree(title: L10n.text("Game files not found"), message: "The game folder was moved or deleted. Put it back in Files › On My iPhone › Mugoat, or pick it again.")
+                GameFolder.clear(); updateServerStatus(); launchButton.isEnabled = true; launchButton.setTitle(L10n.text("Vào game"), for: .normal)
                 return
             }
             PGSetLocalGameFolder(data.path)
@@ -532,7 +538,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     @objc private func lookForGameFiles() {
         guard !engineStarted, !GameFolder.isChosen || GameFolder.inAppFolder, !lookingForGameFiles, !GameInstallManager.shared.isRunning else { return }
         lookingForGameFiles = true
-        if !GameFolder.isChosen { home.setFiles(.busy, title: "Looking for your game files…", detail: "") }
+        if !GameFolder.isChosen { home.setFiles(.busy, title: L10n.text("Looking for your game files…"), detail: "") }
         DispatchQueue.global(qos: .userInitiated).async {
             GameFolder.findInAppFolder()
             DispatchQueue.main.async {
@@ -558,7 +564,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private func updateServerStatus(_ status: String? = nil) {
         // A download running in the background shows on the card (tap it for the full progress).
         if case let .running(update) = GameInstallManager.shared.state {
-            home.setFiles(.busy, title: update.title, detail: update.detail.split(separator: "\n").first.map(String.init) ?? "Tap to see the progress.")
+            home.setFiles(.busy, title: update.title, detail: update.detail.split(separator: "\n").first.map(String.init) ?? L10n.text("Tap to see the progress."))
             updatePlayEnabled()
             return
         }
@@ -571,16 +577,16 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             home.setFiles(problems > 0 ? .attention : .ready, title: "\"\(GameFolder.name)\"",
                           detail: problems > 0 ? "\(place) · \(problems) problem \(problems == 1 ? "file" : "files"), playing anyway" : "\(place) · every file checked")
         } else if server.isEmpty, let report = GameFolder.appFolderReport {
-            home.setFiles(.problem, title: report.explanation.title, detail: "Found your game folder, but it can't be used yet. Tap to see why and how to fix it.")
+            home.setFiles(.problem, title: report.explanation.title, detail: L10n.text("Found your game folder, but it can't be used yet. Tap to see why and how to fix it."))
         } else if server.isEmpty, !raw.isEmpty {
-            home.setFiles(.problem, title: "Server address isn't a web address", detail: "Tap to change it.")
+            home.setFiles(.problem, title: L10n.text("Server address isn't a web address"), detail: L10n.text("Tap to change it."))
         } else if server.isEmpty {
-            home.setFiles(.attention, title: "Add your game files", detail: GameFolder.archivesFound.isEmpty ? "Tap to find them on this iPhone, or get them from a link or an archive." : "Found a game archive. Tap to unpack it.")
+            home.setFiles(.attention, title: L10n.text("Add your game files"), detail: GameFolder.archivesFound.isEmpty ? L10n.text("Tap to find them on this iPhone, or get them from a link or an archive.") : L10n.text("Found a game archive. Tap to unpack it."))
         } else if status == "checking…" {
-            home.setFiles(.busy, title: "Streaming from your server", detail: server)
+            home.setFiles(.busy, title: L10n.text("Streaming from your server"), detail: server)
         } else {
             let ok = status == nil || status == "connected ✓"
-            home.setFiles(ok ? .ready : .problem, title: "Streaming from your server", detail: server + (status.map { " · " + $0 } ?? ""))
+            home.setFiles(ok ? .ready : .problem, title: L10n.text("Streaming from your server"), detail: server + (status.map { " · " + $0 } ?? ""))
         }
         updatePlayEnabled()
     }
@@ -651,7 +657,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         message += " You can change this any time in Settings."
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Share log", style: .default) { _ in
+        alert.addAction(UIAlertAction(title: L10n.text("Share log"), style: .default) { _ in
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let logs = ["native-port-previous.log", "native-port.log"].map { documents.appendingPathComponent($0) }
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -707,9 +713,30 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         controller.editLayout = { [weak self] in self?.showLayoutEditor() }
         controller.targetingChanged = { PGSetTargetingMode(Int32(GameSettings.shared.targetingMode)) }
         controller.openCheat = { [weak self] in self?.showCheatMenu() }
+        controller.openSaves = { [weak controller, weak self] in
+            guard let self, let controller else { return }
+            let saves = SaveViewController(engineRunning: self.engineStarted)
+            controller.navigationController?.pushViewController(saves, animated: true)
+        }
         let navigation = UINavigationController(rootViewController: controller)
         Theme.styleNavigation(navigation)
         present(navigation, animated: true)
+    }
+
+    private func showSaves() {
+        guard presentedViewController == nil else { return }
+        touchControls.reset()
+        let navigation = UINavigationController(rootViewController: SaveViewController(engineRunning: engineStarted))
+        Theme.styleNavigation(navigation)
+        present(navigation, animated: true)
+    }
+
+    private func refreshLanguage() {
+        home.languageButton.configuration?.title = L10n.language.uppercased()
+        LocalizedUI.apply(to: home)
+        refreshModeChoice()
+        updateServerStatus()
+        launchButton.setNeedsUpdateConfiguration()
     }
 
     @objc private func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
@@ -838,7 +865,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             hasController = true
             if diagnosticsOverlay?.isHidden != true { controllerLabel.text = "Controller: \(controller.vendorName ?? "Gamepad")" }
         } else if diagnosticsOverlay?.isHidden != true {
-            controllerLabel.text = "Touch controls ready"
+            controllerLabel.text = L10n.text("Touch controls ready")
         }
         // With a controller connected the touch controls step aside (Settings › Touch controls).
         // Keyboard and mouse: every frame while the game runs (keys go straight to the game as they change).

@@ -14,6 +14,7 @@ final class SettingsViewController: UITableViewController {
     var targetingChanged: (() -> Void)?
     var gameModeChanged: (() -> Void)?
     var openCheat: (() -> Void)?
+    var openSaves: (() -> Void)?
 
     private enum Section: Int, CaseIterable { case cheat, mode, graphics, controls, gyro, files, device }
     private let preloader = AssetPreloader.shared
@@ -28,7 +29,7 @@ final class SettingsViewController: UITableViewController {
         self.runningMode = engineRunning ? runningMode : nil
         self.bootPreset = GameSettings.shared.graphicsPreset
         super.init(style: .insetGrouped)
-        title = "Cài đặt Mugoat"
+        title = L10n.text("Cài đặt Mugoat")
         modalPresentationStyle = .formSheet
         overrideUserInterfaceStyle = .dark
     }
@@ -79,40 +80,40 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
         case .cheat: return 1
-        case .mode: return GameMode.allCases.count + (settings.gameModeChoice == .sandbox ? 1 : 0)
+        case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 3
         case .controls: return 10
         case .gyro: return (settings.gyroAim == .off ? 1 : 3) + (settings.tiltSteer == .off ? 1 : 2)
         case .files: return fileRows.count
-        case .device: return 3
+        case .device: return 5
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        ["Tiện ích game", "Chế độ chơi", "Đồ họa & FPS", "Điều khiển", "Cảm biến", "Dữ liệu game", "Thiết bị & hỗ trợ"][section]
+        [L10n.text("Tiện ích game"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .cheat:
-            return "Mở bảng lệnh cheat để kích hoạt bất tử, hồi máu & giáp, nhận tất cả vũ khí, gọi xe cộ, máy bay, đổi thời tiết..."
+            return L10n.text("Mở bảng lệnh cheat để kích hoạt bất tử, hồi máu & giáp, nhận tất cả vũ khí, gọi xe cộ, máy bay, đổi thời tiết...")
         case .mode:
-            var text = "Story mode saves stay on this phone between launches. Sandbox keeps its own separate files."
+            var text = L10n.text("Story mode saves stay on this phone between launches. Sandbox keeps its own separate files.")
             if let runningMode {
-                text = "Changes apply the next time you start the game. " + text
+                text = L10n.text("Changes apply the next time you start the game. ") + text
                 if settings.gameMode != runningMode { text += " Close and reopen the app to play \(settings.gameMode.title)." }
             }
             return text
         case .graphics:
-            var text = "Resolution changes apply right away. "
-            text += engineRunning ? "Preset and frame rate changes apply the next time you start the game." : "Presets apply when you press Play."
+            var text = L10n.text("Resolution changes apply right away. ")
+            text += engineRunning ? L10n.text("Preset and frame rate changes apply the next time you start the game.") : L10n.text("Presets apply when you press Play.")
             if settings.graphicsPreset != bootPreset && engineRunning { text += " Restart needed for \(settings.graphicsPreset.title)." }
             if settings.tier.risky(settings.graphicsPreset) { text += " Presets above the recommended one can run out of memory or overheat on this phone; if a launch fails, the game falls back automatically." }
             return text
         case .controls:
-            return "Controls act as a game controller, so the game's own aim assist and analog steering work. Assisted aim locks onto targets like on a console."
+            return L10n.text("Controls act as a game controller, so the game's own aim assist and analog steering work. Assisted aim locks onto targets like on a console.")
         case .gyro:
-            return "Move the phone to fine-tune your aim; turning your body turns the camera. Tilt steering turns the phone like a steering wheel: Assist adds fine control on top of the touch steering, Tilt to steer replaces it. The straight-ahead angle is however you hold the phone when you get in."
+            return L10n.text("Move the phone to fine-tune your aim; turning your body turns the camera. Tilt steering turns the phone like a steering wheel: Assist adds fine control on top of the touch steering, Tilt to steer replaces it. The straight-ahead angle is however you hold the phone when you get in.")
         case .files: return filesFooter()
         case .device: return "Mugoat · iOSVN · \(Theme.appVersion). Chia sẻ log kèm phiên bản này khi báo lỗi."
         }
@@ -126,53 +127,36 @@ final class SettingsViewController: UITableViewController {
         let presets = settings.tier.allowed
         switch Section(rawValue: indexPath.section)! {
         case .cheat:
-            content.text = "Bảng lệnh cheat (Cheat Menu)"
-            content.secondaryText = "Nhập mã lệnh hoặc bật nhanh các cheat có sẵn"
+            content.text = L10n.text("Bảng lệnh cheat (Cheat Menu)")
+            content.secondaryText = L10n.text("Nhập mã lệnh hoặc bật nhanh các cheat có sẵn")
             let button = UIButton(configuration: .tinted())
-            button.configuration?.title = "Mở menu"
+            button.configuration?.title = L10n.text("Mở menu")
             button.configuration?.cornerStyle = .capsule
             button.isUserInteractionEnabled = false
             cell.accessoryView = button
             cell.selectionStyle = .default
-        case .mode where indexPath.row == GameMode.allCases.count:
-            // Sandbox only: which map.
-            content.text = "Sandbox map"
-            content.secondaryText = settings.sandboxMap == 1 ? "The test level that comes with the game files" : "The full GTA V map"
-            let button = UIButton(configuration: .gray())
-            button.configuration?.title = GameSettings.sandboxMapTitles[settings.sandboxMap]
-            button.menu = UIMenu(children: GameSettings.sandboxMapTitles.enumerated().map { index, title in
-                UIAction(title: title, state: index == settings.sandboxMap ? .on : .off) { [weak self] _ in
-                    self?.settings.sandboxMap = index
-                    self?.gameModeChanged?()
-                    UIView.performWithoutAnimation { self?.tableView.reloadSections([Section.mode.rawValue], with: .none) }
-                }
-            })
-            button.showsMenuAsPrimaryAction = true
-            button.sizeToFit()
-            cell.accessoryView = button
-            cell.selectionStyle = .none
         case .mode:
             let mode = GameMode.allCases[indexPath.row]
-            content.text = mode.title + (mode == runningMode ? " (playing now)" : "")
+            content.text = mode.title + (mode == runningMode ? L10n.text(" (playing now)") : "")
             content.secondaryText = mode.detail
             cell.accessoryType = settings.gameModeChoice == mode ? .checkmark : .none
         case .graphics:
             if indexPath.row < presets.count {
                 let preset = presets[indexPath.row]
-                content.text = preset.title + (preset == settings.tier.recommended ? " (recommended)" : "")
-                content.secondaryText = "Detail level, default \(preset.height)p · " + preset.detail + (settings.tier.risky(preset) ? "\n⚠︎ Heavier than this phone's recommended setting: may run out of memory or overheat." : "")
+                content.text = preset.title + (preset == settings.tier.recommended ? L10n.text(" (recommended)") : "")
+                content.secondaryText = "Detail level, default \(preset.height)p · " + preset.detail + (settings.tier.risky(preset) ? L10n.text("\n⚠︎ Heavier than this phone's recommended setting: may run out of memory or overheat.") : "")
                 if settings.tier.risky(preset) { content.secondaryTextProperties.color = .systemOrange }
                 cell.accessoryType = preset == settings.graphicsPreset ? .checkmark : .none
             } else {
                 let row = indexPath.row - presets.count
                 cell.selectionStyle = .none
                 if row == 0 {
-                    content.text = "Resolution"
-                    content.secondaryText = currentSizeText() + " · changes right away"
+                    content.text = L10n.text("Resolution")
+                    content.secondaryText = currentSizeText() + L10n.text(" · changes right away")
                     let button = UIButton(type: .system)
                     button.setTitle(resolutionTitle(settings.renderHeight) + " ▾", for: .normal)
                     button.showsMenuAsPrimaryAction = true
-                    button.accessibilityLabel = "Resolution"
+                    button.accessibilityLabel = L10n.text("Resolution")
                     let choices = [0] + GraphicsConfiguration.resolutionChoices
                     button.menu = UIMenu(children: choices.map { height in
                         UIAction(title: resolutionTitle(height), state: height == settings.renderHeight ? .on : .off) { [weak self] _ in
@@ -185,18 +169,18 @@ final class SettingsViewController: UITableViewController {
                     button.sizeToFit()
                     cell.accessoryView = button
                 } else if row == 1 {
-                    content.text = "Fill the screen"
-                    content.secondaryText = "Render at the screen's shape instead of stretching 16:9"
-                    cell.accessoryView = toggle(settings.matchScreenShape, label: "Fill the screen") { [weak self] in
+                    content.text = L10n.text("Fill the screen")
+                    content.secondaryText = L10n.text("Render at the screen's shape instead of stretching 16:9")
+                    cell.accessoryView = toggle(settings.matchScreenShape, label: L10n.text("Fill the screen")) { [weak self] in
                         self?.settings.matchScreenShape = $0; self?.resolutionChanged?(); self?.tableView.reloadData()
                     }
                 } else {
-                    content.text = "Frame rate"
-                    content.secondaryText = "Higher uses more power and heat; 30 FPS is steadiest. Unlocked goes up to 120 on ProMotion iPhones."
+                    content.text = L10n.text("Frame rate")
+                    content.secondaryText = L10n.text("Higher uses more power and heat; 30 FPS is steadiest. Unlocked goes up to 120 on ProMotion iPhones.")
                     let button = UIButton(type: .system)
                     button.setTitle(GameSettings.frameRateTitle(settings.frameRateCap) + " ▾", for: .normal)
                     button.showsMenuAsPrimaryAction = true
-                    button.accessibilityLabel = "Frame rate"
+                    button.accessibilityLabel = L10n.text("Frame rate")
                     button.menu = UIMenu(children: [30, 60, 0].map { cap in
                         UIAction(title: GameSettings.frameRateTitle(cap), state: cap == settings.frameRateCap ? .on : .off) { [weak self] _ in
                             self?.settings.frameRateCap = cap; self?.reloadFooters(); self?.tableView.reloadData()
@@ -210,21 +194,21 @@ final class SettingsViewController: UITableViewController {
             cell.selectionStyle = .none
             switch indexPath.row {
             case 0:
-                cell.accessoryView = slider(settings.lookSensitivity, 0.3, 3, label: "Look speed") { [weak self] in self?.settings.lookSensitivity = $0 }
-                content.text = "Camera stick speed"
+                cell.accessoryView = slider(settings.lookSensitivity, 0.3, 3, label: L10n.text("Look speed")) { [weak self] in self?.settings.lookSensitivity = $0 }
+                content.text = L10n.text("Camera stick speed")
             case 5:
                 cell.accessoryView = slider(settings.aimSensitivity, 0.3, 4, label: "Aim look speed") { [weak self] in self?.settings.aimSensitivity = $0 }
-                content.text = "Aim stick speed"
+                content.text = L10n.text("Aim stick speed")
             case 7:
-                content.text = "Edit controls layout"
+                content.text = L10n.text("Edit controls layout")
                 content.secondaryText = ControlsLayout.isCustomized ? "Customized" : "Move, resize or hide buttons"
                 content.textProperties.color = .systemBlue
             case 1:
                 cell.accessoryView = slider(settings.controlScale, 0.7, 1.5, label: "Button size") { [weak self] in self?.settings.controlScale = $0; self?.controlsChanged?() }
                 content.text = "Button size"
             case 2:
-                cell.accessoryView = slider(settings.controlOpacity, 0.2, 1, label: "Button opacity") { [weak self] in self?.settings.controlOpacity = $0; self?.controlsChanged?() }
-                content.text = "Button opacity"
+                cell.accessoryView = slider(settings.controlOpacity, 0.2, 1, label: L10n.text("Button opacity")) { [weak self] in self?.settings.controlOpacity = $0; self?.controlsChanged?() }
+                content.text = L10n.text("Button opacity")
             case 3:
                 content.text = "Targeting"
                 let button = UIButton(configuration: .gray())
@@ -240,25 +224,25 @@ final class SettingsViewController: UITableViewController {
                 button.sizeToFit()
                 cell.accessoryView = button
             case 6:
-                content.text = "Hide when a controller is connected"
-                content.secondaryText = "Touch controls come back as soon as the controller disconnects"
-                cell.accessoryView = toggle(settings.hideTouchWithController, label: "Hide touch controls with a controller") { [weak self] in self?.settings.hideTouchWithController = $0 }
+                content.text = L10n.text("Hide when a controller is connected")
+                content.secondaryText = L10n.text("Touch controls come back as soon as the controller disconnects")
+                cell.accessoryView = toggle(settings.hideTouchWithController, label: L10n.text("Hide touch controls with a controller")) { [weak self] in self?.settings.hideTouchWithController = $0 }
             case 8:
-                content.text = "Keyboard and mouse"
-                content.secondaryText = "Play with the PC controls (WASD, mouse look). With both connected, touch controls hide"
-                cell.accessoryView = toggle(settings.keyboardMouse, label: "Keyboard and mouse") { [weak self] in
+                content.text = L10n.text("Keyboard and mouse")
+                content.secondaryText = L10n.text("Play with the PC controls (WASD, mouse look). With both connected, touch controls hide")
+                cell.accessoryView = toggle(settings.keyboardMouse, label: L10n.text("Keyboard and mouse")) { [weak self] in
                     self?.settings.keyboardMouse = $0
                     if !$0 { KeyboardMouse.shared.releaseAll() }
                 }
             default:
-                content.text = "Fire also aims"
-                content.secondaryText = "Fire locks on first, like the classic mobile GTA games"
-                cell.accessoryView = toggle(settings.fireAlsoAims, label: "Fire also aims") { [weak self] in self?.settings.fireAlsoAims = $0 }
+                content.text = L10n.text("Fire also aims")
+                content.secondaryText = L10n.text("Fire locks on first, like the classic mobile GTA games")
+                cell.accessoryView = toggle(settings.fireAlsoAims, label: L10n.text("Fire also aims")) { [weak self] in self?.settings.fireAlsoAims = $0 }
             }
         case .gyro:
             let aimRows = settings.gyroAim == .off ? 1 : 3
             if indexPath.row == aimRows {
-                content.text = "Tilt steering"
+                content.text = L10n.text("Tilt steering")
                 let button = UIButton(configuration: .gray())
                 button.configuration?.title = settings.tiltSteer.title
                 button.menu = UIMenu(children: TiltSteerMode.allCases.map { mode in
@@ -272,10 +256,10 @@ final class SettingsViewController: UITableViewController {
                 cell.selectionStyle = .none
             } else if indexPath.row == aimRows + 1 {
                 content.text = "Full lock at \(Int(settings.tiltFullLock))°"
-                cell.accessoryView = slider(settings.tiltFullLock, 10, 45, label: "Tilt for full steering") { [weak self] in self?.settings.tiltFullLock = $0.rounded() }
+                cell.accessoryView = slider(settings.tiltFullLock, 10, 45, label: L10n.text("Tilt for full steering")) { [weak self] in self?.settings.tiltFullLock = $0.rounded() }
                 cell.selectionStyle = .none
             } else if indexPath.row == 0 {
-                content.text = "Gyro"
+                content.text = L10n.text("Gyro")
                 content.secondaryText = settings.gyroAim.title
                 let menu = UIMenu(children: GyroAimMode.allCases.map { mode in
                     UIAction(title: mode.title, state: mode == settings.gyroAim ? .on : .off) { [weak self] _ in
@@ -306,25 +290,33 @@ final class SettingsViewController: UITableViewController {
                 cell.accessoryView = slider
                 cell.selectionStyle = .none
             } else {
-                content.text = "Invert vertical"
+                content.text = L10n.text("Invert vertical")
                 cell.accessoryView = toggle(settings.gyroInvertY, label: "Invert vertical gyro") { [weak self] in self?.settings.gyroInvertY = $0 }
                 cell.selectionStyle = .none
             }
         case .files:
             configureFileCell(cell, &content, fileRows[indexPath.row])
         case .device:
-            if indexPath.row == 0 {
+            if indexPath.row == 4 {
+                content.text = "Tiếng Việt / English"
+                content.secondaryText = L10n.language == "en" ? "English" : "Tiếng Việt"
+                cell.accessoryType = .disclosureIndicator
+            } else if indexPath.row == 3 {
+                content.text = L10n.text("Save game & sao lưu")
+                content.secondaryText = L10n.text("Xem tệp lưu, xuất bản sao hoặc khôi phục")
+                cell.accessoryType = .disclosureIndicator
+            } else if indexPath.row == 0 {
                 content.text = settings.tier.summary
                 content.textProperties.font = .preferredFont(forTextStyle: .footnote)
                 content.textProperties.color = .secondaryLabel
                 cell.selectionStyle = .none
             } else if indexPath.row == 1 {
-                content.text = "Chia sẻ nhật ký hỗ trợ"
-                content.secondaryText = "One tap. Helps fix crashes and loading problems"
+                content.text = L10n.text("Chia sẻ nhật ký hỗ trợ")
+                content.secondaryText = L10n.text("One tap. Helps fix crashes and loading problems")
                 content.textProperties.color = .systemBlue
             } else {
-                content.text = "Share log"
-                content.secondaryText = "Save or send this run's log and the previous one yourself"
+                content.text = L10n.text("Share log")
+                content.secondaryText = L10n.text("Save or send this run's log and the previous one yourself")
                 content.textProperties.color = .systemBlue
             }
         }
@@ -335,6 +327,14 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == Section.cheat.rawValue { openCheat?(); return }
+        if indexPath.section == Section.device.rawValue, indexPath.row == 4 {
+            LocalizedUI.chooseLanguage(from: self) { [weak self] in
+                self?.title = L10n.text("Cài đặt Mugoat")
+                self?.tableView.reloadData()
+            }
+            return
+        }
+        if indexPath.section == Section.device.rawValue, indexPath.row == 3 { openSaves?(); return }
         if indexPath.section == Section.device.rawValue, indexPath.row == 1 { shareLogs(from: tableView.cellForRow(at: indexPath)); return }
         if indexPath.section == Section.device.rawValue, indexPath.row == 2 { shareLogs(from: tableView.cellForRow(at: indexPath)); return }
         if indexPath.section == Section.controls.rawValue, indexPath.row == 7 { editLayout?(); return }
@@ -399,13 +399,13 @@ final class SettingsViewController: UITableViewController {
     }
 
     private func configureFileCell(_ cell: UITableViewCell, _ content: inout UIListContentConfiguration, _ row: FileRow) {
-        let total = preloader.measured ? AssetPreloader.format(preloader.totalBytes) : "Checking size"
+        let total = preloader.measured ? AssetPreloader.format(preloader.totalBytes) : L10n.text("Checking size")
         switch row {
         case .status:
             cell.selectionStyle = .none
             switch preloader.phase {
             case .unavailable(let reason):
-                content.text = "Download all game files"
+                content.text = L10n.text("Download all game files")
                 content.secondaryText = reason
                 content.textProperties.color = .secondaryLabel
             case .complete:
@@ -423,7 +423,7 @@ final class SettingsViewController: UITableViewController {
                 cell.accessoryView = progressView()
             }
         case .start:
-            content.text = "Download all game files"
+            content.text = L10n.text("Download all game files")
             content.textProperties.color = .tintColor
             if preloader.cachedBytes > 0 && preloader.measured {
                 content.secondaryText = "\(total) · \(AssetPreloader.format(preloader.cachedBytes)) already on this iPhone"
@@ -432,7 +432,7 @@ final class SettingsViewController: UITableViewController {
             }
             content.image = UIImage(systemName: "arrow.down.circle")
         case .pause:
-            content.text = "Pause"
+            content.text = L10n.text("Pause")
             content.textProperties.color = .tintColor
             content.image = UIImage(systemName: "pause.circle")
         case .resume:
@@ -489,25 +489,25 @@ final class SettingsViewController: UITableViewController {
                 if let message = self.preloader.start() { self.showAlert("Can't download", message) }
             }
             if row == .start {
-                let alert = UIAlertController(title: "Download all game files?",
+                let alert = UIAlertController(title: L10n.text("Download all game files?"),
                     message: "This saves \(AssetPreloader.format(preloader.missingBytes)) more on this iPhone (\(AssetPreloader.format(preloader.availableBytes())) free). Wi-Fi and Tailscale recommended.",
                     preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-                alert.addAction(UIAlertAction(title: "Download", style: .default) { _ in start() })
+                alert.addAction(UIAlertAction(title: L10n.text("Cancel"), style: .cancel))
+                alert.addAction(UIAlertAction(title: L10n.text("Download"), style: .default) { _ in start() })
                 present(alert, animated: true)
             } else { start() }
         case .pause: preloader.pause()
         case .cancel: preloader.cancel()
         case .remove:
             guard !engineRunning else { return }
-            let alert = UIAlertController(title: "Remove downloaded files?",
+            let alert = UIAlertController(title: L10n.text("Remove downloaded files?"),
                 message: "Frees \(AssetPreloader.format(preloader.cachedBytes)). The game will stream from the server again.",
                 preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            alert.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: L10n.text("Cancel"), style: .cancel))
+            alert.addAction(UIAlertAction(title: L10n.text("Remove"), style: .destructive) { [weak self] _ in
                 guard let self else { return }
                 self.preloader.removeDownloads { message in
-                    if let message { self.showAlert("Can't remove files", message) }
+                    if let message { self.showAlert(L10n.text("Can't remove files"), message) }
                 }
             })
             present(alert, animated: true)
@@ -540,7 +540,7 @@ final class SettingsViewController: UITableViewController {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let logs = ["native-port.log", "native-port-previous.log"].map { documents.appendingPathComponent($0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard !logs.isEmpty else { showAlert("No log yet", "Start the game once, then try again."); return }
+        guard !logs.isEmpty else { showAlert(L10n.text("No log yet"), L10n.text("Start the game once, then try again.")); return }
         let sheet = UIActivityViewController(activityItems: logs, applicationActivities: nil)
         sheet.popoverPresentationController?.sourceView = cell ?? view
         present(sheet, animated: true)

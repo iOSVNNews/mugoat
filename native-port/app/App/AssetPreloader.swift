@@ -28,7 +28,7 @@ enum EnginePaths {
     }
 }
 
-/// "Download all game files": copies every archive into the same block cache
+/// L10n.text("Download all game files"): copies every archive into the same block cache
 /// that streaming fills, so play no longer depends on the server. The native
 /// side (Source/NativeAssetPreload.h) does the work; this class keeps the
 /// player's choice, checks storage, estimates time and handles app lifecycle.
