@@ -64,7 +64,7 @@ pub unsafe extern "C" fn MugoatOnlineConfigure(server: *const c_char, name: *con
         std::env::set_var("MUGUET_NAME",name);
         std::env::set_var("MUGUET_ROOM",room);
         std::env::set_var("MUGUET_MODE",if mode == 1 { "story" } else { "sandbox" });
-        std::env::set_var("MUGUET_PVP","0");
+        if std::env::var("MUGUET_PVP").is_err() { std::env::set_var("MUGUET_PVP","0"); }
         ENABLED.store(true,Ordering::Release);
     }
     CONFIGURED.store(true,Ordering::Release); true

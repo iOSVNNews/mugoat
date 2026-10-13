@@ -36,6 +36,15 @@ jobs:
                   time.sleep(3)
                   subprocess.run(['xcrun','simctl','io',udid,'screenshot',name.replace(' ','-')+'-'+language+'.png'],check=True)
                   subprocess.run(['xcrun','simctl','terminate',udid,'vn.iosvn.mugoat.preview'],check=True)
+                  if name == 'iPhone SE (3rd generation)':
+                      subprocess.run(['xcrun','simctl','launch',udid,'vn.iosvn.mugoat.preview','--language',language,'--preview-online'],check=True)
+                      time.sleep(2)
+                      subprocess.run(['xcrun','simctl','io',udid,'screenshot','Online-SE-'+language+'.png'],check=True)
+                      subprocess.run(['xcrun','simctl','terminate',udid,'vn.iosvn.mugoat.preview'],check=True)
+                      subprocess.run(['xcrun','simctl','launch',udid,'vn.iosvn.mugoat.preview','--language',language,'--preview-online','--preview-online-bottom'],check=True)
+                      time.sleep(2)
+                      subprocess.run(['xcrun','simctl','io',udid,'screenshot','Online-SE-bottom-'+language+'.png'],check=True)
+                      subprocess.run(['xcrun','simctl','terminate',udid,'vn.iosvn.mugoat.preview'],check=True)
               subprocess.run(['xcrun','simctl','shutdown',udid],check=True)
           PY
       - uses: actions/upload-artifact@v4
@@ -62,7 +71,7 @@ jobs:
             native-port/app/GeneratedResources
             native-port/app/Build/MetalShaders
             native-port/app/Build/Release
-          key: mugoat-hybrid-ios160-v1-${{ hashFiles('native-port/app/Scripts/**', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml', 'src/mp.rs') }}
+          key: mugoat-hybrid-ios160-v1-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml', 'src/mp.rs') }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -111,6 +120,8 @@ jobs:
           plutil -lint app/Build/IPA-Free/Payload/PlayGTA5Native.app/Info.plist
           unzip -t Mugoat-AppleID-Free.ipa > /dev/null
           unzip -t Mugoat-Cert-Paid.ipa > /dev/null
+          python3 app/Scripts/verify_native_ipa.py Mugoat-AppleID-Free.ipa --revision "$GITHUB_SHA" > Native-IPA-Free-validation.json
+          python3 app/Scripts/verify_native_ipa.py Mugoat-Cert-Paid.ipa --revision "$GITHUB_SHA" > Native-IPA-Paid-validation.json
       - name: Test native runtime and BC texture fallback
         working-directory: native-port/app
         run: |
@@ -131,6 +142,7 @@ jobs:
             native-port/Mugoat-AppleID-Free.enc
             native-port/Mugoat-Cert-Paid.enc
             native-port/SHA256SUMS.txt
+            native-port/Native-IPA-*-validation.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()

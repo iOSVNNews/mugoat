@@ -1,4 +1,5 @@
 import UIKit
+import Darwin
 
 enum OnlineSettings {
     private static let legacy: [String: Any] = {
@@ -23,8 +24,13 @@ enum OnlineSettings {
         get { UserDefaults.standard.string(forKey: "MugoatOnlineRoom") ?? legacy["room"] as? String ?? "story" }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineRoom") }
     }
+    static var pvp: Bool {
+        get { UserDefaults.standard.object(forKey: "MugoatOnlinePVP") as? Bool ?? legacy["pvp"] as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlinePVP") }
+    }
     static func configure(mode: GameMode) -> Bool {
-        (enabled ? server : "").withCString { server in
+        setenv("MUGUET_PVP", pvp ? "1" : "0", 1)
+        return (enabled ? server : "").withCString { server in
             name.withCString { name in room.withCString { room in
                 MugoatOnlineConfigure(server, name, room, Int32(mode.rawValue))
             } }
@@ -40,9 +46,12 @@ enum OnlineSettings {
 final class OnlineSettingsViewController: UIViewController {
     private let running: Bool
     private let enabled = UISwitch()
+    private let pvp = UISwitch()
     private let server = UITextField()
     private let name = UITextField()
     private let room = UITextField()
+    private let status = UILabel()
+    private var statusTimer: Timer?
     var changed: (() -> Void)?
     init(running: Bool) { self.running = running; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
@@ -53,6 +62,9 @@ final class OnlineSettingsViewController: UIViewController {
         enabled.isOn = OnlineSettings.enabled; enabled.isEnabled = !running
         let label = UILabel(); label.text = L10n.text("Chơi online"); label.textColor = Theme.text
         let toggle = UIStackView(arrangedSubviews: [label, enabled]); toggle.alignment = .center
+        pvp.isOn = OnlineSettings.pvp; pvp.isEnabled = !running
+        let pvpLabel = UILabel(); pvpLabel.text = L10n.text("PvP: bắn người chơi khác"); pvpLabel.textColor = Theme.text
+        let pvpRow = UIStackView(arrangedSubviews: [pvpLabel, pvp]); pvpRow.alignment = .center
         server.text = OnlineSettings.server; server.placeholder = "IP / hostname:47520"; server.keyboardType = .URL
         name.text = OnlineSettings.name; name.placeholder = L10n.text("Tên người chơi")
         room.text = OnlineSettings.room; room.placeholder = L10n.text("Phòng chơi")
@@ -64,16 +76,31 @@ final class OnlineSettingsViewController: UIViewController {
         let explanation = UILabel()
         explanation.text = L10n.text(running ? "Đóng rồi mở lại app để đổi máy chủ." : "Dùng cùng IP, phòng và chế độ chơi với bạn bè. Máy chủ Muguet dùng UDP 47520. Kết nối bắt đầu khi vào game.")
         explanation.font = Theme.body(13); explanation.textColor = Theme.secondaryText; explanation.numberOfLines = 0
-        let status = UILabel(); status.text = running ? OnlineSettings.status : ""; status.textColor = Theme.accent; status.numberOfLines = 0
+        status.text = running ? OnlineSettings.status : ""; status.textColor = Theme.accent; status.numberOfLines = 0
         let save = Theme.primaryButton(L10n.text("Lưu"), symbol: "checkmark")
         save.isEnabled = !running
         save.addAction(UIAction { [weak self] _ in self?.save() }, for: .touchUpInside)
-        let column = UIStackView(arrangedSubviews: [toggle, server, name, room, explanation, status, save]); column.axis = .vertical; column.spacing = 16
-        column.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(column)
-        NSLayoutConstraint.activate([column.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20), column.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24), column.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24)])
+        let column = UIStackView(arrangedSubviews: [toggle, server, name, room, pvpRow, explanation, status, save]); column.axis = .vertical; column.spacing = 16
+        let scroll = UIScrollView(); scroll.keyboardDismissMode = .interactive
+        scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
+        column.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(column)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            column.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 20), column.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -20),
+            column.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 24), column.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -24),
+            column.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -48)
+        ])
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: L10n.text("Đóng"), style: .done, target: self, action: #selector(close))
     }
     @objc private func close() { dismiss(animated: true) }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if running { statusTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.status.text = OnlineSettings.status } }
+    }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated); statusTimer?.invalidate(); statusTimer = nil
+    }
     private func save() {
         let host = (server.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let player = (name.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,6 +110,7 @@ final class OnlineSettingsViewController: UIViewController {
             alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true); return
         }
         OnlineSettings.server = host; OnlineSettings.name = player; OnlineSettings.room = channel; OnlineSettings.enabled = enabled.isOn
+        OnlineSettings.pvp = pvp.isOn
         changed?(); dismiss(animated: true)
     }
 }

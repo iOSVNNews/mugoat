@@ -1798,5 +1798,9 @@
   "Online: connecting…": {
     "en": "Online: connecting…",
     "vi": "Online: đang kết nối…"
+  },
+  "PvP: bắn người chơi khác": {
+    "vi": "PvP: bắn người chơi khác",
+    "en": "PvP: attack other players"
   }
 }

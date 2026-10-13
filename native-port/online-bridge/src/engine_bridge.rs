@@ -1,5 +1,5 @@
 //! Typed FFI to statically compiled game functions, with no VM or JIT.
-use std::{ffi::CString, marker::PhantomData};
+use std::{ffi::CString, marker::PhantomData, cell::RefCell, collections::HashMap, rc::Rc};
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -28,28 +28,42 @@ extern "C" {
 }
 pub struct Caller<'a, T> { pub instance: *mut std::ffi::c_void, marker: PhantomData<&'a mut T> }
 pub struct Export(Func);
-pub struct Func { name: CString, ty: FuncType }
+struct Definition { name: CString, ty: FuncType }
+#[derive(Clone)]
+pub struct Func(Rc<Definition>);
+thread_local! {
+    // Immutable signatures belong to the generated engine version. Cache per
+    // script thread without a global lock or repeat string/type allocations.
+    static EXPORTS: RefCell<HashMap<String, Option<Func>>> = RefCell::new(HashMap::new());
+}
 impl<'a, T> Caller<'a, T> {
     pub fn new(instance: *mut std::ffi::c_void) -> Self { Self { instance, marker: PhantomData } }
     pub fn get_export(&mut self, name: &str) -> Option<Export> {
-        let name = CString::new(name).ok()?;
-        let mut params = [0; 32]; let mut result = 0;
-        let count = unsafe { mugoat_command_info(name.as_ptr(), params.as_mut_ptr(), params.len() as u32, &mut result) };
-        if count < 0 || count as usize > params.len() { return None; }
-        Some(Export(Func { name, ty: FuncType { params: params[..count as usize].to_vec(), result: (result != 0).then_some(result) } }))
+        EXPORTS.with(|cache| {
+            if let Some(found) = cache.borrow().get(name) { return found.clone().map(Export); }
+            let symbol = CString::new(name).ok()?;
+            let mut params = [0;32]; let mut result=0;
+            let count = unsafe { mugoat_command_info(symbol.as_ptr(),params.as_mut_ptr(),32,&mut result) };
+            let found = if count<0 || count as usize>params.len() { None } else {
+                Some(Func(Rc::new(Definition { name: symbol, ty: FuncType { params: params[..count as usize].to_vec(), result: (result!=0).then_some(result) } })))
+            };
+            cache.borrow_mut().insert(name.to_owned(),found.clone());
+            found.map(Export)
+        })
     }
 }
 impl Export { pub fn into_func(self) -> Option<Func> { Some(self.0) } }
 impl Func {
-    pub fn ty<T>(&self, _: &mut Caller<'_, T>) -> &FuncType { &self.ty }
+    pub fn ty<T>(&self, _: &mut Caller<'_, T>) -> &FuncType { &self.0.ty }
     pub fn call<T>(&self, caller: &mut Caller<'_, T>, args: &[Val], output: &mut [Val]) -> anyhow::Result<()> {
-        anyhow::ensure!(args.len() == self.ty.params.len(), "native argument count mismatch");
-        anyhow::ensure!(output.len() == usize::from(self.ty.result.is_some()), "native result count mismatch");
-        let values: Vec<_> = args.iter().map(|a| a.native()).collect();
-        anyhow::ensure!(values.iter().zip(&self.ty.params).all(|(v,t)| v.kind==*t), "native argument type mismatch");
+        anyhow::ensure!(args.len() == self.0.ty.params.len() && args.len() <= 32, "native argument count mismatch");
+        anyhow::ensure!(output.len() == usize::from(self.0.ty.result.is_some()), "native result count mismatch");
+        let mut values = [NativeValue::default();32];
+        for (index,arg) in args.iter().enumerate() { values[index]=arg.native(); }
+        anyhow::ensure!(values.iter().zip(&self.0.ty.params).all(|(v,t)| v.kind==*t), "native argument type mismatch");
         let mut result = NativeValue::default();
-        anyhow::ensure!(unsafe { mugoat_command_call(caller.instance, self.name.as_ptr(), values.as_ptr(), values.len() as u32, &mut result) }, "native command rejected");
-        if let Some(expected) = self.ty.result {
+        anyhow::ensure!(unsafe { mugoat_command_call(caller.instance, self.0.name.as_ptr(), values.as_ptr(), args.len() as u32, &mut result) }, "native command rejected");
+        if let Some(expected) = self.0.ty.result {
             anyhow::ensure!(result.kind == expected, "native result type mismatch");
             output[0] = Val::from_native(result).ok_or_else(|| anyhow::anyhow!("invalid native result"))?;
         }
@@ -85,5 +99,7 @@ mod tests {
         assert!(matches!(out[0], Val::F32(v) if v == 3.5f32.to_bits()));
         assert!(f.call(&mut caller, &[Val::I32(7)], &mut out).is_err());
         assert!(f.call(&mut caller, &[], &mut out).is_err());
+        let cached = caller.get_export("test").unwrap().into_func().unwrap();
+        assert!(Rc::ptr_eq(&f.0,&cached.0), "Native signatures should not allocate again each frame");
     }
 }

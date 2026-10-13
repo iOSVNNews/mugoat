@@ -1,6 +1,12 @@
 import UIKit
 
 enum GameSettings { static let sandboxMapTitles = ["Los Santos"] }
+enum GameMode: Int { case story = 1, sandbox = 2 }
+// Preview-only linker substitutes. The release uses the real native bridge.
+func MugoatOnlineConfigure(_ server: UnsafePointer<CChar>, _ name: UnsafePointer<CChar>, _ room: UnsafePointer<CChar>, _ mode: Int32) -> Bool { false }
+func MugoatOnlineStatus(_ output: UnsafeMutablePointer<CChar>?, _ capacity: Int) -> Int {
+    if capacity > 0 { output?[0] = 0 }; return 0
+}
 
 @main
 final class PreviewApp: UIResponder, UIApplicationDelegate {
@@ -15,6 +21,21 @@ final class PreviewApp: UIResponder, UIApplicationDelegate {
     }
 }
 final class PreviewController: UIViewController {
+    private var presentedOnline = false
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !presentedOnline, ProcessInfo.processInfo.arguments.contains("--preview-online") else { return }
+        presentedOnline = true
+        let controller = OnlineSettingsViewController(running: false)
+        let navigation = UINavigationController(rootViewController: controller)
+        Theme.styleNavigation(navigation); navigation.modalPresentationStyle = .fullScreen
+        present(navigation, animated: false) {
+            if ProcessInfo.processInfo.arguments.contains("--preview-online-bottom"), let scroll = controller.view.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView {
+                controller.view.layoutIfNeeded()
+                scroll.setContentOffset(CGPoint(x: 0, y: max(0, scroll.contentSize.height - scroll.bounds.height)), animated: false)
+            }
+        }
+    }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
     override var prefersStatusBarHidden: Bool { true }
     override func viewDidLoad() {
