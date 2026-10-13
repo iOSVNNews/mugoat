@@ -969,17 +969,20 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
     double x=(double)atomic_exchange(&touchCameraX,0)/65536;
     double y=(double)atomic_exchange(&touchCameraY,0)/65536;
     if (isfinite(x) && isfinite(y)) {
+      static double fracX = 0, fracY = 0;
+      fracX += x * 1.6;
+      fracY += y * 1.6;
+      int32_t ix = (int32_t)trunc(fracX);
+      int32_t iy = (int32_t)trunc(fracY);
+      fracX -= ix;
+      fracY -= iy;
       _Atomic uint8_t *keys = pg_input_keys();
       if (keys) {
         _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
-        atomic_fetch_add(words + 2, (int32_t)llround(x * 2.2));
-        atomic_fetch_add(words + 3, (int32_t)llround(y * 2.2));
+        if (ix) atomic_fetch_add(words + 2, ix);
+        if (iy) atomic_fetch_add(words + 3, iy);
       }
     }
-    float rightX=((int)((packed>>32)&255)-127.5f)/127.5f;
-    float rightY=-((int)((packed>>40)&255)-127.5f)/127.5f;
-    rightX+=pg_drag_camera_axis(x,cameraSeconds);rightY+=pg_drag_camera_axis(y,cameraSeconds);
-    packed=(packed&~(0xffffull<<32))|((uint64_t)pg_pad_axis(rightX,false)<<32)|((uint64_t)pg_pad_axis(rightY,true)<<40);
   }
   uint8_t *base = pg_pointer(&env, pad, 136);
   _Atomic uint32_t *buttons = (_Atomic uint32_t *)(base + 12);

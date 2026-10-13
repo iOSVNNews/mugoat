@@ -29,7 +29,7 @@ struct DragCamera {
     mutating func motion(sensitivity: Double) -> CGPoint {
         let delta = pending; pending = .zero
         let gain = min(max(sensitivity, 0.1), 10.0)
-        return CGPoint(x: delta.x * gain, y: -delta.y * gain * 0.85)
+        return CGPoint(x: delta.x * gain, y: delta.y * gain * 0.85)
     }
 
     /// Keep assisted aiming on pad 0. Relative finger motion becomes a pad

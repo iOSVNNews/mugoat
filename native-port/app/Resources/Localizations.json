@@ -1874,5 +1874,17 @@
   "Đã tắt": {
     "vi": "Đã tắt",
     "en": "Disabled"
+  },
+  "Đảo ngược trục dọc (Invert Y)": {
+    "vi": "Đảo ngược trục dọc (Invert Y)",
+    "en": "Invert vertical look (Invert Y)"
+  },
+  "Kéo lên để nhìn xuống, kéo xuống để nhìn lên": {
+    "vi": "Kéo lên để nhìn xuống, kéo xuống để nhìn lên",
+    "en": "Swipe up to look down, swipe down to look up"
+  },
+  "Đảo ngược trục dọc": {
+    "vi": "Đảo ngược trục dọc",
+    "en": "Invert vertical look"
   }
 }

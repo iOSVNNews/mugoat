@@ -85,7 +85,7 @@ final class SettingsViewController: UITableViewController {
         case .cheat: return 2
         case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 3
-        case .controls: return 10
+        case .controls: return 11
         case .gyro: return (settings.gyroAim == .off ? 1 : 3) + (settings.tiltSteer == .off ? 1 : 2)
         case .files: return fileRows.count
         case .device: return 5
@@ -240,6 +240,10 @@ final class SettingsViewController: UITableViewController {
                     self?.settings.keyboardMouse = $0
                     if !$0 { KeyboardMouse.shared.releaseAll() }
                 }
+            case 10:
+                content.text = L10n.text("Đảo ngược trục dọc (Invert Y)")
+                content.secondaryText = L10n.text("Kéo lên để nhìn xuống, kéo xuống để nhìn lên")
+                cell.accessoryView = toggle(settings.invertLookY, label: L10n.text("Đảo ngược trục dọc")) { [weak self] in self?.settings.invertLookY = $0 }
             default:
                 content.text = L10n.text("Fire also aims")
                 content.secondaryText = L10n.text("Fire locks on first, like the classic mobile GTA games")

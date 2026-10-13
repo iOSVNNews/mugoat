@@ -32,6 +32,10 @@ final class GameSettings {
         get { defaults.bool(forKey: "gyroInvertY") }
         set { defaults.set(newValue, forKey: "gyroInvertY") }
     }
+    var invertLookY: Bool {
+        get { defaults.bool(forKey: "invertLookY") }
+        set { defaults.set(newValue, forKey: "invertLookY") }
+    }
 
     var tiltSteer: TiltSteerMode {
         get { TiltSteerMode(rawValue: defaults.integer(forKey: "tiltSteer")) ?? .off }
