@@ -74,6 +74,8 @@ jobs:
           python3 native-port/app/Tests/online_codegen.py
           swiftc native-port/app/App/DragCamera.swift native-port/app/Tests/drag_camera.swift -o "$RUNNER_TEMP/mugoat-camera-tests"
           "$RUNNER_TEMP/mugoat-camera-tests"
+          clang -std=c11 -I native-port/app/Source native-port/app/Tests/drag_camera.c -o "$RUNNER_TEMP/mugoat-camera-axis-tests"
+          "$RUNNER_TEMP/mugoat-camera-axis-tests"
       - name: Fetch and validate compatible engine and shaders
         run: |
           mkdir -p "$RUNNER_TEMP/game-files/b/8b0b5899ed"

@@ -79,6 +79,9 @@ typedef struct {
   float leftX, leftY, rightX, rightY, leftTrigger, rightTrigger;
 } PGPadState;
 void PGUpdateVirtualPad(PGPadState state);
+// Relative touch motion, queued until the engine consumes its pad input.
+void PGTouchCameraDrag(double x, double y);
+void PGTouchCameraEnabled(bool enabled);
 // The engine's last input device for the player: -4 keyboard/mouse,
 // 0...3 pads, -3 unknown. Assisted aim needs a pad.
 int32_t PGLastInputDevice(void);

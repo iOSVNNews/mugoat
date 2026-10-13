@@ -1,3 +1,9 @@
+# Mugoat — iOSVN
+
+The release app uses Port's C/ARM64 and native Metal engine with Port's touch buttons, Muguet-style drag aiming, and Muguet multiplayer. Minimum iOS: 16.0.
+
+See [release notes](RELEASE_NOTES.md) and [native integration](native-port/HYBRID.md) for actual features, build steps and validation limits. The root Rust/wgpu app below remains as upstream reference; it is not the release build path.
+
 # Muguet (iOSVN Rebuild)
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)

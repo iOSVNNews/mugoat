@@ -926,11 +926,14 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             }
             touchControls.updateHints(hints)
             let touch = touchControls.padState(elapsed: elapsed)
+            touchControls.sendCameraMotion()
             if ProcessInfo.processInfo.arguments.contains("--trace-touch-controls") {
                 let sample = String(format: "Touch pad: buttons=%u move=%.2f,%.2f look=%.2f,%.2f triggers=%.2f,%.2f device=%d", touch.buttons, touch.leftX, touch.leftY, touch.rightX, touch.rightY, touch.leftTrigger, touch.rightTrigger, PGLastInputDevice())
                 if sample != lastTouchInputTrace { lastTouchInputTrace = sample; appendLog(sample) }
             }
             state.merge(touch)
+        } else {
+            PGTouchCameraEnabled(false)
         }
         #if targetEnvironment(simulator)
         var keys = PGPadState()

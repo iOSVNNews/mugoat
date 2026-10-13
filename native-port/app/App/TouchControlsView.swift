@@ -770,6 +770,7 @@ final class TouchControlsView: UIView {
         enter.setProgress(0)
         sprintSince = nil; moveStick.sprinting = false
         dragCamera.reset()
+        PGTouchCameraEnabled(false)
         if publish { self.publish() }
     }
 
@@ -779,6 +780,15 @@ final class TouchControlsView: UIView {
     var aiming: Bool { aimActive || fire.pressed || leftFire.pressed || driveBy.pressed }
     /// Aircraft are flown with the left stick and buttons now; kept for the gyro check.
     var flyingWithRightStick: Bool { false }
+
+    func sendCameraMotion() {
+        let available = context != .menu && !phoneDock && !has(isWeaponWheel) &&
+            !roles.values.contains { if case .radioWheel = $0 { return true }; if case .characterWheel = $0 { return true }; return false }
+        PGTouchCameraEnabled(available)
+        let sensitivity = aiming ? GameSettings.shared.aimSensitivity : GameSettings.shared.lookSensitivity
+        let delta = dragCamera.motion(sensitivity: sensitivity)
+        if available { PGTouchCameraDrag(delta.x, delta.y) }
+    }
 
     /// The current controller state. `elapsed` turns finger travel into a
     /// stick deflection, so the camera turns about as far as the finger moves.
@@ -791,9 +801,9 @@ final class TouchControlsView: UIView {
         if context == .menu || phoneDock {
             (state.rightX, state.rightY) = Self.cameraStick(has(isLook) ? lookStick.value : .zero, speed: speed)
         } else {
-            let velocity = dragCamera.velocity(elapsed: elapsed, sensitivity: Double(speed), aimed: aiming)
-            state.rightX = Self.lookAxis(velocity.x)
-            state.rightY = Self.lookAxis(velocity.y)
+            // Drag motion is queued separately so UIKit cannot overwrite it
+            // before the engine samples pad 0. Gyro/gamepad axes remain here.
+            state.rightX = 0; state.rightY = 0
         }
 
         switch context {

@@ -454,6 +454,17 @@ void PGSendKeyAndChar(uint8_t virtualKey, bool down, uint16_t ch) {
 
 static _Atomic uint64_t virtualPad = 0x0000808080800000ull;
 static _Atomic bool virtualPadActive;
+static _Atomic bool touchCameraEnabled;
+static _Atomic int64_t touchCameraX, touchCameraY;
+void PGTouchCameraEnabled(bool enabled) {
+  atomic_store(&touchCameraEnabled,enabled);
+  if(!enabled){atomic_store(&touchCameraX,0);atomic_store(&touchCameraY,0);}
+}
+void PGTouchCameraDrag(double x,double y) {
+  if(!atomic_load(&touchCameraEnabled))return;
+  if(isfinite(x))atomic_fetch_add(&touchCameraX,(int64_t)llround(fmax(-2000,fmin(2000,x))*65536));
+  if(isfinite(y))atomic_fetch_add(&touchCameraY,(int64_t)llround(fmax(-2000,fmin(2000,y))*65536));
+}
 static _Atomic bool pg_cheat_in_progress = false;
 static _Atomic bool pg_gamepad_cheat_active = false;
 
@@ -920,6 +931,19 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
 #endif
   if (pad != 12840656 || !atomic_load(&virtualPadActive) || atomic_load(&pg_cheat_in_progress)) return;
   uint64_t packed = atomic_load(&virtualPad);
+  // UIKit may publish several times per engine frame. Consume queued relative
+  // motion exactly once here, preserving the pad's assisted-aim path.
+  static double lastCameraPoll;
+  double cameraNow=timeMS(CLOCK_MONOTONIC), cameraSeconds=(cameraNow-lastCameraPoll)/1000;
+  lastCameraPoll=cameraNow;
+  if(atomic_load(&touchCameraEnabled)) {
+    double x=(double)atomic_exchange(&touchCameraX,0)/65536;
+    double y=(double)atomic_exchange(&touchCameraY,0)/65536;
+    float rightX=((int)((packed>>32)&255)-127.5f)/127.5f;
+    float rightY=-((int)((packed>>40)&255)-127.5f)/127.5f;
+    rightX+=pg_drag_camera_axis(x,cameraSeconds);rightY+=pg_drag_camera_axis(y,cameraSeconds);
+    packed=(packed&~(0xffffull<<32))|((uint64_t)pg_pad_axis(rightX,false)<<32)|((uint64_t)pg_pad_axis(rightY,true)<<40);
+  }
   uint8_t *base = pg_pointer(&env, pad, 136);
   _Atomic uint32_t *buttons = (_Atomic uint32_t *)(base + 12);
   uint32_t bits = (uint32_t)(packed & 0xffff);

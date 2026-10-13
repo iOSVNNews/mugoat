@@ -1,20 +1,26 @@
 import UIKit
 
 enum OnlineSettings {
+    private static let legacy: [String: Any] = {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let data = try? Data(contentsOf: documents.appendingPathComponent("config.json")),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return json
+    }()
     static var enabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "MugoatOnlineEnabled") }
+        get { UserDefaults.standard.object(forKey: "MugoatOnlineEnabled") as? Bool ?? legacy["multiplayer"] as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineEnabled") }
     }
     static var server: String {
-        get { UserDefaults.standard.string(forKey: "MugoatOnlineServer") ?? "" }
+        get { UserDefaults.standard.string(forKey: "MugoatOnlineServer") ?? legacy["server"] as? String ?? "18.143.103.253" }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineServer") }
     }
     static var name: String {
-        get { UserDefaults.standard.string(forKey: "MugoatOnlineName") ?? "Player" }
+        get { UserDefaults.standard.string(forKey: "MugoatOnlineName") ?? legacy["player_name"] as? String ?? "Player" }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineName") }
     }
     static var room: String {
-        get { UserDefaults.standard.string(forKey: "MugoatOnlineRoom") ?? "default" }
+        get { UserDefaults.standard.string(forKey: "MugoatOnlineRoom") ?? legacy["room"] as? String ?? "story" }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineRoom") }
     }
     static func configure(mode: GameMode) -> Bool {

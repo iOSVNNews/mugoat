@@ -90,7 +90,14 @@ pub unsafe extern "C" fn mugoat_script_tick(instance: *mut c_void, thread: u64, 
         if active.replace(true) { return; }
         RT.get_or_init(|| Runtime { mem: SharedMemory { instance: instance as usize } });
         let mut caller = engine_bridge::Caller::<HostState>::new(instance);
+        let memory = &RT.get().unwrap().mem;
+        let Some(active_thread) = tls.checked_add(3088) else { active.set(false); return; };
+        let saved = read_u64(memory, active_thread);
+        if saved.is_none() { active.set(false); return; }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mp::script_tick(&mut caller,thread,tls)));
+        // The original script hook also restores this on its normal path.
+        // Preserve it if Rust rejects a sync update or catches a panic.
+        write_u64(memory, active_thread, saved.unwrap());
         if !matches!(result, Ok(Ok(()))) { ENABLED.store(false,Ordering::Release); eprintln!("[online] native sync stopped after a bridge error"); }
         active.set(false);
     });

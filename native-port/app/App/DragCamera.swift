@@ -26,18 +26,18 @@ struct DragCamera {
     mutating func end(_ id: ObjectIdentifier) { fingers[id] = nil }
     mutating func reset() { fingers.removeAll(); pending = .zero }
 
+    mutating func motion(sensitivity: Double) -> CGPoint {
+        let delta = pending; pending = .zero
+        let gain = min(max(sensitivity, 0.1), 4)
+        return CGPoint(x: delta.x * gain, y: -delta.y * gain * 0.85)
+    }
+
     /// Keep assisted aiming on pad 0. Relative finger motion becomes a pad
     /// velocity for this poll only; a resting finger always returns zero.
     mutating func velocity(elapsed: Double, sensitivity: Double, aimed: Bool) -> CGPoint {
-        let delta = pending
-        pending = .zero
-        guard elapsed.isFinite, elapsed > 0, elapsed <= 0.05 else { return .zero }
+        guard elapsed.isFinite, elapsed > 0, elapsed <= 0.05 else { pending = .zero; return .zero }
         let seconds = max(elapsed, 1.0 / 240)
-        let gain = min(max(sensitivity, 0.1), 4)
-        let speed = hypot(delta.x, delta.y) / seconds
-        // Acceleration depends on velocity, not the number of UIKit events.
-        let acceleration = aimed ? 1.0 : 1 + min(speed / 600, 1.5)
-        return CGPoint(x: delta.x / seconds * gain * acceleration,
-                       y: -delta.y / seconds * gain * acceleration * 0.85)
+        let delta = motion(sensitivity: sensitivity)
+        return CGPoint(x: delta.x / seconds, y: delta.y / seconds)
     }
 }
