@@ -1,6 +1,7 @@
 name: Build Mugoat Native IPA
 on:
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
