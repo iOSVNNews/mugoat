@@ -6,6 +6,8 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 struct gi_reader {
     struct archive *archive;
@@ -127,59 +129,96 @@ int gi_punch_hole(int fd, int64_t offset, int64_t length, int64_t block) {
 
 const char *gi_libarchive_version(void) { return archive_version_details(); }
 
+struct gi_extract_ctx {
+    FILE *fp;
+    char buf[65536];
+};
+
+static long gi_extract_read_cb(void *context, const void **buffer) {
+    struct gi_extract_ctx *c = (struct gi_extract_ctx *)context;
+    size_t n = fread(c->buf, 1, sizeof(c->buf), c->fp);
+    *buffer = c->buf;
+    return (long)n;
+}
+
 int gi_extract_archive(const char *archive_path, const char *dest_dir) {
     if (!archive_path || !dest_dir) return -1;
-    struct archive *src = archive_read_new();
-    if (!src) return -1;
-    archive_read_support_format_all(src);
-    archive_read_support_filter_all(src);
-    if (archive_read_open_filename(src, archive_path, 16384) != ARCHIVE_OK) {
-        archive_read_free(src);
-        return -1;
-    }
-    struct archive *disk = archive_write_disk_new();
-    if (!disk) {
-        archive_read_free(src);
-        return -1;
-    }
-    archive_write_disk_set_options(disk, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_SECURE_NODOTDOT);
-    archive_write_disk_set_standard_lookup(disk);
+    FILE *fp = fopen(archive_path, "rb");
+    if (!fp) return -1;
 
-    struct archive_entry *entry = NULL;
+    struct gi_extract_ctx ctx;
+    ctx.fp = fp;
+
+    gi_reader *reader = gi_reader_open(gi_extract_read_cb, &ctx);
+    if (!reader) {
+        fclose(fp);
+        return -1;
+    }
+
     int files_extracted = 0;
-    while (archive_read_next_header(src, &entry) == ARCHIVE_OK) {
-        const char *currentFile = archive_entry_pathname_utf8(entry);
-        if (!currentFile) currentFile = archive_entry_pathname(entry);
-        if (!currentFile || currentFile[0] == '\0') continue;
-
-        if (strstr(currentFile, "__MACOSX/") || strstr(currentFile, "/.") || currentFile[0] == '.') {
+    gi_entry_info info;
+    while (gi_reader_next(reader, &info) == GI_OK) {
+        if (!info.path || !*info.path) continue;
+        if (strstr(info.path, "__MACOSX/") || strstr(info.path, "/.") || info.path[0] == '.') {
+            gi_reader_skip(reader);
             continue;
         }
 
         char full_dest[1024];
-        snprintf(full_dest, sizeof(full_dest), "%s/%s", dest_dir, currentFile);
-        archive_entry_set_pathname(entry, full_dest);
+        snprintf(full_dest, sizeof(full_dest), "%s/%s", dest_dir, info.path);
 
-        int r = archive_write_header(disk, entry);
-        if (r < ARCHIVE_OK) {
-            continue;
-        }
-        if (archive_entry_size(entry) > 0) {
-            const void *buff;
-            size_t size;
-            la_int64_t offset;
-            while (archive_read_data_block(src, &buff, &size, &offset) == ARCHIVE_OK) {
-                if (archive_write_data_block(disk, buff, size, offset) < ARCHIVE_OK) {
-                    break;
+        if (info.kind == GI_ENTRY_DIRECTORY) {
+            char tmp[1024];
+            snprintf(tmp, sizeof(tmp), "%s", full_dest);
+            for (char *p = tmp + 1; *p; p++) {
+                if (*p == '/') {
+                    *p = '\0';
+                    mkdir(tmp, 0755);
+                    *p = '/';
                 }
             }
+            mkdir(tmp, 0755);
+            continue;
         }
-        archive_write_finish_entry(disk);
-        files_extracted++;
+
+        if (info.kind == GI_ENTRY_FILE) {
+            char tmp[1024];
+            snprintf(tmp, sizeof(tmp), "%s", full_dest);
+            char *last_slash = strrchr(tmp, '/');
+            if (last_slash) {
+                *last_slash = '\0';
+                for (char *p = tmp + 1; *p; p++) {
+                    if (*p == '/') {
+                        *p = '\0';
+                        mkdir(tmp, 0755);
+                        *p = '/';
+                    }
+                }
+                mkdir(tmp, 0755);
+            }
+
+            int fd = open(full_dest, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd >= 0) {
+                const void *buf = NULL;
+                size_t size = 0;
+                int64_t offset = 0;
+                while (gi_reader_data(reader, &buf, &size, &offset) == GI_OK) {
+                    if (size > 0 && buf) {
+                        write(fd, buf, size);
+                    }
+                }
+                close(fd);
+                files_extracted++;
+            } else {
+                gi_reader_skip(reader);
+            }
+        } else {
+            gi_reader_skip(reader);
+        }
     }
-    archive_write_close(disk);
-    archive_write_free(disk);
-    archive_read_close(src);
-    archive_read_free(src);
+
+    gi_reader_close(reader);
+    fclose(fp);
     return files_extracted;
 }
+
