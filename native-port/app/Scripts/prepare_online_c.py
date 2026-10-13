@@ -9,7 +9,7 @@ def declarations(header):
     pattern = r"/\* export: '([^']+)' \*/\s*([^;]+);"
     found = {}
     for name, declaration in re.findall(pattern, header):
-        m = re.fullmatch(r'(\w+)(\*)?\s+(\w+)\(w2c_game\*(?:,\s*(.*))?\)', declaration.strip())
+        m = re.fullmatch(r'(\w+)(\*)?\s+(\w+)\(w2c_game\*(?:\s+instance)?(?:,\s*(.*))?\)', declaration.strip())
         if not m: continue
         result, pointer, symbol, params = m.groups()
         found[name] = (result + (pointer or ''), symbol, [p.strip() for p in params.split(',')] if params else [])

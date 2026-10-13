@@ -16,7 +16,7 @@ u32 w2c_game_mp0x3APlayerPedId(w2c_game*);
 /* export: 'mp:SetHeading' */
 void w2c_game_mp0x3ASetHeading(w2c_game*, u32, f32);
 /* export: 'mugoat:tls-base' */
-u64* w2c_game_mugoat0x3Atls0x2Dbase(w2c_game*);
+u64* w2c_game_mugoat0x3Atls0x2Dbase(w2c_game* instance);
 /* export: 'emscripten_stack_get_current' */
 u64 w2c_game_emscripten_stack_get_current(w2c_game*);
 /* export: '_emscripten_stack_alloc' */
