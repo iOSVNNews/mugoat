@@ -52,10 +52,13 @@ struct DeviceTier {
         var info = utsname(); uname(&info)
         let model = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         let device = MTLCreateSystemDefaultDevice()
+        let supportsBC: Bool
+        if #available(iOS 16.4, *) { supportsBC = device?.supportsBCTextureCompression ?? false }
+        else { supportsBC = false }
         return DeviceTier(memoryLimitMB: Self.processMemoryLimitMB(),
                           physicalMemoryMB: Int(ProcessInfo.processInfo.physicalMemory / 1_048_576),
                           model: model,
-                          supportsBCTextures: device?.supportsBCTextureCompression ?? false)
+                          supportsBCTextures: supportsBC)
     }
 
     /// Jetsam limit = memory still available + what the app already uses.

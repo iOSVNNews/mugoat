@@ -500,8 +500,8 @@
     "vi": "Lưu tiến trình bằng điện thoại hoặc điểm lưu trong GTA V. Sau đó sao lưu tại đây. Bản sao nằm trong Tệp › Mugoat › SaveBackups. Khôi phục khi chưa vào game; save hiện có được sao lưu trước khi thay thế."
   },
   "Đóng": {
-    "en": "Close",
-    "vi": "Đóng"
+    "vi": "Đóng",
+    "en": "Close"
   },
   "Close": {
     "en": "Close",
@@ -1244,8 +1244,8 @@
     "vi": "Chỉnh sửa"
   },
   "Lưu": {
-    "en": "Save",
-    "vi": "Lưu"
+    "vi": "Lưu",
+    "en": "Save"
   },
   "Save": {
     "en": "Save",
@@ -1730,5 +1730,73 @@
   "Touch aim sensitivity": {
     "en": "Touch aim sensitivity",
     "vi": "Độ nhạy ngắm cảm ứng"
+  },
+  "Máy chủ online": {
+    "vi": "Máy chủ online",
+    "en": "Online server"
+  },
+  "Chơi online": {
+    "vi": "Chơi online",
+    "en": "Play online"
+  },
+  "Tên người chơi": {
+    "vi": "Tên người chơi",
+    "en": "Player name"
+  },
+  "Phòng chơi": {
+    "vi": "Phòng chơi",
+    "en": "Room"
+  },
+  "Đóng rồi mở lại app để đổi máy chủ.": {
+    "vi": "Đóng rồi mở lại app để đổi máy chủ.",
+    "en": "Restart the app to change servers."
+  },
+  "Dùng cùng IP, phòng và chế độ chơi với bạn bè. Máy chủ Muguet dùng UDP 47520. Kết nối bắt đầu khi vào game.": {
+    "vi": "Dùng cùng IP, phòng và chế độ chơi với bạn bè. Máy chủ Muguet dùng UDP 47520. Kết nối bắt đầu khi vào game.",
+    "en": "Use the same IP, room and game mode as your friends. Muguet servers use UDP 47520. Connection starts when the game starts."
+  },
+  "Máy chủ không hợp lệ": {
+    "vi": "Máy chủ không hợp lệ",
+    "en": "Invalid server"
+  },
+  "Nhập IP hoặc hostname, ví dụ 192.168.1.10:47520.": {
+    "vi": "Nhập IP hoặc hostname, ví dụ 192.168.1.10:47520.",
+    "en": "Enter an IP or hostname, for example 192.168.1.10:47520."
+  },
+  "Tiện ích cheat bị tắt khi chơi online.": {
+    "vi": "Tiện ích cheat bị tắt khi chơi online.",
+    "en": "Cheats are disabled during online play."
+  },
+  "Offline": {
+    "en": "Offline",
+    "vi": "Ngoại tuyến"
+  },
+  "Online: waiting for game startup": {
+    "en": "Online: waiting for game startup",
+    "vi": "Online: chờ game khởi động"
+  },
+  "Online: invalid or unreachable server address": {
+    "en": "Online: invalid or unreachable server address",
+    "vi": "Online: địa chỉ máy chủ không hợp lệ hoặc không truy cập được"
+  },
+  "Online: room full — retrying": {
+    "en": "Online: room full — retrying",
+    "vi": "Online: phòng đầy — đang thử lại"
+  },
+  "Online: no server response — check IP / UDP 47520": {
+    "en": "Online: no server response — check IP / UDP 47520",
+    "vi": "Online: máy chủ không trả lời — kiểm tra IP / UDP 47520"
+  },
+  "Online: connected": {
+    "en": "Online: connected",
+    "vi": "Online: đã kết nối"
+  },
+  "player(s)": {
+    "en": "player(s)",
+    "vi": "người chơi"
+  },
+  "Online: connecting…": {
+    "en": "Online: connecting…",
+    "vi": "Online: đang kết nối…"
   }
 }

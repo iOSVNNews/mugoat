@@ -8,7 +8,10 @@ use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+#[cfg(not(feature = "native-port"))]
 use wasmtime::{Caller, Val};
+#[cfg(feature = "native-port")]
+use crate::engine_bridge::{Caller, Val};
 
 #[cfg_attr(not(feature = "jit"), allow(dead_code))]
 pub const COMMANDS: &[(&str, &str)] = &[
@@ -1117,6 +1120,7 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
         let mut c = Cmd { caller, scratch };
         init_world_blips_once(&mut c);
         update_camera_mode(&mut c);
+        #[cfg(not(feature = "native-port"))]
         process_story_mode_startup(&mut c);
 
         if WANT_BULLETS.swap(false, Ordering::Relaxed) {
@@ -1178,7 +1182,7 @@ impl Cmd<'_, '_> {
             _ => 0.0,
         }
     }
-    fn mem(&self) -> &'static wasmtime::SharedMemory {
+    fn mem(&self) -> &'static crate::SharedMemory {
         &crate::RT.get().unwrap().mem
     }
     fn read_i32(&self, off: u64) -> i32 {

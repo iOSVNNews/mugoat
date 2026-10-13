@@ -5,5 +5,5 @@ permissions:
   contents: read
 jobs:
   mugoat:
-    uses: ./.github/workflows/build-muguet-wgpu.yml
+    uses: ./.github/workflows/build-mugoat-native.yml
     secrets: inherit

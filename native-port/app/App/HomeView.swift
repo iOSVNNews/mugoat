@@ -12,6 +12,7 @@ final class HomeView: UIView {
     let cheatButton = Theme.glassButton(L10n.text("Tiện ích game"), symbol: "sparkles")
     let saveButton = Theme.glassButton(L10n.text("Save game"), symbol: "externaldrive.fill")
     let languageButton = Theme.glassButton("VI", symbol: "globe")
+    let onlineButton = Theme.glassButton(L10n.text("Máy chủ online"), symbol: "network")
     let preloadLabel = UILabel()
     let controllerLabel = UILabel()
     /// Taps on the game files card.
@@ -36,11 +37,11 @@ final class HomeView: UIView {
         let backdrop = Theme.backdrop(image: "StartBackground")
         pin(backdrop, to: self)
 
-        let icon = UIImageView(image: UIImage(systemName: "gamecontroller.fill"))
+        let icon = UIImageView(image: UIImage(named: "HomeIcon"))
         icon.tintColor = Theme.accent
-        icon.contentMode = .center
+        icon.contentMode = .scaleAspectFit
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
-        icon.backgroundColor = Theme.accent.withAlphaComponent(0.12)
+        icon.backgroundColor = .black
         icon.layer.cornerRadius = 14
         icon.layer.cornerCurve = .continuous
         icon.clipsToBounds = true
@@ -99,7 +100,7 @@ final class HomeView: UIView {
         versionLabel.text = "Mugoat · iOSVN · \(Theme.appVersion)"
         versionLabel.font = Theme.body(11)
         versionLabel.textColor = Theme.tertiaryText
-        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, saveButton, cheatButton, guideLabel, versionLabel])
+        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, onlineButton, saveButton, cheatButton, guideLabel, versionLabel])
         secondary.axis = .vertical
         secondary.spacing = 12
         secondary.setCustomSpacing(6, after: toolsTitle)

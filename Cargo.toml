@@ -28,6 +28,7 @@ bcdec_rs = "0.2.0"
 [features]
 default = ["jit"]
 jit = ["wasmtime/cranelift", "wasmtime/parallel-compilation", "dep:wasmparser", "dep:wasm-encoder"]
+native-port = []
 
 [profile.release]
 opt-level = 2

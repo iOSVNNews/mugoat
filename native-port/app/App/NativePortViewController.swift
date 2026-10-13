@@ -105,6 +105,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             button.configuration?.image = title == L10n.text("Vào game") ? UIImage(systemName: "play.fill", withConfiguration: UIImage.SymbolConfiguration(weight: .heavy)) : nil
         }
         launchButton.addTarget(self, action: #selector(startEngine), for: .touchUpInside)
+        home.onlineButton.addAction(UIAction { [weak self] _ in self?.showOnline() }, for: .touchUpInside)
         output.isEditable = false
         output.isHidden = !ProcessInfo.processInfo.arguments.contains("--show-log")
         output.backgroundColor = UIColor.black.withAlphaComponent(0.65)
@@ -341,6 +342,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     @objc private func startEngine() {
+        if OnlineSettings.enabled && OnlineSettings.server.isEmpty { showOnline(); return }
         if GameSettings.shared.gameModeChoice == nil {
             // Automated launches without a choice keep the old sandbox start.
             guard ProcessInfo.processInfo.arguments.contains("--boot-engine") else { return }
@@ -392,6 +394,12 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             PGSetAssetServer(GameSettings.shared.assetServer)
         }
         AssetPreloader.shared.engineRunning = true
+        guard OnlineSettings.configure(mode: mode) else {
+            engineStarted = false; AssetPreloader.shared.engineRunning = false
+            launchButton.isEnabled = true
+            home.settingsButton.isHidden = false; home.layoutButton.isHidden = false
+            showWhenFree(title: L10n.text("Máy chủ online"), message: L10n.text("Máy chủ không hợp lệ")); return
+        }
         path.withCString { manifest in
             root.withCString { PGStartEngine(manifest, $0, engineLog, Unmanaged.passUnretained(self).toOpaque()) }
         }
@@ -744,6 +752,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     func showCheatMenu() {
+        guard !MugoatOnlineEnabled() else {
+            showCheatToast(L10n.text("Tiện ích cheat bị tắt khi chơi online.")); return
+        }
         touchControls.reset()
         let cheatView = CheatMenuView(
             engineRunning: engineStarted,
@@ -789,6 +800,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func applyCheat(_ code: String, mode: CheatInputMode = .auto) {
+        guard !MugoatOnlineEnabled() else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return }
         let modeDesc = mode == .console ? "Console (~)" : mode == .gamepad ? "Gamepad" : "Tự động"
@@ -818,6 +830,14 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         KeyboardMouse.shared.releaseAll()
         PGUpdateVirtualPad(PGPadState())
     }
+
+    private func showOnline() {
+        guard presentedViewController == nil else { return }
+        touchControls.reset()
+        let controller = OnlineSettingsViewController(running: engineStarted)
+        let navigation = UINavigationController(rootViewController: controller)
+        Theme.styleNavigation(navigation); present(navigation, animated: true)
+    }
     private var injectedKey = false, releasedKey = false, injectedMouse = false
     private func injectTestInput(sinceWorld: Double) {
         let arguments = ProcessInfo.processInfo.arguments
@@ -844,7 +864,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let now = CACurrentMediaTime()
         if now - lastFPSLabelUpdate >= 0.25 {
             let fps = PGRenderedFramesPerSecond()
-            fpsLabel.text = fps > 0 ? String(format: "%.0f FPS", fps) : "— FPS"
+            let frames = fps > 0 ? String(format: "%.0f FPS", fps) : "— FPS"
+            fpsLabel.text = MugoatOnlineEnabled() ? frames + " · " + OnlineSettings.status : frames
             lastFPSLabelUpdate = now
         }
         let elapsed = lastControllerPoll.map { now - $0 } ?? (1.0 / 60.0)

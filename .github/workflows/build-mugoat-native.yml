@@ -62,7 +62,18 @@ jobs:
             native-port/app/GeneratedResources
             native-port/app/Build/MetalShaders
             native-port/app/Build/Release
-          key: mugoat-native-ios164-v1-${{ hashFiles('native-port/app/Scripts/**', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml') }}
+          key: mugoat-hybrid-ios160-v1-${{ hashFiles('native-port/app/Scripts/**', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'native-port/app/project.yml', 'src/mp.rs') }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - name: Verify native multiplayer bridge and existing UDP protocol
+        run: |
+          cargo test --manifest-path native-port/online-bridge/Cargo.toml --lib
+          cargo build --manifest-path native-port/online-bridge/Cargo.toml --bin mugoat-server
+          node tools/test-server.cjs native-port/online-bridge/target/debug/mugoat-server
+          python3 native-port/app/Tests/online_codegen.py
+          swiftc native-port/app/App/DragCamera.swift native-port/app/Tests/drag_camera.swift -o "$RUNNER_TEMP/mugoat-camera-tests"
+          "$RUNNER_TEMP/mugoat-camera-tests"
       - name: Fetch and validate compatible engine and shaders
         run: |
           mkdir -p "$RUNNER_TEMP/game-files/b/8b0b5899ed"

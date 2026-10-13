@@ -232,8 +232,7 @@ final class TouchControlsView: UIView {
 
     private let moveStick = FloatingStick()
     private let lookStick = FloatingStick()
-    /// Where a finger pressed Aim/Fire; dragging from there works as a stick.
-    private var dragOrigins: [ObjectIdentifier: (start: CGPoint, current: CGPoint)] = [:]
+    private var dragCamera = DragCamera()
     private var sprintSince: CFTimeInterval?
     private var aimToggled = false
     private var lastFireTime: CFTimeInterval = 0
@@ -621,7 +620,7 @@ final class TouchControlsView: UIView {
                 moveStick.begin(at: point)
             } else if !has(isLook) {
                 roles[id] = .look
-                lookStick.begin(at: point)
+                dragCamera.begin(id, at: point)
             }
         }
         publish()
@@ -633,7 +632,7 @@ final class TouchControlsView: UIView {
         haptics.impactOccurred(intensity: 0.6)
         button.setPressed(true)
         roles[id] = .button(button)
-        defer { if case .fireLook = roles[id] { dragOrigins[id] = (point, point) } }
+        defer { if case .fireLook = roles[id] { dragCamera.begin(id, at: point) } }
         switch button {
         case weapons:
             roles[id] = .weaponWheel(start: point, current: point)
@@ -696,9 +695,10 @@ final class TouchControlsView: UIView {
             case .radioWheel(let start, _, let since):
                 roles[id] = .radioWheel(start: start, current: point, since: since)
             case .look:
-                lookStick.move(to: point)
+                if context == .menu || phoneDock { lookStick.move(to: point) }
+                else { dragCamera.move(id, to: point) }
             case .fireLook:
-                if let origin = dragOrigins[id] { dragOrigins[id] = (origin.start, point) }
+                dragCamera.move(id, to: point)
             case .weaponWheel(let start, _):
                 roles[id] = .weaponWheel(start: start, current: point)
             case .characterWheel(let start, _):
@@ -723,7 +723,7 @@ final class TouchControlsView: UIView {
     private func finish(_ touches: Set<UITouch>) {
         for touch in touches {
             guard let role = roles.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
-            dragOrigins[ObjectIdentifier(touch)] = nil
+            dragCamera.end(ObjectIdentifier(touch))
             switch role {
             case .moveStick, .steer: moveStick.end(); sprintSince = nil
             case .look: lookStick.end()
@@ -769,7 +769,7 @@ final class TouchControlsView: UIView {
         fireStartedAt = nil; exitHoldStart = nil
         enter.setProgress(0)
         sprintSince = nil; moveStick.sprinting = false
-        dragOrigins.removeAll()
+        dragCamera.reset()
         if publish { self.publish() }
     }
 
@@ -787,18 +787,14 @@ final class TouchControlsView: UIView {
         var held = PadButtons()
         let now = CACurrentMediaTime()
 
-        // Camera stick: holding the thumb off-centre keeps turning. Drags from
-        // Aim/Fire count the same way, measured from where they pressed.
-        var look = has(isLook) ? lookStick.value : .zero
-        for (_, origin) in dragOrigins {
-            let travel = lookStick.travel
-            var v = CGPoint(x: (origin.current.x - origin.start.x) / travel, y: -(origin.current.y - origin.start.y) / travel)
-            let length = hypot(v.x, v.y)
-            if length > 1 { v.x /= length; v.y /= length }
-            if hypot(v.x, v.y) > hypot(look.x, look.y) { look = v }
-        }
         let speed = CGFloat(aimActive ? GameSettings.shared.aimSensitivity : GameSettings.shared.lookSensitivity)
-        (state.rightX, state.rightY) = Self.cameraStick(look, speed: speed)
+        if context == .menu || phoneDock {
+            (state.rightX, state.rightY) = Self.cameraStick(has(isLook) ? lookStick.value : .zero, speed: speed)
+        } else {
+            let velocity = dragCamera.velocity(elapsed: elapsed, sensitivity: Double(speed), aimed: aiming)
+            state.rightX = Self.lookAxis(velocity.x)
+            state.rightY = Self.lookAxis(velocity.y)
+        }
 
         switch context {
         case .onFoot:

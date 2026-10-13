@@ -11,7 +11,12 @@ enum EnginePaths {
 
     /// Returns the engine files root and, on the simulator, an optional note.
     static func filesRoot() -> (path: String, note: String?) {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("EngineFiles").path
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        // Upgrading the old Muguet-based build must preserve its actual saves.
+        // Reuse that root when present; never overwrite or delete either folder.
+        let legacy = base.appendingPathComponent("saves")
+        let folder = FileManager.default.fileExists(atPath: legacy.path) ? legacy : base.appendingPathComponent("EngineFiles")
+        let documents = folder.path
         #if targetEnvironment(simulator)
         // PG_SIMULATOR_ENGINE_ROOT (or PG_ENGINE_FILES_ROOT) keeps a test run's saves and cache apart.
         let environment = ProcessInfo.processInfo.environment

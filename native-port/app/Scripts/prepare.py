@@ -57,8 +57,9 @@ run('xcrun', 'clang', '-Wno-deprecated-declarations', '-c', 'Scripts/sha256_shim
 run('xcrun', 'clang++', '-std=c++20', '-O1', '-I', str(wabt / 'include'),
     'Tools/wasm2c-main.cc', 'Tools/c-writer-patched.cc', 'Tools/sha256_shim.o',
     str(wabt / 'lib/libwabt.a'), '-o', 'Tools/wasm2c-native')
+run('python3', 'Scripts/prepare_online_exports.py', str(engine), '--out', 'Generated/online-game.wasm')
 run('Tools/wasm2c-native', '--enable-threads', '--no-debug-names', '--module-name=game',
-    '--num-outputs=64', str(engine), '-o', 'Generated/game.c')
+    '--num-outputs=64', 'Generated/online-game.wasm', '-o', 'Generated/game.c')
 runtime = wabt / 'share/wabt/wasm2c/wasm-rt-impl.c'
 text = runtime.read_text()
 if 'pg_record_trap' not in text:
@@ -73,6 +74,7 @@ run('python3', 'Scripts/prepare_virtual_pad.py')
 run('python3', 'Scripts/prepare_movie_wait.py')
 run('python3', 'Scripts/prepare_missing_txd.py')
 run('python3', 'Scripts/prepare_unchecked_memory.py')
+run('python3', 'Scripts/prepare_online_c.py')
 # The BC texture decoder header (MIT): phones without BC texture support get decoded textures.
 bcdec = root / 'Tools/bcdec'
 if not bcdec.exists():

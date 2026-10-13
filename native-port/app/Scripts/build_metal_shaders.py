@@ -17,7 +17,7 @@ import argparse, concurrent.futures, json, os, shutil, subprocess, sys, tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK = os.path.join(ROOT, 'Build', 'MetalShaders')
 OUT = os.path.join(ROOT, 'GeneratedResources')
-TARGETS = {'iphoneos': 'air64-apple-ios16.4', 'iphonesimulator': 'air64-apple-ios16.4-simulator'}
+TARGETS = {'iphoneos': 'air64-apple-ios16.0', 'iphonesimulator': 'air64-apple-ios16.0-simulator'}
 
 
 def run(cmd, cwd=None):

@@ -23,6 +23,9 @@ if [ -n "$SERVER" ]; then
   MIRROR="$PWD/Build/Inputs/mirror"
 fi
 "$PY" Scripts/check_game_files.py --mirror "$MIRROR"
+mkdir -p Build/Online
+cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
+cp ../online-bridge/target/aarch64-apple-ios/release/libmugoat_online.a Build/Online/
 if [ "${PG_REUSE_PREPARED:-0}" = "1" ] && [ -s Generated/game_0.c ] && [ -s GeneratedResources/shaders-iphoneos.metallib ]; then
   xcodegen generate --spec project.yml
 else

@@ -27,6 +27,7 @@ DerivedData/
 /native-port/app/*.xcodeproj
 /native-port/app/Preview/Build/
 /native-port/app/Preview/*.xcodeproj
+/native-port/online-bridge/target/
 *.enc
 /artifacts/
 /previews/
