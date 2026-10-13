@@ -51,14 +51,15 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     private func scanMods() {
         modFiles.removeAll()
         let dir = Self.modsDirectory
+        let baseLength = dir.path.count + (dir.path.hasSuffix("/") ? 0 : 1)
         if let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey], options: [.skipsHiddenFiles]) {
             for case let fileURL as URL in enumerator {
                 guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
                       values.isRegularFile == true else { continue }
-                let name = fileURL.lastPathComponent
-                let enabled = !name.hasSuffix(".disabled")
+                let relPath = fileURL.path.count > baseLength ? String(fileURL.path.dropFirst(baseLength)) : fileURL.lastPathComponent
+                let enabled = !fileURL.lastPathComponent.hasSuffix(".disabled") && !relPath.contains(".disabled")
                 modFiles.append(ModFile(
-                    name: name,
+                    name: relPath,
                     url: fileURL,
                     size: Int64(values.fileSize ?? 0),
                     modified: values.contentModificationDate ?? Date(),
@@ -80,7 +81,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         case 0: return 3 // Quản lý & Cài đặt
         case 1: return max(1, modFiles.count) // Tệp mod đã cài
         case 2: return 5 // Game Tweaks / Modding Hacks
-        case 3: return 3 // Hướng dẫn tự tạo mod
+        case 3: return 4 // Hướng dẫn tự tạo mod & cài xe
         default: return 0
         }
     }
@@ -168,6 +169,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
 
         case 3:
             let guides = [
+                (L10n.text("Cách cài xe Mercedes-Benz SLK 55 AMG (mbslk)"), L10n.text("Hướng dẫn nạp DLC mbslk, chọn bản Enhanced/Legacy và spawn xe"), "car.side.fill"),
                 (L10n.text("Cách mod xe cộ & đồ họa bằng OpenIV (PC)"), L10n.text("Mở file .rpf trên PC, thay model .yft/.ytd rồi chép vào iPhone"), "laptopcomputer"),
                 (L10n.text("Cách chỉnh tốc độ xe trong handling.meta"), L10n.text("Sửa thông số gia tốc và tốc độ tối đa của từng loại xe"), "slider.horizontal.3"),
                 (L10n.text("Kinh nghiệm chống văng game khi cài Mod"), L10n.text("Ưu tiên mod Low/Mid poly dưới 20MB để không bị lỗi tràn RAM"), "shield.lefthalf.filled")
@@ -220,19 +222,36 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         let destDir = Self.modsDirectory
-        var count = 0
+        var extractedCount = 0
+        var copiedCount = 0
+        let archiveExtensions = ["zip", "rar", "7z", "tar", "gz"]
+
         for url in urls {
-            let target = destDir.appendingPathComponent(url.lastPathComponent)
-            try? fileManager.removeItem(at: target)
-            do {
-                try fileManager.copyItem(at: url, to: target)
-                count += 1
-            } catch {
-                NSLog("ModManager: error copying mod file: %@", error.localizedDescription)
+            let ext = url.pathExtension.lowercased()
+            if archiveExtensions.contains(ext) {
+                let count = gi_extract_archive(url.path, destDir.path)
+                if count > 0 {
+                    extractedCount += Int(count)
+                } else {
+                    let target = destDir.appendingPathComponent(url.lastPathComponent)
+                    try? fileManager.removeItem(at: target)
+                    if (try? fileManager.copyItem(at: url, to: target)) != nil {
+                        copiedCount += 1
+                    }
+                }
+            } else {
+                let target = destDir.appendingPathComponent(url.lastPathComponent)
+                try? fileManager.removeItem(at: target)
+                if (try? fileManager.copyItem(at: url, to: target)) != nil {
+                    copiedCount += 1
+                }
             }
         }
         scanMods()
-        showAlert(L10n.text("Đã nạp Mod thành công"), String(format: L10n.text("Đã thêm %d tệp vào thư mục mods của game."), count))
+        let msg = extractedCount > 0
+            ? String(format: L10n.text("Đã giải nén %d tệp mod vào thư mục Mugoat/mods."), extractedCount)
+            : String(format: L10n.text("Đã thêm %d tệp vào thư mục mods của game."), copiedCount)
+        showAlert(L10n.text("Đã nạp Mod thành công"), msg)
     }
 
     private func toggleMod(at index: Int) {
@@ -316,15 +335,20 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         switch row {
         case 0:
             showAlert(
+                L10n.text("Mod xe Mercedes-Benz SLK 55 AMG (mbslk)"),
+                L10n.text("Bản mod gồm 2 phiên bản:\n- Enhanced: 27.5 MB (Đồ họa đỉnh cao, chi tiết cao)\n- Legacy: 52.4 MB (Tối ưu độ ổn định, chống tràn RAM)\n\nCách cài đặt:\n1. Bấm 'Nhập Mod từ tệp' và chọn file .zip hoặc thư mục mbslk.\n2. Ứng dụng tự động giải nén thư mục mbslk/dlc.rpf vào Mugoat/mods.\n3. Vào game, mở Menu Cheat (Trainer), gõ mã xe 'mbslk' để spawn xe ngay lập tức!")
+            )
+        case 1:
+            showAlert(
                 L10n.text("Mod xe & Đồ họa (OpenIV)"),
                 L10n.text("1. Mở OpenIV trên máy tính trỏ vào dữ liệu game GTA V.\n2. Bật Edit Mode.\n3. Kéo thả file mod xe (.yft/.ytd) vào x64e.rpf hoặc dlcpacks.\n4. Copy file .rpf đã sửa vào thư mục Mugoat trên iPhone bằng 3uTools hoặc app Tệp.")
             )
-        case 1:
+        case 2:
             showAlert(
                 L10n.text("Chỉnh thông số handling.meta"),
                 L10n.text("1. Mở file update/update.rpf/common/data/handling.meta trong OpenIV.\n2. Tìm tên xe muốn sửa, chỉnh fInitialDriveMaxFlatVel để tăng tốc độ tối đa.\n3. Lưu file và chép đè vào iPhone.")
             )
-        case 2:
+        case 3:
             showAlert(
                 L10n.text("Chống tràn RAM (OOM Jetsam)"),
                 L10n.text("iOS quản lý bộ nhớ rất khắt khe. Khi chọn mod xe hoặc mod cảnh vật:\n- Chỉ dùng mod có texture dung lượng dưới 20MB.\n- Tránh mod xe 4K/8K polygon quá cao.\n- Nếu vào game bị văng, xóa tệp mod đó khỏi thư mục mods.")

@@ -1886,5 +1886,21 @@
   "Đảo ngược trục dọc": {
     "vi": "Đảo ngược trục dọc",
     "en": "Invert vertical look"
+  },
+  "Cài đặt & Đồ họa": {
+    "vi": "Cài đặt & Đồ họa",
+    "en": "Settings & Graphics"
+  },
+  "Menu Cheat (Trainer)": {
+    "vi": "Menu Cheat (Trainer)",
+    "en": "Cheat Menu (Trainer)"
+  },
+  "Menu Cheat & Mod": {
+    "vi": "Menu Cheat & Mod",
+    "en": "Cheat Menu & Mods"
+  },
+  "Quản lý Mod riêng biệt": {
+    "vi": "Quản lý Mod riêng biệt",
+    "en": "Dedicated Mod Manager"
   }
 }

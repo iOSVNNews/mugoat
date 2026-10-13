@@ -93,13 +93,13 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        [L10n.text("Mod & Tiện ích game"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
+        [L10n.text("Menu Cheat & Mod"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .cheat:
-            return L10n.text("Menu Mod cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể chép mod vào thư mục Mugoat trong ứng dụng Tệp.")
+            return L10n.text("Menu Cheat cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể mở Quản lý Mod để cài đặt tệp mod vào game.")
         case .mode:
             var text = L10n.text("Story mode saves stay on this phone between launches. Sandbox keeps its own separate files.")
             if let runningMode {
@@ -131,13 +131,13 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: indexPath.section)! {
         case .cheat:
             if indexPath.row == 0 {
-                content.text = L10n.text("Menu Mod & Cheat (Trainer)")
+                content.text = L10n.text("Menu Cheat (Trainer)")
                 content.secondaryText = L10n.text("Kích hoạt bất tử, full vũ khí, gọi xe cộ, máy bay, đổi thời tiết...")
                 cell.accessoryType = .disclosureIndicator
                 cell.selectionStyle = .default
             } else {
-                content.text = L10n.text("Quản lý Mod & Tệp game")
-                content.secondaryText = L10n.text("Xem dữ liệu game & thư mục Mugoat trên iPhone để cài Mod")
+                content.text = L10n.text("Quản lý Mod riêng biệt")
+                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/mods")
                 cell.accessoryType = .disclosureIndicator
                 cell.selectionStyle = .default
             }

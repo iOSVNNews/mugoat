@@ -112,9 +112,10 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         output.textColor = .white
         output.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         output.layer.cornerRadius = 12
+        home.modButton.addAction(UIAction { [weak self] _ in self?.showModManager() }, for: .touchUpInside)
+        home.cheatButton.addAction(UIAction { [weak self] _ in self?.showCheatMenu() }, for: .touchUpInside)
         home.settingsButton.addAction(UIAction { [weak self] _ in self?.showSettings() }, for: .touchUpInside)
         home.layoutButton.addAction(UIAction { [weak self] _ in self?.showLayoutEditor() }, for: .touchUpInside)
-        home.cheatButton.addAction(UIAction { [weak self] _ in self?.showCheatMenu() }, for: .touchUpInside)
         home.saveButton.addAction(UIAction { [weak self] _ in self?.showSaves() }, for: .touchUpInside)
         home.languageButton.configuration?.title = L10n.language.uppercased()
         home.languageButton.addAction(UIAction { [weak self] _ in
@@ -732,6 +733,15 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             controller.navigationController?.pushViewController(saves, animated: true)
         }
         let navigation = UINavigationController(rootViewController: controller)
+        Theme.styleNavigation(navigation)
+        present(navigation, animated: true)
+    }
+
+    private func showModManager() {
+        guard presentedViewController == nil else { return }
+        touchControls.reset()
+        let vc = ModManagerViewController(engineRunning: engineStarted)
+        let navigation = UINavigationController(rootViewController: vc)
         Theme.styleNavigation(navigation)
         present(navigation, animated: true)
     }

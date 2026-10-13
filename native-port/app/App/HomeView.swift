@@ -7,9 +7,10 @@ final class HomeView: UIView {
     enum FilesState { case ready, attention, problem, busy }
 
     let playButton = Theme.primaryButton(L10n.text("Vào game"), symbol: "play.fill")
-    let settingsButton = Theme.glassButton(L10n.text("Đồ họa & FPS"), symbol: "slider.horizontal.3")
+    let modButton = Theme.glassButton(L10n.text("Quản lý Mod"), symbol: "cube.box.fill")
+    let cheatButton = Theme.glassButton(L10n.text("Menu Cheat (Trainer)"), symbol: "sparkles")
+    let settingsButton = Theme.glassButton(L10n.text("Cài đặt & Đồ họa"), symbol: "slider.horizontal.3")
     let layoutButton = Theme.glassButton(L10n.text("Bố trí điều khiển"), symbol: "hand.tap.fill")
-    let cheatButton = Theme.glassButton(L10n.text("Tiện ích game"), symbol: "sparkles")
     let saveButton = Theme.glassButton(L10n.text("Save game"), symbol: "externaldrive.fill")
     let languageButton = Theme.glassButton("VI", symbol: "globe")
     let onlineButton = Theme.glassButton(L10n.text("Máy chủ online"), symbol: "network")
@@ -100,12 +101,12 @@ final class HomeView: UIView {
         versionLabel.text = "Mugoat · iOSVN · \(Theme.appVersion)"
         versionLabel.font = Theme.body(11)
         versionLabel.textColor = Theme.tertiaryText
-        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, onlineButton, saveButton, cheatButton, guideLabel, versionLabel])
+        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, modButton, cheatButton, settingsButton, layoutButton, onlineButton, saveButton, guideLabel, versionLabel])
         secondary.axis = .vertical
         secondary.spacing = 12
         secondary.setCustomSpacing(6, after: toolsTitle)
         secondary.setCustomSpacing(18, after: toolsHint)
-        secondary.setCustomSpacing(18, after: cheatButton)
+        secondary.setCustomSpacing(18, after: saveButton)
         secondary.translatesAutoresizingMaskIntoConstraints = false
         for label in [preloadLabel, controllerLabel] {
             label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)

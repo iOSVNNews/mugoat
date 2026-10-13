@@ -53,6 +53,10 @@ void gi_reader_close(gi_reader *reader);
 /// `block` (the file system block size). Returns 0 or errno.
 int gi_punch_hole(int fd, int64_t offset, int64_t length, int64_t block);
 
+/// Extracts all files from an archive (.zip, .rar, .7z, .tar) into destination_folder.
+/// Returns number of files extracted on success, or -1 on error.
+int gi_extract_archive(const char *archive_path, const char *destination_folder);
+
 /// libarchive version string, for logs.
 const char *gi_libarchive_version(void);
 

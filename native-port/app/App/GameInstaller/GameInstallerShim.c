@@ -126,3 +126,60 @@ int gi_punch_hole(int fd, int64_t offset, int64_t length, int64_t block) {
 }
 
 const char *gi_libarchive_version(void) { return archive_version_details(); }
+
+int gi_extract_archive(const char *archive_path, const char *dest_dir) {
+    if (!archive_path || !dest_dir) return -1;
+    struct archive *src = archive_read_new();
+    if (!src) return -1;
+    archive_read_support_format_all(src);
+    archive_read_support_filter_all(src);
+    if (archive_read_open_filename(src, archive_path, 16384) != ARCHIVE_OK) {
+        archive_read_free(src);
+        return -1;
+    }
+    struct archive *disk = archive_write_disk_new();
+    if (!disk) {
+        archive_read_free(src);
+        return -1;
+    }
+    archive_write_disk_set_options(disk, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_SECURE_NODOTDOT);
+    archive_write_disk_set_standard_lookup(disk);
+
+    struct archive_entry *entry = NULL;
+    int files_extracted = 0;
+    while (archive_read_next_header(src, &entry) == ARCHIVE_OK) {
+        const char *currentFile = archive_entry_pathname_utf8(entry);
+        if (!currentFile) currentFile = archive_entry_pathname(entry);
+        if (!currentFile || currentFile[0] == '\0') continue;
+
+        if (strstr(currentFile, "__MACOSX/") || strstr(currentFile, "/.") || currentFile[0] == '.') {
+            continue;
+        }
+
+        char full_dest[1024];
+        snprintf(full_dest, sizeof(full_dest), "%s/%s", dest_dir, currentFile);
+        archive_entry_set_pathname(entry, full_dest);
+
+        int r = archive_write_header(disk, entry);
+        if (r < ARCHIVE_OK) {
+            continue;
+        }
+        if (archive_entry_size(entry) > 0) {
+            const void *buff;
+            size_t size;
+            la_int64_t offset;
+            while (archive_read_data_block(src, &buff, &size, &offset) == ARCHIVE_OK) {
+                if (archive_write_data_block(disk, buff, size, offset) < ARCHIVE_OK) {
+                    break;
+                }
+            }
+        }
+        archive_write_finish_entry(disk);
+        files_extracted++;
+    }
+    archive_write_close(disk);
+    archive_write_free(disk);
+    archive_read_close(src);
+    archive_read_free(src);
+    return files_extracted;
+}
