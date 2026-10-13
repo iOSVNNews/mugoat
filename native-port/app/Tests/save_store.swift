@@ -27,6 +27,7 @@ import CryptoKit
         let settings = target.deletingLastPathComponent().appendingPathComponent("settings.xml")
         try Data("graphics".utf8).write(to: settings)
         check(try store.files().count == 1)
+        check(try store.files()[0].path == path)
         let backup = try store.export()
         try Data("new save".utf8).write(to: target)
         try store.restore(from: backup)

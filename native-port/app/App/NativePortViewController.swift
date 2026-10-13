@@ -572,7 +572,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let raw = GameSettings.shared.assetServer
         let server = Self.isServerAddress(raw) ? raw : ""
         if GameFolder.isChosen {
-            let place = GameFolder.inAppFolder ? "In the Mugoat folder" : "On this iPhone"
+            let place = GameFolder.inAppFolder ? "In the Mugoat folder" : L10n.text("On this iPhone")
             let problems = GameFolder.acceptedProblemCount
             home.setFiles(problems > 0 ? .attention : .ready, title: "\"\(GameFolder.name)\"",
                           detail: problems > 0 ? "\(place) · \(problems) problem \(problems == 1 ? "file" : "files"), playing anyway" : "\(place) · every file checked")

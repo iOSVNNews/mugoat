@@ -611,6 +611,22 @@
     "en": "Explore Los Santos your way.",
     "vi": "Khám phá Los Santos theo cách của bạn."
   },
+  "Nhập thư mục save": {
+    "en": "Import a save folder",
+    "vi": "Nhập thư mục save"
+  },
+  "Import a save folder": {
+    "en": "Import a save folder",
+    "vi": "Nhập thư mục save"
+  },
+  "Chọn thư mục chứa userdata và sandbox, ví dụ Muguet/saves": {
+    "en": "Choose a folder containing userdata and sandbox, for example Muguet/saves",
+    "vi": "Chọn thư mục chứa userdata và sandbox, ví dụ Muguet/saves"
+  },
+  "Choose a folder containing userdata and sandbox, for example Muguet/saves": {
+    "en": "Choose a folder containing userdata and sandbox, for example Muguet/saves",
+    "vi": "Chọn thư mục chứa userdata và sandbox, ví dụ Muguet/saves"
+  },
   "Mở bảng lệnh cheat để kích hoạt bất tử, hồi máu & giáp, nhận tất cả vũ khí, gọi xe cộ, máy bay, đổi thời tiết...": {
     "en": "Open built-in cheats for health, armor, weapons, vehicles, aircraft and weather.",
     "vi": "Mở bảng lệnh cheat để kích hoạt bất tử, hồi máu & giáp, nhận tất cả vũ khí, gọi xe cộ, máy bay, đổi thời tiết..."
@@ -1250,6 +1266,110 @@
   "Controls:": {
     "en": "Controls:",
     "vi": "Điều khiển:"
+  },
+  "Trên iPhone này": {
+    "en": "On this iPhone",
+    "vi": "Trên iPhone này"
+  },
+  "On this iPhone": {
+    "en": "On this iPhone",
+    "vi": "Trên iPhone này"
+  },
+  "Trong thư mục app": {
+    "en": "In the app folder",
+    "vi": "Trong thư mục app"
+  },
+  "In the app folder": {
+    "en": "In the app folder",
+    "vi": "Trong thư mục app"
+  },
+  " · đã kiểm tra toàn bộ tệp": {
+    "en": " · every file checked",
+    "vi": " · đã kiểm tra toàn bộ tệp"
+  },
+  " · every file checked": {
+    "en": " · every file checked",
+    "vi": " · đã kiểm tra toàn bộ tệp"
+  },
+  "Đóng rồi mở lại app để chơi": {
+    "en": "Close and reopen the app to play",
+    "vi": "Đóng rồi mở lại app để chơi"
+  },
+  "Close and reopen the app to play": {
+    "en": "Close and reopen the app to play",
+    "vi": "Đóng rồi mở lại app để chơi"
+  },
+  "Cần mở lại game để dùng": {
+    "en": "Restart needed for",
+    "vi": "Cần mở lại game để dùng"
+  },
+  "Restart needed for": {
+    "en": "Restart needed for",
+    "vi": "Cần mở lại game để dùng"
+  },
+  "Chất lượng, mặc định": {
+    "en": "Detail level, default",
+    "vi": "Chất lượng, mặc định"
+  },
+  "Detail level, default": {
+    "en": "Detail level, default",
+    "vi": "Chất lượng, mặc định"
+  },
+  "Độ phân giải dựng hình": {
+    "en": "Renders at",
+    "vi": "Độ phân giải dựng hình"
+  },
+  "Renders at": {
+    "en": "Renders at",
+    "vi": "Độ phân giải dựng hình"
+  },
+  "Đã tìm thấy tệp nén game": {
+    "en": "Found a game archive",
+    "vi": "Đã tìm thấy tệp nén game"
+  },
+  "Found a game archive": {
+    "en": "Found a game archive",
+    "vi": "Đã tìm thấy tệp nén game"
+  },
+  "Đang tìm dữ liệu trong thư mục và kiểm tra từng tệp.": {
+    "en": "Looking through every folder inside for your game, then checking each file.",
+    "vi": "Đang tìm dữ liệu trong thư mục và kiểm tra từng tệp."
+  },
+  "Looking through every folder inside for your game, then checking each file.": {
+    "en": "Looking through every folder inside for your game, then checking each file.",
+    "vi": "Đang tìm dữ liệu trong thư mục và kiểm tra từng tệp."
+  },
+  "Đường dẫn này là trang tải về": {
+    "en": "That link is a web page",
+    "vi": "Đường dẫn này là trang tải về"
+  },
+  "That link is a web page": {
+    "en": "That link is a web page",
+    "vi": "Đường dẫn này là trang tải về"
+  },
+  "Bấm nút tải trên trang; app sẽ tiếp nhận việc tải tệp.": {
+    "en": "Use the page's download button in the browser; the app takes over the download.",
+    "vi": "Bấm nút tải trên trang; app sẽ tiếp nhận việc tải tệp."
+  },
+  "Use the page's download button in the browser; the app takes over the download.": {
+    "en": "Use the page's download button in the browser; the app takes over the download.",
+    "vi": "Bấm nút tải trên trang; app sẽ tiếp nhận việc tải tệp."
+  },
+  "Để đủ dung lượng, tệp nén được giải phóng dần trong khi giải nén. Nếu quá trình dừng giữa chừng, bạn cần chuẩn bị lại tệp nén.": {
+    "en": "To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again.",
+    "vi": "Để đủ dung lượng, tệp nén được giải phóng dần trong khi giải nén. Nếu quá trình dừng giữa chừng, bạn cần chuẩn bị lại tệp nén."
+  },
+  "To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again.": {
+    "en": "To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again.",
+    "vi": "Để đủ dung lượng, tệp nén được giải phóng dần trong khi giải nén. Nếu quá trình dừng giữa chừng, bạn cần chuẩn bị lại tệp nén."
+  },
+  "Language": {
+    "en": "Ngôn ngữ",
+    "vi": "Language"
+  },
+  "Ngôn ngữ": {
+    "en": "Ngôn ngữ",
+    "vi": "Language"
   },
   "Chọn Cốt truyện hoặc Tự do để bắt đầu.": {
     "en": "Choose Story mode or Sandbox to play.",

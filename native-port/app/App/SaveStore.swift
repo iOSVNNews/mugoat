@@ -61,7 +61,10 @@ struct SaveStore {
                 let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey])
                 if values.isSymbolicLink == true { scan.skipDescendants(); continue }
                 guard values.isRegularFile == true, url.lastPathComponent.lowercased() != "settings.xml" else { continue }
-                let path = mode + "/Documents/" + String(url.path.dropFirst(folder.path.count + 1))
+                let basePath = folder.resolvingSymlinksInPath().standardizedFileURL.path
+                let canonicalPath = url.resolvingSymlinksInPath().standardizedFileURL.path
+                guard canonicalPath.hasPrefix(basePath + "/") else { throw Failure.invalid }
+                let path = mode + "/Documents/" + String(canonicalPath.dropFirst(basePath.count + 1))
                 _ = try destination(path)
                 result.append(File(url: url, path: path, size: values.fileSize ?? 0, modified: values.contentModificationDate ?? .distantPast))
                 if result.count > 256 { throw Failure.tooLarge }

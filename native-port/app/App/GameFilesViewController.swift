@@ -231,8 +231,8 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     }
 
     private func setStatus(_ ok: Bool?, title: String, detail: String) {
-        statusTitle.text = title
-        statusDetail.text = detail
+        statusTitle.text = L10n.text(title)
+        statusDetail.text = L10n.text(detail)
         statusDetail.isHidden = detail.isEmpty
         statusIcon.image = UIImage(systemName: ok == true ? "checkmark.circle.fill" : ok == false ? "exclamationmark.triangle.fill" : "folder.badge.questionmark")
         statusIcon.tintColor = ok == true ? Theme.ok : ok == false ? Theme.problem : Theme.warning
@@ -324,7 +324,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
             return
         }
         guard let folder = urls.first else { return }
-        setStatus(nil, title: "Searching \"\(folder.lastPathComponent)\"…", detail: "Looking through every folder inside for your game, then checking each file.")
+        setStatus(nil, title: "Searching \"\(folder.lastPathComponent)\"…", detail: L10n.text("Looking through every folder inside for your game, then checking each file."))
         DispatchQueue.global(qos: .userInitiated).async {
             let choice = GameFolder.choose(folder)
             DispatchQueue.main.async {
@@ -337,7 +337,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
                     self.detailsButton.isHidden = false
                     self.anywayButton.isHidden = !GameFolder.playAnywayAllowed(report)
                 case let .archivesOnly(archives):
-                    self.setStatus(nil, title: "Found a game archive", detail: "\(archives[0].lastPathComponent) isn't unpacked yet. Tap Unpack below and the app does it for you.")
+                    self.setStatus(nil, title: L10n.text("Found a game archive"), detail: "\(archives[0].lastPathComponent) isn't unpacked yet. Tap Unpack below and the app does it for you.")
                     self.showArchives()
                 case let .refused(message):
                     self.setStatus(false, title: "No game in that folder", detail: message)
@@ -404,7 +404,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     }
 
     private func openBrowser(_ url: URL) {
-        setStatus(nil, title: "That link is a web page", detail: "Use the page's download button in the browser; the app takes over the download.")
+        setStatus(nil, title: L10n.text("That link is a web page"), detail: L10n.text("Use the page's download button in the browser; the app takes over the download."))
         let browser = DownloadBrowserViewController(url: url)
         browser.onDownload = { [weak self] file, headers in self?.startInstall(.url(file, headers: headers)) }
         let navigation = UINavigationController(rootViewController: browser)
@@ -421,7 +421,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
         guard !install.isRunning else { return }
         if case let .file(url, true) = source, !confirmed {
             // Unpacking frees the archive as it goes (that's how it fits next to the game).
-            let alert = UIAlertController(title: "Unpack \(url.lastPathComponent)?", message: "To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again.", preferredStyle: .alert)
+            let alert = UIAlertController(title: "Unpack \(url.lastPathComponent)?", message: L10n.text("To fit on this iPhone, the archive is used up while it unpacks: once it's done, only the unpacked game is left. If unpacking stops half way, you'll need the archive again."), preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: L10n.text("Cancel"), style: .cancel))
             alert.addAction(UIAlertAction(title: "Unpack", style: .default) { [weak self] _ in self?.startInstall(source, confirmed: true) })
             present(alert, animated: true)
@@ -485,7 +485,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
         var items = views
         if let title {
             let label = UILabel()
-            label.text = title
+            label.text = L10n.text(title)
             label.font = Theme.display(18, .bold)
             label.textColor = Theme.text
             items.insert(label, at: 0)
@@ -499,7 +499,7 @@ final class GameFilesViewController: UIViewController, UIDocumentPickerDelegate,
     }
     private func note(_ text: String) -> UILabel {
         let label = UILabel()
-        label.text = text
+        label.text = L10n.text(text)
         label.font = Theme.body(14)
         label.textColor = Theme.secondaryText
         label.numberOfLines = 0

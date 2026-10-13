@@ -5,6 +5,7 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
     private let engineRunning: Bool
     private let store: SaveStore
     private var files: [SaveStore.File] = []
+    private var importingFolder = false
     private var working = false {
         didSet { navigationItem.rightBarButtonItem?.isEnabled = !working }
     }
@@ -32,7 +33,7 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
         refreshControl?.endRefreshing()
     }
     override func numberOfSections(in tableView: UITableView) -> Int { 2 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 0 ? 3 : max(1, files.count) }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 0 ? 4 : max(1, files.count) }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 0 ? L10n.text("Sao lưu & khôi phục") : L10n.text("Tệp đang có") + " · \(files.count)" }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard section == 0 else { return nil }
@@ -45,13 +46,14 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
         cell.detailTextLabel?.textColor = Theme.secondaryText
         cell.detailTextLabel?.numberOfLines = 2
         if indexPath.section == 0 {
-            let titles = [L10n.text("Sao lưu tất cả save"), L10n.text("Nhập bản sao lưu"), L10n.text("Làm mới danh sách")]
-            let symbols = ["square.and.arrow.up", "square.and.arrow.down", "arrow.clockwise"]
+            let titles = [L10n.text("Sao lưu tất cả save"), L10n.text("Nhập bản sao lưu"), L10n.text("Làm mới danh sách"), L10n.text("Nhập thư mục save")]
+            let symbols = ["square.and.arrow.up", "square.and.arrow.down", "arrow.clockwise", "folder.badge.plus"]
             cell.textLabel?.text = titles[indexPath.row]
             cell.imageView?.image = UIImage(systemName: symbols[indexPath.row]); cell.imageView?.tintColor = Theme.accent
             cell.detailTextLabel?.text = indexPath.row == 0 ? L10n.text("Tạo bản sao và chọn nơi lưu hoặc chia sẻ") : indexPath.row == 1 ? (engineRunning ? L10n.text("Mở lại app, nhập trước khi bấm Vào game") : L10n.text("Chọn tệp .mugoatsave đã xuất")) : L10n.text("Xem tệp mới nhất sau khi game lưu")
             cell.accessoryType = .disclosureIndicator
-            if indexPath.row == 1 && engineRunning { cell.textLabel?.textColor = Theme.tertiaryText }
+            if indexPath.row == 3 { cell.detailTextLabel?.text = L10n.text("Chọn thư mục chứa userdata và sandbox, ví dụ Muguet/saves") }
+            if [1, 3].contains(indexPath.row) && engineRunning { cell.textLabel?.textColor = Theme.tertiaryText }
         } else if files.isEmpty {
             cell.textLabel?.text = L10n.text("Chưa có tệp save")
             cell.detailTextLabel?.text = L10n.text("Chơi Cốt truyện và lưu trong game, rồi quay lại đây.")
@@ -99,9 +101,10 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
                     }
                 }
             }
-        case 1:
+        case 1, 3:
             guard !engineRunning else { message(L10n.text("Khôi phục trước khi vào game"), L10n.text("Mở lại app và vào Save game trước khi bấm Vào game.")); return }
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
+            importingFolder = indexPath.row == 3
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: importingFolder ? [.folder] : [.data], asCopy: !importingFolder)
             picker.delegate = self
             present(picker, animated: true)
         default: reloadFiles()
@@ -109,6 +112,7 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
     }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard !engineRunning, let source = urls.first else { return }
+        let isFolder = importingFolder
         let alert = UIAlertController(title: L10n.text("Khôi phục save?"), message: L10n.text("Save trùng đường dẫn sẽ được thay thế. App tạo bản sao lưu save hiện có trước khi khôi phục."), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
         alert.addAction(UIAlertAction(title: L10n.text("Khôi phục"), style: .default) { [weak self] _ in
@@ -117,7 +121,17 @@ final class SaveViewController: UITableViewController, UIDocumentPickerDelegate 
             DispatchQueue.global(qos: .userInitiated).async {
                 let scoped = source.startAccessingSecurityScopedResource()
                 defer { if scoped { source.stopAccessingSecurityScopedResource() } }
-                let result = Result { try self.store.restore(from: source) }
+                let result = Result {
+                    if isFolder {
+                        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                        defer { try? FileManager.default.removeItem(at: temporary) }
+                        let imported = SaveStore(root: source, backups: temporary)
+                        let package = try imported.export()
+                        try self.store.restore(from: package)
+                    } else {
+                        try self.store.restore(from: source)
+                    }
+                }
                 DispatchQueue.main.async {
                     self.working = false
                     switch result {

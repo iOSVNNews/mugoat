@@ -74,7 +74,9 @@ final class SettingsViewController: UITableViewController {
         header.contentConfiguration = content
     }
     override func tableView(_ tableView: UITableView, willDisplayFooterView view: UIView, forSection section: Int) {
-        (view as? UITableViewHeaderFooterView)?.textLabel?.textColor = Theme.tertiaryText
+        let label = (view as? UITableViewHeaderFooterView)?.textLabel
+        label?.textColor = Theme.tertiaryText
+        if let text = label?.text { label?.text = L10n.text(text) }
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -320,6 +322,8 @@ final class SettingsViewController: UITableViewController {
                 content.textProperties.color = .systemBlue
             }
         }
+        content.text = content.text.map(L10n.text)
+        content.secondaryText = content.secondaryText.map(L10n.text)
         cell.contentConfiguration = content
         return cell
     }
@@ -516,7 +520,7 @@ final class SettingsViewController: UITableViewController {
     }
 
     private func showAlert(_ title: String, _ message: String) {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        let alert = UIAlertController(title: L10n.text(title), message: L10n.text(message), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
