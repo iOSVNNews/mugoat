@@ -1830,5 +1830,49 @@
   "Aim, left hand": {
     "vi": "Ngắm bắn (tay trái)",
     "en": "Aim, left hand"
+  },
+  "Quản lý Mod": {
+    "vi": "Quản lý Mod",
+    "en": "Mod Manager"
+  },
+  "Cài đặt & Tệp Mod": {
+    "vi": "Cài đặt & Tệp Mod",
+    "en": "Mod Settings & Files"
+  },
+  "Danh sách Mod đã cài": {
+    "vi": "Danh sách Mod đã cài",
+    "en": "Installed Mods"
+  },
+  "Tinh chỉnh & Can thiệp Game (Tweaks)": {
+    "vi": "Tinh chỉnh & Can thiệp Game (Tweaks)",
+    "en": "Game Tweaks & Modding"
+  },
+  "Hướng dẫn tự làm Mod cho iOS": {
+    "vi": "Hướng dẫn tự làm Mod cho iOS",
+    "en": "Modding Guide for iOS"
+  },
+  "Nhập Mod từ tệp (.zip, .rpf, .meta)": {
+    "vi": "Nhập Mod từ tệp (.zip, .rpf, .meta)",
+    "en": "Import Mod from file (.zip, .rpf, .meta)"
+  },
+  "Vị trí thư mục Mod": {
+    "vi": "Vị trí thư mục Mod",
+    "en": "Mods Folder Location"
+  },
+  "Làm mới danh sách Mod": {
+    "vi": "Làm mới danh sách Mod",
+    "en": "Refresh Mod List"
+  },
+  "Chưa có tệp Mod nào": {
+    "vi": "Chưa có tệp Mod nào",
+    "en": "No mods installed"
+  },
+  "Đang bật": {
+    "vi": "Đang bật",
+    "en": "Enabled"
+  },
+  "Đã tắt": {
+    "vi": "Đã tắt",
+    "en": "Disabled"
   }
 }

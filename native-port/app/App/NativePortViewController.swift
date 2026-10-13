@@ -721,6 +721,11 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         controller.editLayout = { [weak self] in self?.showLayoutEditor() }
         controller.targetingChanged = { PGSetTargetingMode(Int32(GameSettings.shared.targetingMode)) }
         controller.openCheat = { [weak self] in self?.showCheatMenu() }
+        controller.openMods = { [weak controller, weak self] in
+            guard let self, let controller else { return }
+            let mods = ModManagerViewController(engineRunning: self.engineStarted)
+            controller.navigationController?.pushViewController(mods, animated: true)
+        }
         controller.openSaves = { [weak controller, weak self] in
             guard let self, let controller else { return }
             let saves = SaveViewController(engineRunning: self.engineStarted)

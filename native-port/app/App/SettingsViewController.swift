@@ -14,6 +14,7 @@ final class SettingsViewController: UITableViewController {
     var targetingChanged: (() -> Void)?
     var gameModeChanged: (() -> Void)?
     var openCheat: (() -> Void)?
+    var openMods: (() -> Void)?
     var openSaves: (() -> Void)?
 
     private enum Section: Int, CaseIterable { case cheat, mode, graphics, controls, gyro, files, device }
@@ -335,7 +336,7 @@ final class SettingsViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == Section.cheat.rawValue {
             if indexPath.row == 0 { openCheat?() }
-            else { showGameFiles() }
+            else { if let openMods { openMods() } else { showModManager() } }
             return
         }
         if indexPath.section == Section.device.rawValue, indexPath.row == 4 {
@@ -556,12 +557,16 @@ final class SettingsViewController: UITableViewController {
         sheet.popoverPresentationController?.sourceView = cell ?? view
         present(sheet, animated: true)
     }
-    private func showGameFiles() {
-        let vc = GameFilesViewController()
-        let nav = UINavigationController(rootViewController: vc)
-        Theme.styleNavigation(nav)
-        nav.modalPresentationStyle = .formSheet
-        present(nav, animated: true)
+    private func showModManager() {
+        let vc = ModManagerViewController(engineRunning: engineRunning)
+        if let nav = navigationController {
+            nav.pushViewController(vc, animated: true)
+        } else {
+            let nav = UINavigationController(rootViewController: vc)
+            Theme.styleNavigation(nav)
+            nav.modalPresentationStyle = .formSheet
+            present(nav, animated: true)
+        }
     }
     private func resolutionTitle(_ height: Int) -> String {
         if height == 0 {
