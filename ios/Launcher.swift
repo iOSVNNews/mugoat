@@ -1524,7 +1524,7 @@ struct LauncherView: View {
 
                             HStack(spacing: 8) {
                                 Circle().fill(Color.green).frame(width: 8, height: 8)
-                                Text(L("Server AWS iOSVN Singapore · Chế độ Cốt truyện (Story)", "AWS Singapore Server · Story Mode"))
+                                Text(L("Server AWS iOSVN Singapore · Cốt truyện: Đua xe sau cướp tiền (Franklin & Lamar)", "AWS Singapore Server · Story: Franklin & Lamar Race"))
                                     .font(.caption.bold())
                                     .foregroundStyle(.green)
                             }
@@ -1537,7 +1537,7 @@ struct LauncherView: View {
                                     .foregroundStyle(.secondary)
                             }
 
-                            Text(L("💡 Chỉ cần bật Multiplayer và nhập IP là chơi được. Khi Online, lệnh Cheat sẽ tự động bị khóa và game chạy ở chế độ Cốt truyện.", "Enter server IP to play GTA V Story mode. Cheats are locked online."))
+                            Text(L("💡 Chỉ cần bật Multiplayer và nhập IP là chơi được. Cốt truyện bắt đầu ngay từ sự kiện đua xe thu hồi 2 siêu xe sau khi cướp tiền (bỏ qua màn tuyết dài). Cheat tự động khóa online.", "Enter server IP to play. Story starts right after the prologue heist with the Franklin & Lamar sports car race in Los Santos."))
                                 .font(.caption2).foregroundStyle(.orange)
                         }
                     }

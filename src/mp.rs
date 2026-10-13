@@ -991,6 +991,63 @@ fn update_camera_mode(c: &mut Cmd<'_, '_>) {
     }
 }
 
+static STORY_START_WARPED: AtomicBool = AtomicBool::new(false);
+static STORY_SCRIPT_STARTED: AtomicBool = AtomicBool::new(false);
+
+fn process_story_mode_startup(c: &mut Cmd<'_, '_>) {
+    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+    let is_mp = crate::input::muguet_is_multiplayer();
+    if !is_mp && mode != "story" { return; }
+
+    let ped = c.i("PlayerPedId", &[]);
+    if ped == 0 || !c.exists(ped) { return; }
+
+    // Coordinates of Franklin & Lamar street race after prologue heist:
+    // Whispymound Drive / Vinewood Hills mansion
+    let race_pos = [-14.0f32, 525.0f32, 143.0f32];
+
+    if !STORY_START_WARPED.swap(true, Ordering::Relaxed) {
+        let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
+        // North Yankton heist coordinates are around x: 5300, y: -5200 (or initial 0,0,0)
+        let in_yankton = cur[0] > 2000.0 || cur[1] < -3500.0 || (cur[0].abs() < 1.0 && cur[1].abs() < 1.0);
+        if in_yankton {
+            let pos_arg = c.vec_arg(0, race_pos);
+            c.i("SetEntityCoordsNoOffset", &[i(ped), pos_arg, b(false), b(false), b(false)]);
+            c.i("SetEntityHeading", &[i(ped), f(290.0)]);
+
+            // Show HUD notification to player
+            let text = "iOSVN Server · Cốt truyện: Đua xe Los Santos (Franklin & Lamar)";
+            c.c_str(S_TEXT, "STRING");
+            c.c_str(S_NAME, text);
+            let _ = c.i("BeginTheFeedPost", &[c.ptr(S_TEXT)]);
+            let _ = c.i("AddTextComponentSubStringPlayerName", &[c.ptr(S_NAME)]);
+            let _ = c.i("EndTheFeedPostTicker", &[b(false), b(true)]);
+
+            eprintln!("[story] skipped prologue heist -> spawned at Franklin & Lamar race in Los Santos: {race_pos:?}");
+        }
+    }
+
+    if !STORY_SCRIPT_STARTED.load(Ordering::Relaxed) {
+        for script in &["armenian1", "franklin0", "arm1"] {
+            c.c_str(S_NAME, script);
+            let name_arg = c.ptr(S_NAME);
+            if c.i("DoesScriptExist", &[name_arg]) != 0 {
+                let _ = c.i("RequestScript", &[name_arg]);
+                let _ = c.i("RequestScript2", &[name_arg]);
+                if c.i("HasScriptLoaded", &[name_arg]) != 0 {
+                    let id = c.i("StartNewScript", &[name_arg, i(1424)]);
+                    if id == 0 {
+                        let _ = c.i("StartNewScript2", &[name_arg, i(1424)]);
+                    }
+                    STORY_SCRIPT_STARTED.store(true, Ordering::Relaxed);
+                    eprintln!("[story] started mission script {script} at street race event");
+                    break;
+                }
+            }
+        }
+    }
+}
+
 static GAME: Mutex<Option<Game>> = Mutex::new(None);
 
 const PREFERRED_SCRIPTS: &[&str] = &["main_persistent", "standard_global_reg", "main", "sandbox", "freemode"];
@@ -1060,6 +1117,7 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
         let mut c = Cmd { caller, scratch };
         init_world_blips_once(&mut c);
         update_camera_mode(&mut c);
+        process_story_mode_startup(&mut c);
 
         if WANT_BULLETS.swap(false, Ordering::Relaxed) {
             more_bullets(&mut c);
