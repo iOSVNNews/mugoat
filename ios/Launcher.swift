@@ -1084,135 +1084,414 @@ struct HUDEditorView: View {
     }
 }
 
-struct LauncherView: View {
-    @StateObject private var s = Settings()
-    @ObservedObject private var importer = Importer.shared
-    @ObservedObject private var modManager = ModManager.shared
-    @AppStorage("mugoat_language") private var currentLang: String = "vi"
-    @State private var error: String?
-    @State private var pickingZip = false
-    @State private var pickingFolder = false
-    @State private var pickingMod = false
-    @State private var showingCheatSheet = false
-    @State private var showingHUDEditor = false
-    @State private var showingResetAlert = false
-    @State private var resetAlertMessage = ""
-    var isOverlay: Bool = false
-    let play: () -> Void
+// MARK: - Port Theme & Styling
 
-    func L(_ vi: String, _ en: String) -> String {
-        return currentLang == "en" ? en : vi
-    }
+enum PortTheme {
+    static let accent = Color(red: 0.34, green: 0.93, blue: 0.77)
+    static let accentDeep = Color(red: 0.18, green: 0.76, blue: 0.66)
+    static let ok = Color(red: 0.30, green: 0.85, blue: 0.47)
+    static let warning = Color(red: 1.0, green: 0.78, blue: 0.26)
+    static let problem = Color(red: 1.0, green: 0.42, blue: 0.38)
+    static let night = Color(red: 0.035, green: 0.055, blue: 0.095)
+    static let panelStroke = Color(white: 1.0, opacity: 0.12)
+    static let panelBackground = Color(white: 1.0, opacity: 0.08)
+    static let secondaryText = Color(white: 1.0, opacity: 0.68)
+    static let tertiaryText = Color(white: 1.0, opacity: 0.45)
+}
+
+struct PortGlassButton: View {
+    let title: String
+    let symbol: String
+    var badge: String? = nil
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Left Column: Branding, Status, Launch / Import Controls
-            VStack(spacing: 14) {
-                // Top Header: Logo + Title + Quick Language Toggle
-                HStack(alignment: .center, spacing: 8) {
-                    if let logo = UIImage(named: "mugoat_logo.png") ?? UIImage(contentsOfFile: Bundle.main.path(forResource: "mugoat_logo", ofType: "png") ?? "") {
-                        Image(uiImage: logo)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 38, height: 38)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .shadow(color: .yellow.opacity(0.4), radius: 4)
-                    }
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(PortTheme.accent)
+                    .frame(width: 22)
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(isOverlay ? "MUGOAT MENU" : "MUGOAT")
-                            .font(.title2.weight(.black))
-                            .foregroundStyle(LinearGradient(colors: [.white, .yellow.opacity(0.9)], startPoint: .top, endPoint: .bottom))
-                        Text(L("Bản lai Muguet & GTA Port", "Hybrid Muguet & GTA Port"))
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            currentLang = (currentLang == "vi" ? "en" : "vi")
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Text(currentLang == "vi" ? "🇻🇳 VI" : "🇬🇧 EN")
-                                .font(.caption.bold())
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Color.blue.opacity(0.25))
-                        .foregroundColor(.white)
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(Color.blue.opacity(0.6), lineWidth: 1))
-                    }
-                }
-                .padding(.horizontal, 2)
-
-                if !muguet_has_game_code() {
-                    Text(L("Bản build này chưa có mã game: vui lòng build cùng game.wasm/zip.", "This build has no game code: build it with ./make-ios.sh <game.zip>."))
-                        .foregroundStyle(.red).font(.callout).multilineTextAlignment(.center)
-                } else if !importer.ready || importer.progress != nil {
-                    importView
-                } else if isOverlay {
-                    Button(action: resumeAndSave) {
-                        Text(L("Tiếp tục (Resume)", "Resume Game")).font(.title3.weight(.semibold)).frame(maxWidth: 220)
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-
-                    Button(action: { exit(0) }) {
-                        Text(L("Thoát hẳn ứng dụng (Exit)", "Exit Application")).font(.callout.weight(.medium)).frame(maxWidth: 220)
-                    }
-                    .controlSize(.regular)
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                } else {
-                    if let error { Text(error).foregroundStyle(.red).font(.callout).multilineTextAlignment(.center) }
-                    playButton
-
-                    HStack(spacing: 10) {
-                        Button(L("Nhập .ZIP khác…", "Import .ZIP…")) { pickingZip = true }
-                            .font(.caption)
-                        Text("•").foregroundStyle(.secondary).font(.caption)
-                        Button(L("Chọn thư mục…", "Pick folder…")) { pickingFolder = true }
-                            .font(.caption)
-                        Text("•").foregroundStyle(.secondary).font(.caption)
-                        Button(L("Kiểm tra lại", "Recheck files")) { importer.refreshReady() }
-                            .font(.caption)
-                    }
-                }
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
 
                 Spacer()
 
-                VStack(spacing: 2) {
-                    Text("Mugoat iOS · Siêu mượt & Đầy đủ tính năng").font(.caption2.bold()).foregroundStyle(.secondary)
-                    Text("Rebuild by iOSVN · Server AWS Singapore · iOS 16+").font(.caption2).foregroundStyle(.secondary.opacity(0.8))
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(PortTheme.accent.opacity(0.18))
+                        .foregroundStyle(PortTheme.accent)
+                        .clipShape(Capsule())
                 }
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity)
 
-            // Right Column: Form with All Settings, Mods, Controls, Multiplayer
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(PortTheme.tertiaryText)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(white: 1.0, opacity: 0.09))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(PortTheme.panelStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PortModeCard: View {
+    let title: String
+    let symbol: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isSelected ? PortTheme.accent : .white)
+
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isSelected ? PortTheme.accent : .white)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isSelected ? PortTheme.accent.opacity(0.14) : Color(white: 1.0, opacity: 0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isSelected ? PortTheme.accent : PortTheme.panelStroke, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PortPrimaryButton: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .heavy))
+                Text(title)
+                    .font(.system(size: 19, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(Color(red: 0.02, green: 0.13, blue: 0.15))
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background(
+                LinearGradient(
+                    colors: [PortTheme.accent, PortTheme.accentDeep],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(Capsule())
+            .shadow(color: PortTheme.accent.opacity(0.35), radius: 14, x: 0, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PortBackdrop: View {
+    var body: some View {
+        ZStack {
+            PortTheme.night.ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    Color(red: 0.045, green: 0.17, blue: 0.18, opacity: 0.8),
+                    PortTheme.night,
+                    Color(red: 0.11, green: 0.10, blue: 0.22, opacity: 0.8)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    PortTheme.night.opacity(0.92),
+                    PortTheme.night.opacity(0.55),
+                    PortTheme.night.opacity(0.1)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
+
+// MARK: - Dedicated Settings Sheets
+
+struct GraphicsSettingsSheet: View {
+    @ObservedObject var s: Settings
+    let L: (String, String) -> String
+    let onReset: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
             Form {
-                // Section 1: Player Name
-                Section(L("Tên nhân vật / Người chơi", "Player Name / Identity")) {
+                Section(L("Tên người chơi", "Player Name")) {
                     HStack {
                         Image(systemName: "person.crop.circle.fill")
-                            .foregroundStyle(.blue)
-                        TextField(L("Nhập tên nhân vật...", "Enter player name..."), text: $s.name)
+                            .foregroundStyle(PortTheme.accent)
+                        TextField(L("Nhập tên người chơi...", "Enter player name..."), text: $s.name)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                     }
-                    Text(L("Tên này sẽ hiển thị trên đầu nhân vật của bạn khi chơi cùng bạn bè.", "This name displays above your character in Multiplayer."))
-                        .font(.caption).foregroundStyle(.secondary)
                 }
 
-                // Section 2: Mod Manager Menu
-                Section(L("🎮 Quản lý Mod (Mod Manager)", "🎮 Mod Manager (Lua / Models / Textures)")) {
+                Section(L("Cấu hình nhanh (Presets)", "Quick Presets")) {
+                    Button(action: {
+                        s.applyLowRamMode(fpsLimit: 60, renderScale: 0.5)
+                    }) {
+                        HStack {
+                            Image(systemName: "speedometer")
+                            Text(L("Cấu hình Cân bằng · 60 FPS (Scale 50%)", "Balanced Preset · 60 FPS (50% Scale)"))
+                        }
+                    }
+
+                    Button(action: {
+                        s.apply120FpsBoost()
+                    }) {
+                        HStack {
+                            Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                            Text(L("Thử Boost 120 FPS (Màn hình ProMotion)", "120 FPS Boost (ProMotion)"))
+                        }
+                    }
+
+                    Button(action: {
+                        s.applyLowRamMode(fpsLimit: 30, renderScale: 0.35)
+                    }) {
+                        HStack {
+                            Image(systemName: "leaf.fill").foregroundStyle(.green)
+                            Text(L("Potato Mode · 30 FPS (Scale 35% - Tiết kiệm RAM)", "Potato Mode · 30 FPS (35% Scale)"))
+                        }
+                    }
+                }
+
+                Section(L("Độ phân giải & FPS", "Display & Frame Rate")) {
+                    Picker(L("Giới hạn FPS", "Frame Rate Limit"), selection: $s.fps) {
+                        Text("30 FPS (" + L("Tiết kiệm pin", "Battery Saver") + ")").tag(30)
+                        Text("60 FPS (" + L("Mặc định mượt mà", "Default Smooth") + ")").tag(60)
+                        Text("120 FPS (" + L("Mở khóa ProMotion", "120 FPS ProMotion") + ")").tag(120)
+                    }
+
+                    Picker(L("Độ phân giải hiển thị", "Resolution Scale"), selection: $s.scale) {
+                        Text("35 % (" + L("Siêu nhẹ", "Potato") + ")").tag(0.35)
+                        Text("50 % (" + L("Nhẹ / Khuyên dùng", "Low / Recommended") + ")").tag(0.5)
+                        Text("65 % (" + L("Cân bằng", "Balanced") + ")").tag(0.65)
+                        Text("75 % (" + L("Rõ nét", "Crisp") + ")").tag(0.75)
+                        Text("100 % (" + L("Gốc", "Native 100%") + ")").tag(1.0)
+                    }
+
+                    Picker(L("Chất lượng Texture", "Texture Quality"), selection: $s.textures) {
+                        Text(L("Bình thường (Ít tốn RAM)", "Normal (Low RAM)")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
+                    }
+
+                    Toggle(L("Hiển thị FPS, thời gian khung hình & RAM", "Show FPS, Frame Time & RAM HUD"), isOn: $s.showFPS)
+                    Toggle(L("Đồng bộ nhịp màn hình (V-Sync)", "Display Sync (V-Sync)"), isOn: $s.promotionSync)
+                    Toggle(L("Tối ưu sâu (Giảm hiệu ứng nặng)", "Deep Optimization"), isOn: $s.deepOptimization)
+                }
+
+                Section(L("Đồ họa chi tiết GTA V", "Granular GTA V Graphics")) {
+                    Picker(L("Chất lượng Đổ bóng", "Shadows"), selection: $s.shadowQuality) {
+                        Text(L("Bình thường (Mượt nhất)", "Normal (Fastest)")).tag(1)
+                        Text(L("Cao", "High")).tag(2)
+                        Text(L("Rất cao", "Very High")).tag(3)
+                    }
+
+                    Picker(L("Khoảng cách Đổ bóng", "Shadow Distance"), selection: $s.shadowDistance) {
+                        Text(L("Ngắn (0.5× - Tiết kiệm RAM)", "Short (0.5×)")).tag(0.5)
+                        Text(L("Tiêu chuẩn (1.0×)", "Normal (1.0×)")).tag(1.0)
+                        Text(L("Xa (1.5×)", "Far (1.5×)")).tag(1.5)
+                    }
+
+                    Picker(L("Chất lượng Phản chiếu", "Reflections"), selection: $s.reflectionQuality) {
+                        Text(L("Bình thường", "Normal")).tag(1)
+                        Text(L("Cao", "High")).tag(2)
+                        Text(L("Rất cao", "Very High")).tag(3)
+                    }
+
+                    Picker(L("Cỏ cây (Grass)", "Grass Quality"), selection: $s.grassQuality) {
+                        Text(L("Bình thường (Chống tụt FPS)", "Normal (Best FPS)")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
+                    }
+
+                    Picker(L("Mặt nước (Water)", "Water Quality"), selection: $s.waterQuality) {
+                        Text(L("Bình thường", "Normal")).tag(0)
+                        Text(L("Cao", "High")).tag(1)
+                        Text(L("Rất cao", "Very High")).tag(2)
+                    }
+
+                    Toggle(L("Khử răng cưa viền (FXAA)", "FXAA Anti-aliasing"), isOn: $s.fxaa)
+
+                    Picker(L("Mật độ Xe cộ", "Traffic Density"), selection: $s.cityDensity) {
+                        Text(L("Vắng (0% - Nhẹ nhất)", "Low (0%)")).tag(0.0)
+                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
+                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
+                    }
+
+                    Picker(L("Mật độ Người đi bộ", "Pedestrians"), selection: $s.pedDensity) {
+                        Text(L("Thấp (0% - Tiết kiệm RAM)", "Low (0%)")).tag(0.0)
+                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
+                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
+                    }
+
+                    Picker(L("Tầm nhìn xa (LOD)", "Distance Scaling"), selection: $s.distanceScaling) {
+                        Text(L("Tiết kiệm RAM (-0.5)", "Potato (-0.5)")).tag(-0.5)
+                        Text(L("Tiêu chuẩn (0.0)", "Default (0.0)")).tag(0.0)
+                        Text(L("Tầm nhìn xa (+0.5)", "Extended (+0.5)")).tag(0.5)
+                    }
+                }
+
+                Section(L("Điều khiển & Góc nhìn", "Look & Aim Controls")) {
+                    HStack {
+                        Text(L("Độ nhạy góc nhìn", "Look Sensitivity"))
+                        Slider(value: $s.touch, in: 0.25...6.0, step: 0.25)
+                        Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 50, alignment: .trailing)
+                    }
+
+                    Picker(L("Chế độ nút ngắm", "Aim Button Mode"), selection: $s.aimMode) {
+                        Text(L("Chạm bật/tắt (Toggle)", "Tap Toggle")).tag("toggle")
+                        Text(L("Giữ để ngắm (Hold)", "Hold to Aim")).tag("hold")
+                    }
+
+                    Toggle(L("Tự ngắm khi bấm bắn", "Aim While Firing"), isOn: $s.fireAim)
+
+                    HStack {
+                        Text(L("Độ nhạy khi ngắm", "Aim Sensitivity"))
+                        Slider(value: $s.aimSensitivity, in: 0.1...3.0, step: 0.1)
+                        Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit().frame(width: 50, alignment: .trailing)
+                    }
+
+                    Toggle(L("Tắt âm thanh game (Mute)", "Mute Audio"), isOn: $s.mute)
+                }
+
+                Section {
+                    Button(role: .destructive, action: onReset) {
+                        Label(L("Khôi phục đồ họa mặc định (Sửa màn hình đen)", "Reset Graphics to Safe Default"), systemImage: "arrow.counterclockwise")
+                    }
+                }
+            }
+            .navigationTitle(L("Đồ họa & FPS", "Graphics & FPS"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("Xong", "Done")) {
+                        try? s.save()
+                        muguet_reload_settings()
+                        dismiss()
+                    }
+                    .font(.body.bold())
+                }
+            }
+        }
+    }
+}
+
+struct MultiplayerSheet: View {
+    @ObservedObject var s: Settings
+    let L: (String, String) -> String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(L("Kết nối Online", "Online Connection")) {
+                    Toggle(L("Bật Multiplayer", "Enable Multiplayer"), isOn: $s.multiplayer)
+
+                    if s.multiplayer {
+                        HStack {
+                            Text(L("Địa chỉ IP Server:", "Server IP:"))
+                                .fontWeight(.semibold)
+                            TextField("18.143.103.253", text: $s.server)
+                                .keyboardType(.numbersAndPunctuation)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        HStack(spacing: 8) {
+                            Circle().fill(Color.green).frame(width: 8, height: 8)
+                            Text(L("Server AWS iOSVN Singapore · Cốt truyện: Đua xe Los Santos", "AWS Singapore Server · Story: Franklin & Lamar Race"))
+                                .font(.caption.bold())
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+
+                Section(L("Quy tắc Server & Chế độ", "Server Rules & Story Mode")) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield.righthalf.filled")
+                            .foregroundStyle(.blue)
+                        Text(L("Luật PvP / Co-op sẽ tự động theo cấu hình của Server bạn tham gia.", "PvP / Co-op rules are automatically dictated by the server host."))
+                            .font(.caption)
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "flag.checkered")
+                            .foregroundStyle(.orange)
+                        Text(L("Cốt truyện bắt đầu ngay từ sự kiện đua xe thu hồi 2 siêu xe sau khi cướp tiền (Franklin & Lamar), bỏ qua đoạn tuyết dài.", "Story Mode starts right at the Los Santos Franklin & Lamar car race after prologue."))
+                            .font(.caption)
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.shield.fill")
+                            .foregroundStyle(.red)
+                        Text(L("Lệnh Cheat tự động khóa trong chế độ Online để đảm bảo tính công bằng.", "Cheats are strictly locked in Multiplayer to ensure fair gameplay."))
+                            .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle(L("Chơi Online (IP)", "Multiplayer (IP)"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("Xong", "Done")) {
+                        try? s.save()
+                        dismiss()
+                    }
+                    .font(.body.bold())
+                }
+            }
+        }
+    }
+}
+
+struct ModManagerSheet: View {
+    @ObservedObject var modManager: ModManager
+    @Binding var pickingMod: Bool
+    let L: (String, String) -> String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
                     HStack {
                         Button(action: { pickingMod = true }) {
                             Label(L("Thêm Mod (+)", "Install Mod (+)"), systemImage: "plus.circle.fill")
@@ -1235,13 +1514,15 @@ struct LauncherView: View {
                             .font(.caption)
                             .foregroundStyle(.cyan)
                     }
+                }
 
+                Section(L("Danh sách Mod đã cài", "Installed Mods")) {
                     if modManager.mods.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(L("Chưa có mod nào được cài đặt.", "No mods installed yet."))
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
-                            Text(L("Bấm nút '+ Thêm Mod' để chọn file mod (.lua, .ytd, .yft, .meta, .asi, .zip) từ Tệp, hoặc sao chép trực tiếp vào thư mục Files > Trên iPhone > Mugoat > mods.", "Tap '+ Install Mod' to pick mod files (.lua, .ytd, .yft, .meta, .asi, .zip) from Files, or copy directly into Files > Mugoat > mods."))
+                            Text(L("Bấm nút '+ Thêm Mod' để chọn file mod (.lua, .ytd, .yft, .meta, .asi, .zip), hoặc sao chép vào Files > Trên iPhone > Mugoat > mods.", "Tap '+ Install Mod' to pick mod files, or copy into Files > Mugoat > mods."))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -1285,288 +1566,404 @@ struct LauncherView: View {
                                 .buttonStyle(.borderless)
                                 .padding(.leading, 6)
                             }
-                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(L("Quản lý Mod", "Mod Manager"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("Xong", "Done")) { dismiss() }
+                        .font(.body.bold())
+                }
+            }
+        }
+    }
+}
+
+struct SaveGameSheet: View {
+    let L: (String, String) -> String
+    let onShareSaves: () -> Void
+    let onShareLogs: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(L("Sao lưu & Xuất Save", "Backup & Share Saves")) {
+                    Button(action: onShareSaves) {
+                        Label(L("Chia sẻ / Sao lưu Save Game", "Share / Backup Save Game"), systemImage: "square.and.arrow.up.fill")
+                    }
+                    Text(L("File save game được lưu trữ an toàn trong thư mục Files > Trên iPhone > Mugoat > saves.", "Save files are safely located in Files > Mugoat > saves."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section(L("Nhật ký & Chẩn đoán", "Diagnostics & Logs")) {
+                    Button(action: onShareLogs) {
+                        Label(L("Chia sẻ nhật ký chẩn đoán (Crash Logs)", "Share Diagnostic Logs"), systemImage: "doc.text.magnifyingglass")
+                    }
+                    Text(L("Gửi log cho nhà phát triển khi gặp sự cố crash hoặc văng game.", "Send logs to developers to help troubleshoot crashes."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(L("Save game & Sao lưu", "Save Game & Backup"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("Xong", "Done")) { dismiss() }
+                        .font(.body.bold())
+                }
+            }
+        }
+    }
+}
+
+struct GameFilesSheet: View {
+    @ObservedObject var importer: Importer
+    @Binding var pickingZip: Bool
+    @Binding var pickingFolder: Bool
+    let L: (String, String) -> String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(L("Trạng thái dữ liệu", "Files Status")) {
+                    HStack(spacing: 12) {
+                        Image(systemName: importer.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(importer.ready ? PortTheme.ok : PortTheme.warning)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(importer.ready ? L("Dữ liệu game đã sẵn sàng", "Game files are ready") : L("Chưa có đầy đủ dữ liệu game", "Game files incomplete"))
+                                .font(.subheadline.bold())
+                            Text(importer.ready ? L("Bạn có thể vào chơi game ngay lập tức.", "You can launch the game now.") : L("Vui lòng chọn file .ZIP hoặc chép thư mục game.", "Please select a .ZIP or copy game folder."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let p = importer.progress {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(value: p)
+                            Text("\(L("Đang nhập…", "Importing…")) \(Int(p * 100))%").font(.caption).monospacedDigit()
                         }
                     }
                 }
 
-                if !s.multiplayer {
-                    Picker(L("Chế độ chơi", "Game Mode"), selection: $s.mode) {
-                        Text(L("Story Mode (Cốt truyện)", "Story Mode")).tag(1)
-                        Text(L("Sandbox (Tự do)", "Sandbox")).tag(2)
+                Section(L("Nhập dữ liệu game", "Import Game Files")) {
+                    Button(action: {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pickingZip = true }
+                    }) {
+                        Label(L("Chọn file .ZIP từ Tệp…", "Select .ZIP file from Files…"), systemImage: "archivebox.fill")
                     }
-                }
-
-                // Section 3: Graphics & Performance
-                Section(L("Đồ họa & Hiệu năng", "Graphics & Performance")) {
-                    Toggle(L("Hiển thị FPS, thời gian khung hình & RAM", "Show FPS, Frame Time & RAM HUD"), isOn: $s.showFPS)
-
-                    Button(L("Cấu hình nhẹ · giới hạn 60 FPS", "Balanced Preset · 60 FPS Limit")) {
-                        s.applyLowRamMode(fpsLimit: 60, renderScale: 0.5)
-                        resetAlertMessage = L("Đã chọn cấu hình nhẹ, 50% độ phân giải và giới hạn 60 FPS.", "Selected balanced preset: 50% scale, 60 FPS limit.")
-                        showingResetAlert = true
-                    }
-
-                    HStack(spacing: 10) {
-                        Button(action: {
-                            s.apply120FpsBoost()
-                            resetAlertMessage = L("Đã bật Boost 120 FPS và độ phân giải 50%. FPS thực tế phụ thuộc màn hình ProMotion và nhiệt độ máy.", "Enabled 120 FPS boost at 50% resolution scale.")
-                            showingResetAlert = true
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "bolt.fill")
-                                Text(L("Thử 120 FPS", "120 FPS Boost")).bold()
-                            }
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.indigo)
-                        .controlSize(.regular)
-
-                        Button(action: {
-                            s.applyLowRamMode()
-                            resetAlertMessage = L("Đã chọn cấu hình Potato: giới hạn 30 FPS, độ phân giải 35% cho máy ram thấp hoặc máy cũ.", "Selected Potato mode: 30 FPS limit, 35% scale.")
-                            showingResetAlert = true
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "leaf.fill")
-                                Text(L("Potato Mode · 30 FPS", "Potato · 30 FPS")).bold()
-                            }
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.green)
-                        .controlSize(.regular)
-                    }
-                    .padding(.vertical, 2)
-
-                    Picker(L("Tốc độ khung hình (Frame Limit)", "Frame Rate Limit"), selection: $s.fps) {
-                        Text("30 fps (" + L("Tiết kiệm pin", "Battery Saver") + ")").tag(30)
-                        Text("60 fps (" + L("Mặc định", "Default") + ")").tag(60)
-                        Text("120 fps (" + L("Mở khóa 120 FPS / ProMotion", "120 FPS ProMotion") + ")").tag(120)
-                    }
-
-                    Picker(L("Độ phân giải (Resolution Scale)", "Resolution Scale"), selection: $s.scale) {
-                        Text("35 % (" + L("Siêu nhẹ", "Potato") + ")").tag(0.35)
-                        Text("50 % (" + L("Nhẹ", "Low") + ")").tag(0.5)
-                        Text("65 % (" + L("Cân bằng", "Balanced") + ")").tag(0.65)
-                        Text("75 % (" + L("Rõ nét", "Crisp") + ")").tag(0.75)
-                        Text("100 % (" + L("Độ phân giải gốc", "Native 100%") + ")").tag(1.0)
-                    }
-
-                    Picker(L("Chất lượng Textures", "Texture Quality"), selection: $s.textures) {
-                        Text(L("Bình thường / Thấp (Ít tốn RAM)", "Normal / Low (Low RAM)")).tag(0)
-                        Text(L("Cao", "High")).tag(1)
-                        Text(L("Rất cao", "Very High")).tag(2)
-                    }
-
-                    Toggle(L("Đồng bộ nhịp màn hình (V-Sync)", "Display Sync (V-Sync)"), isOn: $s.promotionSync)
-                    Toggle(L("Giảm hiệu ứng nặng", "Deep Optimization (Reduce Heavy Effects)"), isOn: $s.deepOptimization)
 
                     Button(action: {
-                        resetGraphicsSettings()
-                        s.scale = 0.5
-                        s.textures = 0
-                        s.fps = 60
-                        s.shadowQuality = 1
-                        s.shadowDistance = 1.0
-                        s.reflectionQuality = 1
-                        s.grassQuality = 0
-                        s.waterQuality = 0
-                        s.particleQuality = 0
-                        s.postFx = 0
-                        s.anisotropicFiltering = 0
-                        s.fxaa = true
-                        s.cityDensity = 0.5
-                        s.pedDensity = 0.5
-                        s.distanceScaling = 0.0
-                        s.deepOptimization = true
-                        s.promotionSync = false
-                        try? s.save()
-                        muguet_reload_settings()
-                        resetAlertMessage = L("Đã khôi phục đồ họa về cấu hình an toàn: Shader High, MSAA tắt, giới hạn 60 FPS.", "Reset graphics settings to safe default.")
-                        showingResetAlert = true
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { pickingFolder = true }
                     }) {
-                        Label(L("Khôi phục đồ họa gốc (Sửa màn hình đen)", "Reset Graphics to Safe Default"), systemImage: "arrow.counterclockwise.circle.fill")
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                }
-
-                // Section 4: Granular GTA V In-Game Graphics
-                Section(L("🎮 Cài đặt Đồ họa GTA V Chi tiết", "🎮 Granular In-Game Graphics")) {
-                    Picker(L("Chất lượng Đổ bóng (Shadows)", "Shadow Quality"), selection: $s.shadowQuality) {
-                        Text(L("Bình thường (Mượt nhất)", "Normal (Fastest)")).tag(1)
-                        Text(L("Cao", "High")).tag(2)
-                        Text(L("Rất cao", "Very High")).tag(3)
+                        Label(L("Chọn Thư mục Game từ Tệp…", "Select Game Folder from Files…"), systemImage: "folder.fill")
                     }
 
-                    Picker(L("Khoảng cách Đổ bóng (Shadow Distance)", "Shadow Distance"), selection: $s.shadowDistance) {
-                        Text(L("Ngắn (0.5× - Tiết kiệm RAM)", "Short (0.5×)")).tag(0.5)
-                        Text(L("Tiêu chuẩn (1.0×)", "Normal (1.0×)")).tag(1.0)
-                        Text(L("Xa (1.5×)", "Far (1.5×)")).tag(1.5)
-                    }
-
-                    Picker(L("Chất lượng Phản chiếu (Reflections)", "Reflections"), selection: $s.reflectionQuality) {
-                        Text(L("Bình thường", "Normal")).tag(1)
-                        Text(L("Cao", "High")).tag(2)
-                        Text(L("Rất cao", "Very High")).tag(3)
-                    }
-
-                    Picker(L("Chất lượng Cỏ cây (Grass)", "Grass Quality"), selection: $s.grassQuality) {
-                        Text(L("Bình thường (Chống tụt FPS)", "Normal (Best FPS)")).tag(0)
-                        Text(L("Cao", "High")).tag(1)
-                        Text(L("Rất cao", "Very High")).tag(2)
-                    }
-
-                    Picker(L("Chất lượng Mặt nước (Water)", "Water Quality"), selection: $s.waterQuality) {
-                        Text(L("Bình thường", "Normal")).tag(0)
-                        Text(L("Cao", "High")).tag(1)
-                        Text(L("Rất cao", "Very High")).tag(2)
-                    }
-
-                    Picker(L("Chất lượng Hạt & Cháy nổ (Particles)", "Particles"), selection: $s.particleQuality) {
-                        Text(L("Bình thường", "Normal")).tag(0)
-                        Text(L("Cao", "High")).tag(1)
-                        Text(L("Rất cao", "Very High")).tag(2)
-                    }
-
-                    Picker(L("Hậu kỳ & Ánh sáng (Post FX)", "Post FX"), selection: $s.postFx) {
-                        Text(L("Bình thường", "Normal")).tag(0)
-                        Text(L("Cao", "High")).tag(1)
-                        Text(L("Rất cao", "Very High")).tag(2)
-                    }
-
-                    Picker(L("Lọc vân bề mặt (Anisotropic)", "Anisotropic Filtering"), selection: $s.anisotropicFiltering) {
-                        Text(L("Tắt (x0)", "Off (x0)")).tag(0)
-                        Text("x4").tag(4)
-                        Text("x8").tag(8)
-                        Text("x16").tag(16)
-                    }
-
-                    Toggle(L("Khử răng cưa viền (FXAA)", "FXAA Anti-aliasing"), isOn: $s.fxaa)
-
-                    Picker(L("Mật độ Xe cộ (Traffic)", "Traffic Density"), selection: $s.cityDensity) {
-                        Text(L("Vắng vẻ (0% - Mượt nhất)", "Low (0%)")).tag(0.0)
-                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
-                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
-                    }
-
-                    Picker(L("Mật độ Người đi bộ (Pedestrians)", "Pedestrian Density"), selection: $s.pedDensity) {
-                        Text(L("Thấp (0% - Tiết kiệm RAM)", "Low (0%)")).tag(0.0)
-                        Text(L("Vừa phải (50%)", "Medium (50%)")).tag(0.5)
-                        Text(L("Đông đúc (100%)", "High (100%)")).tag(1.0)
-                    }
-
-                    Picker(L("Tầm nhìn xa vật thể (LOD Scale)", "Distance Scaling (LOD)"), selection: $s.distanceScaling) {
-                        Text(L("Tiết kiệm RAM (-0.5)", "Potato (-0.5)")).tag(-0.5)
-                        Text(L("Tiêu chuẩn (0.0)", "Default (0.0)")).tag(0.0)
-                        Text(L("Tầm nhìn xa (+0.5)", "Extended (+0.5)")).tag(0.5)
+                    Button(action: {
+                        importer.refreshReady()
+                    }) {
+                        Label(L("🔄 Kiểm tra lại dữ liệu", "🔄 Recheck / Verify Files"), systemImage: "arrow.clockwise")
                     }
                 }
 
-                // Section 5: Touch Controls & HUD Editor
-                Section(L("Tùy chỉnh Nút Bấm GTA Port (HUD Controls)", "GTA Port HUD Controls")) {
-                    Button(action: { showingHUDEditor = true }) {
-                        Label(L("Chỉnh vị trí & Kích thước nút (HUD Editor)", "Custom HUD Editor (Drag & Resize)"), systemImage: "hand.draw.fill")
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-
-                    Button(L("Khôi phục mặc định nút bấm", "Reset HUD Layout to Default")) {
-                        s.resetLayout()
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                Section(L("Hướng dẫn cài đặt offline", "Offline Files Setup")) {
+                    Text(L("1. Mở ứng dụng Tệp (Files) > Trên iPhone/iPad > Mugoat.\n2. Tạo thư mục tên là 'game'.\n3. Chép 2 thư mục 'data' và 'b' vào bên trong 'game'.\n4. Bấm nút 'Kiểm tra lại dữ liệu' ở trên.",
+                           "1. Open Files > On My iPhone > Mugoat.\n2. Create folder named 'game'.\n3. Copy 'data' and 'b' inside 'game'.\n4. Tap 'Recheck / Verify Files' above."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-
-                HStack {
-                    Text(L("Độ nhạy góc nhìn", "Look sensitivity"))
-                    Slider(value: $s.touch, in: 0.25...6.0, step: 0.25)
-                    Text(String(format: "%.2f×", s.touch)).monospacedDigit().frame(width: 55, alignment: .trailing)
+            }
+            .navigationTitle(L("Dữ liệu game", "Game Files"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L("Xong", "Done")) { dismiss() }
+                        .font(.body.bold())
                 }
+            }
+        }
+    }
+}
 
-                Section(L("Ngắm bắn (Aiming)", "Aiming")) {
-                    Picker(L("Nút ngắm", "Aim button mode"), selection: $s.aimMode) {
-                        Text(L("Chạm để bật/tắt", "Tap to toggle")).tag("toggle")
-                        Text(L("Giữ để ngắm", "Hold to aim")).tag("hold")
-                    }
-                    Toggle(L("Ngắm khi bắn", "Aim while firing"), isOn: $s.fireAim)
-                    HStack {
-                        Text(L("Độ nhạy khi ngắm", "Aim sensitivity"))
-                        Slider(value: $s.aimSensitivity, in: 0.1...3.0, step: 0.1)
-                        Text(String(format: "%.2f×", s.aimSensitivity)).monospacedDigit().frame(width: 55, alignment: .trailing)
-                    }
-                }
+// MARK: - Main Port-Style LauncherView
 
-                Toggle(L("Tắt âm thanh (Mute audio)", "Mute audio"), isOn: $s.mute)
+struct LauncherView: View {
+    @StateObject private var s = Settings()
+    @ObservedObject private var importer = Importer.shared
+    @ObservedObject private var modManager = ModManager.shared
+    @AppStorage("mugoat_language") private var currentLang: String = "vi"
+    @State private var error: String?
 
-                // Section 6: Online Multiplayer
-                Section(L("Chơi Online (Multiplayer)", "Online Multiplayer (IP Server)")) {
-                    Toggle(L("Bật chế độ Multiplayer", "Enable Multiplayer"), isOn: $s.multiplayer)
-                    if s.multiplayer {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(L("Địa chỉ IP Server:", "Server IP:"))
-                                    .fontWeight(.semibold)
-                                TextField("18.143.103.253", text: $s.server)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never)
-                                    .textFieldStyle(.roundedBorder)
-                            }
+    // Sheets & Modals
+    @State private var pickingZip = false
+    @State private var pickingFolder = false
+    @State private var pickingMod = false
+    @State private var showingGraphicsSheet = false
+    @State private var showingHUDEditor = false
+    @State private var showingCheatSheet = false
+    @State private var showingSaveSheet = false
+    @State private var showingModSheet = false
+    @State private var showingMPSheet = false
+    @State private var showingFilesSheet = false
+    @State private var showingResetAlert = false
+    @State private var resetAlertMessage = ""
 
-                            HStack(spacing: 8) {
-                                Circle().fill(Color.green).frame(width: 8, height: 8)
-                                Text(L("Server AWS iOSVN Singapore · Cốt truyện: Đua xe sau cướp tiền (Franklin & Lamar)", "AWS Singapore Server · Story: Franklin & Lamar Race"))
-                                    .font(.caption.bold())
-                                    .foregroundStyle(.green)
-                            }
+    var isOverlay: Bool = false
+    let play: () -> Void
 
-                            HStack(spacing: 6) {
-                                Image(systemName: "shield.righthalf.filled")
-                                    .foregroundStyle(.blue)
-                                Text(L("Luật PvP / Co-op sẽ tự động đồng bộ theo cấu hình của Server bạn tham gia.", "PvP / Co-op combat rules are automatically dictated by the server."))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+    func L(_ vi: String, _ en: String) -> String {
+        return currentLang == "en" ? en : vi
+    }
 
-                            Text(L("💡 Chỉ cần bật Multiplayer và nhập IP là chơi được. Cốt truyện bắt đầu ngay từ sự kiện đua xe thu hồi 2 siêu xe sau khi cướp tiền (bỏ qua màn tuyết dài). Cheat tự động khóa online.", "Enter server IP to play. Story starts right after the prologue heist with the Franklin & Lamar sports car race in Los Santos."))
-                                .font(.caption2).foregroundStyle(.orange)
+    var body: some View {
+        HStack(alignment: .top, spacing: 28) {
+            // LEFT COLUMN: Clean Brand, Game Files Card, Mode Cards, Play Button
+            VStack(alignment: .leading, spacing: 14) {
+                // Header (App Icon + Title + Language Pill)
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(PortTheme.accent.opacity(0.14))
+                            .frame(width: 48, height: 48)
+
+                        if let logo = UIImage(named: "AppIcon60x60@2x.png") ?? UIImage(named: "mugoat_logo.png") ?? UIImage(contentsOfFile: Bundle.main.path(forResource: "mugoat_logo", ofType: "png") ?? "") {
+                            Image(uiImage: logo)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 40, height: 40)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            Image(systemName: "gamecontroller.fill")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(PortTheme.accent)
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(isOverlay ? "MUGOAT MENU" : "Mugoat")
+                            .font(.system(size: 32, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(L("iOSVN  /  CHƠI THEO CÁCH CỦA BẠN", "iOSVN  /  PLAY YOUR WAY"))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(PortTheme.secondaryText)
+                    }
+
+                    Spacer()
+
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            currentLang = (currentLang == "vi" ? "en" : "vi")
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 11))
+                            Text(currentLang == "vi" ? "VI" : "EN")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(white: 1.0, opacity: 0.12)))
+                        .overlay(Capsule().stroke(PortTheme.panelStroke, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
                 }
 
-                // Section 7: In-Game Cheats (Offline Only)
-                if !s.multiplayer {
-                    Section(L("Lệnh Cheat GTA V (Chỉ Offline)", "GTA V Cheats (Offline Only)")) {
-                        Button(action: { showingCheatSheet = true }) {
-                            Label(L("Xem & Kích hoạt Lệnh Cheat", "View & Activate Cheats"), systemImage: "wand.and.stars")
+                // Game Files Card (tap to open files options)
+                Button(action: { showingFilesSheet = true }) {
+                    HStack(spacing: 12) {
+                        if importer.progress != nil {
+                            ProgressView()
+                                .tint(PortTheme.accent)
+                                .frame(width: 28)
+                        } else {
+                            Image(systemName: importer.ready ? "checkmark.circle.fill" : "folder.badge.plus")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(importer.ready ? PortTheme.ok : PortTheme.warning)
+                                .frame(width: 28)
                         }
-                        Text(L("Tra cứu và kích hoạt nhanh các lệnh cheat (Bất tử, full vũ khí, trực thăng, xe đua...). Tự động khóa trong chế độ Online.", "Quick cheat activator for single player."))
-                            .font(.caption).foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("Dữ liệu game", "Game Files"))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+
+                            if let p = importer.progress {
+                                Text("\(L("Đang nhập…", "Importing…")) \(Int(p * 100))%")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(PortTheme.secondaryText)
+                            } else if importer.ready {
+                                Text(L("Sẵn sàng vào game", "Ready to play"))
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(PortTheme.secondaryText)
+                            } else {
+                                Text(L("Chưa có dữ liệu · Chạm để chọn", "Missing files · Tap to import"))
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(PortTheme.warning)
+                            }
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(PortTheme.tertiaryText)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(white: 1.0, opacity: 0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(PortTheme.panelStroke, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // Game Mode Selection Cards (Story vs Sandbox)
+                HStack(spacing: 10) {
+                    PortModeCard(
+                        title: L("Cốt truyện", "Story Mode"),
+                        symbol: "book.closed.fill",
+                        isSelected: s.mode == 1
+                    ) {
+                        s.mode = 1
+                        try? s.save()
+                    }
+
+                    PortModeCard(
+                        title: L("Tự do (Sandbox)", "Sandbox"),
+                        symbol: "building.2.fill",
+                        isSelected: s.mode == 2
+                    ) {
+                        s.mode = 2
+                        try? s.save()
+                    }
+                }
+
+                // Mode Explanation Subtitle
+                Text(s.mode == 1
+                    ? L("Cốt truyện chính Los Santos (bắt đầu từ đua xe sau cướp tiền)", "Story Mode in Los Santos (starts after heist race)")
+                    : L("Tự do dạo chơi thành phố Los Santos, khám phá thế giới mở", "Free roam sandbox across Los Santos"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(PortTheme.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if let error {
+                    Text(error)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(PortTheme.problem)
+                }
+
+                // Big Primary Action Button
+                if !muguet_has_game_code() {
+                    Text(L("Bản build này chưa có mã game: vui lòng build cùng game.wasm/zip.", "This build has no game code: build it with ./make-ios.sh <game.zip>."))
+                        .foregroundStyle(.red).font(.callout).multilineTextAlignment(.center)
+                } else if isOverlay {
+                    PortPrimaryButton(title: L("TIẾP TỤC", "RESUME"), symbol: "play.fill") {
+                        resumeAndSave()
                     }
                 } else {
-                    Section(L("Lệnh Cheat GTA V", "GTA V Cheats")) {
-                        Text(L("🔒 Lệnh Cheat đã bị khóa trong chế độ Online để đảm bảo tính công bằng.", "🔒 Cheats are locked in Multiplayer to ensure fairness."))
-                            .font(.caption).foregroundStyle(.secondary)
+                    PortPrimaryButton(title: L("VÀO GAME", "PLAY"), symbol: "play.fill") {
+                        start()
                     }
                 }
 
-                // Section 8: Save Data & Diagnostics
-                Section(L("Dữ liệu & Chẩn đoán", "Save Data & Logs")) {
-                    Button(L("Chia sẻ / Sao lưu Save Game", "Backup / Share Save Files")) { shareSaves() }
-                    Button(L("Chia sẻ nhật ký chẩn đoán (Crash Logs)", "Share Diagnostic Logs")) { shareDiagnostics() }
+                // Gamepad info notice
+                HStack(spacing: 6) {
+                    Image(systemName: "gamecontroller")
+                        .font(.system(size: 11))
+                    Text(L("🎮 Hỗ trợ tay cầm real: Nút ảo tự động ẩn khi kết nối", "🎮 Real gamepad supported: On-screen buttons auto-hide"))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
+                .foregroundStyle(PortTheme.tertiaryText)
+
+                Spacer()
+            }
+            .frame(maxWidth: 500)
+
+            // RIGHT COLUMN: "Thiết lập trải nghiệm" with sleek glass buttons
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L("Thiết lập trải nghiệm", "Experience Settings"))
+                        .font(.system(size: 19, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text(L("Chọn cấu hình phù hợp với máy của bạn.", "Choose the best profile for your device."))
+                        .font(.system(size: 13))
+                        .foregroundStyle(PortTheme.secondaryText)
+                        .padding(.bottom, 4)
+
+                    PortGlassButton(
+                        title: L("Đồ họa & FPS", "Graphics & FPS"),
+                        symbol: "slider.horizontal.3",
+                        badge: "\(s.fps) FPS"
+                    ) { showingGraphicsSheet = true }
+
+                    PortGlassButton(
+                        title: L("Bố trí điều khiển", "Controls Layout"),
+                        symbol: "hand.tap.fill"
+                    ) { showingHUDEditor = true }
+
+                    PortGlassButton(
+                        title: L("Tiện ích & Cheat GTA V", "GTA V Cheats"),
+                        symbol: "sparkles",
+                        badge: s.multiplayer ? L("Khóa Online", "Online Locked") : nil
+                    ) { showingCheatSheet = true }
+
+                    PortGlassButton(
+                        title: L("Save game & Sao lưu", "Save Game & Backup"),
+                        symbol: "externaldrive.fill"
+                    ) { showingSaveSheet = true }
+
+                    PortGlassButton(
+                        title: L("Quản lý Mod", "Mod Manager"),
+                        symbol: "puzzlepiece.extension.fill",
+                        badge: modManager.mods.isEmpty ? nil : "\(modManager.mods.count)"
+                    ) { showingModSheet = true }
+
+                    PortGlassButton(
+                        title: L("Chơi Online (IP)", "Multiplayer (IP)"),
+                        symbol: "globe",
+                        badge: s.multiplayer ? L("Đang Bật", "Enabled") : nil
+                    ) { showingMPSheet = true }
+
+                    // 3-step Quick Guide
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L("01  Chọn dữ liệu game\n02  Chọn chế độ chơi\n03  Bấm Vào game",
+                               "01  Select game files\n02  Select game mode\n03  Tap Play"))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(PortTheme.secondaryText)
+                    }
+                    .padding(.top, 8)
+
+                    // Footer Version Info
+                    Text("Mugoat · iOSVN · v1.0.0 (iOS 16+)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(PortTheme.tertiaryText)
+                        .padding(.top, 2)
+                }
+                .padding(.vertical, 4)
             }
             .frame(maxWidth: .infinity)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .background(PortBackdrop())
         .preferredColorScheme(.dark)
         .fileImporter(isPresented: $pickingZip, allowedContentTypes: [.zip]) { result in
             if case .success(let url) = result { importer.run(url) }
@@ -1576,6 +1973,44 @@ struct LauncherView: View {
         }
         .fileImporter(isPresented: $pickingMod, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result { modManager.installMod(from: url) }
+        }
+        .sheet(isPresented: $showingGraphicsSheet) {
+            GraphicsSettingsSheet(s: s, L: L, onReset: {
+                resetGraphicsSettings()
+                s.scale = 0.5
+                s.textures = 0
+                s.fps = 60
+                s.shadowQuality = 1
+                s.shadowDistance = 1.0
+                s.reflectionQuality = 1
+                s.grassQuality = 0
+                s.waterQuality = 0
+                s.particleQuality = 0
+                s.postFx = 0
+                s.anisotropicFiltering = 0
+                s.fxaa = true
+                s.cityDensity = 0.5
+                s.pedDensity = 0.5
+                s.distanceScaling = 0.0
+                s.deepOptimization = true
+                s.promotionSync = false
+                try? s.save()
+                muguet_reload_settings()
+                resetAlertMessage = L("Đã khôi phục đồ họa về cấu hình an toàn 60 FPS.", "Reset graphics settings to safe default.")
+                showingResetAlert = true
+            })
+        }
+        .sheet(isPresented: $showingMPSheet) {
+            MultiplayerSheet(s: s, L: L)
+        }
+        .sheet(isPresented: $showingModSheet) {
+            ModManagerSheet(modManager: modManager, pickingMod: $pickingMod, L: L)
+        }
+        .sheet(isPresented: $showingSaveSheet) {
+            SaveGameSheet(L: L, onShareSaves: shareSaves, onShareLogs: shareDiagnostics)
+        }
+        .sheet(isPresented: $showingFilesSheet) {
+            GameFilesSheet(importer: importer, pickingZip: $pickingZip, pickingFolder: $pickingFolder, L: L)
         }
         .sheet(isPresented: $showingCheatSheet) {
             CheatMenuView(onApply: { code in
@@ -1597,68 +2032,6 @@ struct LauncherView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             importer.refreshReady()
         }
-    }
-
-    @ViewBuilder var importView: some View {
-        VStack(spacing: 12) {
-            if let p = importer.progress {
-                ProgressView(value: p)
-                Text("\(L("Đang nhập dữ liệu…", "Importing…")) \(Int(p * 100)) %").font(.callout).monospacedDigit()
-            } else {
-                HStack(spacing: 10) {
-                    Button(action: { pickingZip = true }) {
-                        Label(L("Chọn file .ZIP", "Pick .ZIP File"), systemImage: "archivebox.fill")
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity)
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.blue)
-
-                    Button(action: { pickingFolder = true }) {
-                        Label(L("Chọn Thư Mục Game", "Pick Game Folder"), systemImage: "folder.fill")
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity)
-                    }
-                    .controlSize(.large)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.indigo)
-                }
-
-                Button(action: { importer.refreshReady() }) {
-                    Label(L("🔄 Kiểm tra lại dữ liệu game", "🔄 Recheck / Verify Game Files"), systemImage: "arrow.clockwise")
-                        .font(.caption.bold())
-                }
-                .buttonStyle(.bordered)
-                .tint(.green)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L("💡 Hướng dẫn cài đặt offline qua ứng dụng Tệp (Files):", "💡 Offline Setup Guide via Files App:"))
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange)
-                    Text(L("1. Mở ứng dụng Tệp (Files) > Trên iPhone/iPad > Mugoat.\n2. Tạo thư mục tên là 'game' (chữ thường).\n3. Chép 2 thư mục 'data' và 'b' vào bên trong 'game'.\n4. Bấm nút '🔄 Kiểm tra lại dữ liệu game' ở trên.", "1. Open Files app > On My iPhone > Mugoat.\n2. Create a folder named 'game'.\n3. Copy 'data' and 'b' folders inside 'game'.\n4. Tap '🔄 Recheck Game Files' above."))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Divider().padding(.vertical, 1)
-                    Text(L("📦 Dung lượng: Game đầy đủ chiếm ~21 GB. Nên giải nén trước trên máy tính rồi chép vào để tiết kiệm bộ nhớ máy.", "📦 Storage: Full game is ~21 GB. Unzipping on PC and copying saves iPhone storage."))
-                        .font(.caption2)
-                        .foregroundStyle(.yellow)
-                }
-                .padding(10)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            if let e = importer.error { Text(e).foregroundStyle(.red).font(.callout).multilineTextAlignment(.center) }
-        }
-    }
-
-    @ViewBuilder var playButton: some View {
-        Button(action: start) {
-            Text(L("Chơi ngay (Play)", "Play")).font(.title3.weight(.bold)).frame(maxWidth: 220)
-        }
-        .controlSize(.large)
-        .buttonStyle(.borderedProminent)
-        .tint(.green)
     }
 
     func resumeAndSave() {

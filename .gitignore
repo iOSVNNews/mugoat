@@ -28,3 +28,5 @@ DerivedData/
 /native-port/app/Preview/Build/
 /native-port/app/Preview/*.xcodeproj
 *.enc
+/artifacts/
+/previews/

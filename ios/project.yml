@@ -12,8 +12,12 @@ targets:
     sources:
       - path: stub.c
       - path: LaunchScreen.storyboard
-      - path: ../assets/muguet.icon
+      - path: Assets.xcassets
       - path: ControlIcons
+      - path: AppIcon60x60@2x.png
+      - path: AppIcon60x60@3x.png
+      - path: AppIcon76x76@2x~ipad.png
+      - path: AppIcon-1024.png
       - path: ../assets/mugoat_logo.png
     settings:
       base:
@@ -24,7 +28,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Muguet.entitlements
         INFOPLIST_FILE: Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
-        ASSETCATALOG_COMPILER_APPICON_NAME: muguet
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         DEAD_CODE_STRIPPING: NO
         STRIP_INSTALLED_PRODUCT: NO
@@ -36,4 +40,3 @@ targets:
           set -e
           xcrun vtool -set-build-version ios 16.0 26.0 -replace -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" \
             "$SRCROOT/../target/ios/aarch64-apple-ios/release/muguet"
-
