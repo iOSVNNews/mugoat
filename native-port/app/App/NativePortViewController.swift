@@ -778,7 +778,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             }
         )
         let host = UIHostingController(rootView: cheatView)
-        host.modalPresentationStyle = .formSheet
+        host.modalPresentationStyle = .fullScreen
         (presentedViewController ?? self).present(host, animated: true)
     }
 
