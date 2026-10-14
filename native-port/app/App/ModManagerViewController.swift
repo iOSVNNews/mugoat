@@ -9,13 +9,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     private let fileManager = FileManager.default
     private var modFiles: [ModFile] = []
 
-    struct ModFile {
-        let name: String
-        let url: URL
-        let size: Int64
-        let modified: Date
-        var isEnabled: Bool
-    }
+    typealias ModFile = ModFiles.Entry
 
     /// The dedicated mods directory: Files › On My iPhone › Mugoat › mods
     static var modsDirectory: URL {
@@ -49,25 +43,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     }
 
     private func scanMods() {
-        modFiles.removeAll()
-        let dir = Self.modsDirectory
-        let baseLength = dir.path.count + (dir.path.hasSuffix("/") ? 0 : 1)
-        if let enumerator = fileManager.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey], options: [.skipsHiddenFiles]) {
-            for case let fileURL as URL in enumerator {
-                guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
-                      values.isRegularFile == true else { continue }
-                let relPath = fileURL.path.count > baseLength ? String(fileURL.path.dropFirst(baseLength)) : fileURL.lastPathComponent
-                let enabled = !fileURL.lastPathComponent.hasSuffix(".disabled") && !relPath.contains(".disabled")
-                modFiles.append(ModFile(
-                    name: relPath,
-                    url: fileURL,
-                    size: Int64(values.fileSize ?? 0),
-                    modified: values.contentModificationDate ?? Date(),
-                    isEnabled: enabled
-                ))
-            }
-        }
-        modFiles.sort { $0.modified > $1.modified }
+        modFiles = ModFiles.scan(Self.modsDirectory)
         tableView.reloadData()
         refreshControl?.endRefreshing()
     }
@@ -81,7 +57,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         case 0: return 3 // Quản lý & Cài đặt
         case 1: return max(1, modFiles.count) // Tệp mod đã cài
         case 2: return 5 // Game Tweaks / Modding Hacks
-        case 3: return 4 // Hướng dẫn tự tạo mod & cài xe
+        case 3: return 3 // Hướng dẫn tự tạo mod
         default: return 0
         }
     }
@@ -99,7 +75,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch section {
         case 0:
-            return L10n.text("Thư mục mod nằm tại: Tệp › Trên iPhone › Mugoat › mods. Bạn có thể chép trực tiếp file mod (.zip, .rpf, .meta, .asi) vào đó hoặc bấm Nhập mod ở trên.")
+            return L10n.text("Chép tệp mod (.rpf, .meta, .yft, .ytd) vào Tệp › Trên iPhone › Mugoat › mods. Với tệp nén, bấm Nhập Mod để giải nén. Tệp hướng dẫn .txt không được tính là mod.")
         case 2:
             return L10n.text("Các tinh chỉnh can thiệp trực tiếp vào cơ chế vật lý của game (handling xe, trọng lực, vũ khí) mà không làm crash game.")
         case 3:
@@ -169,7 +145,6 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
 
         case 3:
             let guides = [
-                (L10n.text("Cách cài xe Mercedes-Benz SLK 55 AMG (mbslk)"), L10n.text("Hướng dẫn nạp DLC mbslk, chọn bản Enhanced/Legacy và spawn xe"), "car.side.fill"),
                 (L10n.text("Cách mod xe cộ & đồ họa bằng OpenIV (PC)"), L10n.text("Mở file .rpf trên PC, thay model .yft/.ytd rồi chép vào iPhone"), "laptopcomputer"),
                 (L10n.text("Cách chỉnh tốc độ xe trong handling.meta"), L10n.text("Sửa thông số gia tốc và tốc độ tối đa của từng loại xe"), "slider.horizontal.3"),
                 (L10n.text("Kinh nghiệm chống văng game khi cài Mod"), L10n.text("Ưu tiên mod Low/Mid poly dưới 20MB để không bị lỗi tràn RAM"), "shield.lefthalf.filled")
@@ -213,7 +188,9 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     // MARK: - Mod File Actions
 
     private func pickModFile() {
-        let types = ["zip", "rar", "7z", "rpf", "meta", "asi", "lua", "cs", "xml"].compactMap { UTType(filenameExtension: $0) } + [.data, .archive]
+        let types = ModFiles.importExtensions.sorted().map {
+            UTType(filenameExtension: $0) ?? UTType(importedAs: "vn.iosvn.mugoat.mod.\($0)", conformingTo: .data)
+        }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
         picker.delegate = self
         picker.allowsMultipleSelection = true
@@ -224,34 +201,45 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         let destDir = Self.modsDirectory
         var extractedCount = 0
         var copiedCount = 0
-        let archiveExtensions = ["zip", "rar", "7z", "tar", "gz"]
+        var rejected: [String] = []
 
         for url in urls {
             let ext = url.pathExtension.lowercased()
-            if archiveExtensions.contains(ext) {
+            guard ModFiles.importExtensions.contains(ext),
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                rejected.append(url.lastPathComponent)
+                continue
+            }
+            if ModFiles.archiveExtensions.contains(ext) {
                 let count = gi_extract_archive(url.path, destDir.path)
                 if count > 0 {
                     extractedCount += Int(count)
                 } else {
-                    let target = destDir.appendingPathComponent(url.lastPathComponent)
-                    try? fileManager.removeItem(at: target)
-                    if (try? fileManager.copyItem(at: url, to: target)) != nil {
-                        copiedCount += 1
-                    }
+                    rejected.append(url.lastPathComponent)
                 }
             } else {
                 let target = destDir.appendingPathComponent(url.lastPathComponent)
                 try? fileManager.removeItem(at: target)
                 if (try? fileManager.copyItem(at: url, to: target)) != nil {
                     copiedCount += 1
+                } else {
+                    rejected.append(url.lastPathComponent)
                 }
             }
         }
         scanMods()
-        let msg = extractedCount > 0
-            ? String(format: L10n.text("Đã giải nén %d tệp mod vào thư mục Mugoat/mods."), extractedCount)
-            : String(format: L10n.text("Đã thêm %d tệp vào thư mục mods của game."), copiedCount)
-        showAlert(L10n.text("Đã nạp Mod thành công"), msg)
+        var messages: [String] = []
+        if extractedCount > 0 {
+            messages.append(String(format: L10n.text("Đã giải nén %d tệp vào thư mục mods. Tệp hướng dẫn không được tính là mod."), extractedCount))
+        }
+        if copiedCount > 0 {
+            messages.append(String(format: L10n.text("Đã thêm %d tệp mod."), copiedCount))
+        }
+        if !rejected.isEmpty {
+            messages.append(L10n.text("Không thể nhập các tệp sau (định dạng không hỗ trợ hoặc không đọc/giải nén được):") + "\n" + rejected.joined(separator: "\n"))
+        }
+        guard !messages.isEmpty else { return }
+        showAlert(L10n.text("Kết quả nhập Mod"), messages.joined(separator: "\n\n"))
     }
 
     private func toggleMod(at index: Int) {
@@ -335,20 +323,15 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         switch row {
         case 0:
             showAlert(
-                L10n.text("Mod xe Mercedes-Benz SLK 55 AMG (mbslk)"),
-                L10n.text("Bản mod gồm 2 phiên bản:\n- Enhanced: 27.5 MB (Đồ họa đỉnh cao, chi tiết cao)\n- Legacy: 52.4 MB (Tối ưu độ ổn định, chống tràn RAM)\n\nCách cài đặt:\n1. Bấm 'Nhập Mod từ tệp' và chọn file .zip hoặc thư mục mbslk.\n2. Ứng dụng tự động giải nén thư mục mbslk/dlc.rpf vào Mugoat/mods.\n3. Vào game, mở Menu Cheat (Trainer), gõ mã xe 'mbslk' để spawn xe ngay lập tức!")
-            )
-        case 1:
-            showAlert(
                 L10n.text("Mod xe & Đồ họa (OpenIV)"),
                 L10n.text("1. Mở OpenIV trên máy tính trỏ vào dữ liệu game GTA V.\n2. Bật Edit Mode.\n3. Kéo thả file mod xe (.yft/.ytd) vào x64e.rpf hoặc dlcpacks.\n4. Copy file .rpf đã sửa vào thư mục Mugoat trên iPhone bằng 3uTools hoặc app Tệp.")
             )
-        case 2:
+        case 1:
             showAlert(
                 L10n.text("Chỉnh thông số handling.meta"),
                 L10n.text("1. Mở file update/update.rpf/common/data/handling.meta trong OpenIV.\n2. Tìm tên xe muốn sửa, chỉnh fInitialDriveMaxFlatVel để tăng tốc độ tối đa.\n3. Lưu file và chép đè vào iPhone.")
             )
-        case 3:
+        case 2:
             showAlert(
                 L10n.text("Chống tràn RAM (OOM Jetsam)"),
                 L10n.text("iOS quản lý bộ nhớ rất khắt khe. Khi chọn mod xe hoặc mod cảnh vật:\n- Chỉ dùng mod có texture dung lượng dưới 20MB.\n- Tránh mod xe 4K/8K polygon quá cao.\n- Nếu vào game bị văng, xóa tệp mod đó khỏi thư mục mods.")

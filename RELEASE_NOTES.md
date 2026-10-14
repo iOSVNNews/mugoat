@@ -1,3 +1,9 @@
+# Mugoat 1.1.3 (13) — Camera/Aim và quản lý Mod
+
+Sửa nút Vào game bị khóa, loại file hướng dẫn `.txt` khỏi danh sách mod và bỏ hướng dẫn Mercedes. Camera/aim dùng cùng chiều trục dọc, gửi chuyển động một lần, giữ chuyển động nhỏ hơn một pixel và bỏ chuyển động tồn đọng sau khung hình chậm.
+
+Xem [ghi chú bản 1.1.3](RELEASE_NOTES_V1.1.3.md) để biết thay đổi, kiểm tra và giới hạn xác minh trên thiết bị.
+
 # Mugoat 1.1.0 (11) — Native hybrid, iOS 16.0+
 
 Mugoat uses Port's native CPU/Metal renderer, Port's contextual touch buttons,

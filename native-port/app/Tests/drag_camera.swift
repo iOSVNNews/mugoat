@@ -33,6 +33,19 @@ struct TestCamera {
         }
         assert(abs(drag(hz: 30)-drag(hz: 60)) <= 2)
         assert(abs(drag(hz: 60)-drag(hz: 120)) <= 2)
+        // Free-look and aim use the same screen-coordinate Y direction.
+        for sensitivity in [1.0, 4.0, 10.0] {
+            for inverted in [false, true] {
+                for direction in [-1.0, 1.0] {
+                    var c = DragCamera(); c.begin(a, at: .zero)
+                    c.move(a, to: CGPoint(x: 10, y: 10 * direction))
+                    let delta = c.motion(sensitivity: sensitivity, invertedY: inverted)
+                    assert(delta.x == 10 * sensitivity)
+                    assert(abs(delta.y - 8.5 * direction * sensitivity * (inverted ? -1 : 1)) < 0.00001)
+                    assert(c.motion(sensitivity: sensitivity, invertedY: inverted) == .zero, "Consume each drag only once")
+                }
+            }
+        }
         print("Camera: idle, independent fingers, suspend, reset and 30/60/120 Hz passed")
     }
 }

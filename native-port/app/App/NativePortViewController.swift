@@ -96,7 +96,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let playStyle = launchButton.configurationUpdateHandler
         launchButton.configurationUpdateHandler = { [weak self] button in
             playStyle?(button)
-            // Before Play is pressed a disabled button still says Play (files or mode missing).
+            // Loading progress replaces Play only after the engine starts.
             let title = button.isEnabled || !(self?.engineStarted ?? false) ? L10n.text("Vào game") : button.title(for: .disabled) ?? L10n.text("Đang tải…")
             var text = AttributedString(title)
             text.font = Theme.display(20, .heavy)
@@ -343,13 +343,50 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     @objc private func startEngine() {
+        guard !engineStarted, presentedViewController == nil else { return }
+        // Keep Play responsive: missing requirements lead to their setup screen.
+        if GameInstallManager.shared.isRunning { showGameFiles(); return }
+        if lookingForGameFiles {
+            if ProcessInfo.processInfo.arguments.contains("--boot-engine") { launchAfterFileScan = true; return }
+            showWhenFree(title: L10n.text("Dữ liệu game"), message: L10n.text("Đang kiểm tra dữ liệu game. Vui lòng đợi kiểm tra xong rồi bấm Vào game."))
+            return
+        }
+        if !GameFolder.isChosen && !Self.isServerAddress(GameSettings.shared.assetServer) { showGameFiles(); return }
         if OnlineSettings.enabled && OnlineSettings.server.isEmpty { showOnline(); return }
-        if GameSettings.shared.gameModeChoice == nil {
-            // Automated launches without a choice keep the old sandbox start.
-            guard ProcessInfo.processInfo.arguments.contains("--boot-engine") else { return }
+        if GameSettings.shared.gameModeChoice == nil && !ProcessInfo.processInfo.arguments.contains("--boot-engine") {
+            let alert = UIAlertController(title: L10n.text("Chọn chế độ chơi"), message: L10n.text("Choose Story mode or Sandbox to play."), preferredStyle: .alert)
+            for mode in GameMode.allCases {
+                alert.addAction(UIAlertAction(title: mode.title, style: .default) { [weak self] _ in
+                    GameSettings.shared.gameMode = mode
+                    self?.refreshModeChoice()
+                    self?.dismiss(animated: true) { self?.startEngine() }
+                })
+            }
+            alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
+            present(alert, animated: true)
+            return
         }
         guard let path = EnginePaths.manifest else {
             appendLog("Asset manifest is missing from the app bundle.")
+            showWhenFree(title: L10n.text("Không thể vào game"), message: L10n.text("Ứng dụng thiếu danh sách dữ liệu game. Vui lòng cài lại bản IPA đầy đủ."))
+            return
+        }
+        let localData: URL?
+        if GameFolder.isChosen {
+            guard let data = GameFolder.open() else {
+                appendLog("The game folder on this iPhone can't be opened any more. Choose it again.")
+                GameFolder.clear()
+                updateServerStatus()
+                showGameFiles()
+                return
+            }
+            localData = data
+        } else {
+            localData = nil
+        }
+        let mode = GameSettings.shared.gameMode
+        guard OnlineSettings.configure(mode: mode) else {
+            showWhenFree(title: L10n.text("Máy chủ online"), message: L10n.text("Máy chủ không hợp lệ"))
             return
         }
         metalView.isPaused = true
@@ -362,7 +399,6 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         home.layoutButton.isHidden = true
         engineStarted = true
         refreshModeChoice()
-        let mode = GameSettings.shared.gameMode
         bootedMode = mode
         let testMap = mode == .sandbox && GameSettings.shared.sandboxMap == 1
         PGSetStartMode(testMap ? 3 : Int32(mode.rawValue))
@@ -383,25 +419,13 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             let settings = "\(root)/\(mode)/Documents/Rockstar Games/GTA V/settings.xml"
             if (try? FileManager.default.removeItem(atPath: settings)) != nil { appendLog("Reset the game's own graphics settings (\(mode)); use the app's Settings for graphics.") }
         }
-        if GameFolder.isChosen {
-            guard let data = GameFolder.open() else {
-                appendLog("The game folder on this iPhone can't be opened any more. Choose it again.")
-                showWhenFree(title: L10n.text("Game files not found"), message: "The game folder was moved or deleted. Put it back in Files › On My iPhone › Mugoat, or pick it again.")
-                GameFolder.clear(); updateServerStatus(); launchButton.isEnabled = true; launchButton.setTitle(L10n.text("Vào game"), for: .normal)
-                return
-            }
+        if let data = localData {
             PGSetLocalGameFolder(data.path)
             syncMods(to: data)
         } else {
             PGSetAssetServer(GameSettings.shared.assetServer)
         }
         AssetPreloader.shared.engineRunning = true
-        guard OnlineSettings.configure(mode: mode) else {
-            engineStarted = false; AssetPreloader.shared.engineRunning = false
-            launchButton.isEnabled = true
-            home.settingsButton.isHidden = false; home.layoutButton.isHidden = false
-            showWhenFree(title: L10n.text("Máy chủ online"), message: L10n.text("Máy chủ không hợp lệ")); return
-        }
         path.withCString { manifest in
             root.withCString { PGStartEngine(manifest, $0, engineLog, Unmanaged.passUnretained(self).toOpaque()) }
         }
@@ -410,10 +434,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private func syncMods(to data: URL) {
         let modsDir = ModManagerViewController.modsDirectory
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: modsDir, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return }
-
         var foundDLCs: [String: URL] = [:]
-        for case let fileURL as URL in enumerator {
+        for mod in ModFiles.scan(modsDir) where mod.isEnabled {
+            let fileURL = mod.url
             guard fileURL.lastPathComponent.lowercased() == "dlc.rpf" else { continue }
             let packName = fileURL.deletingLastPathComponent().lastPathComponent.lowercased()
             if !packName.isEmpty && packName != "mods" {
@@ -610,10 +633,15 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             DispatchQueue.main.async {
                 self.lookingForGameFiles = false
                 self.updateServerStatus()
+                if self.launchAfterFileScan {
+                    self.launchAfterFileScan = false
+                    self.startEngine()
+                }
             }
         }
     }
     private var lookingForGameFiles = false
+    private var launchAfterFileScan = false
     @objc private func installChanged() {
         guard !engineStarted else { return }
         updateServerStatus()
@@ -656,10 +684,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
         updatePlayEnabled()
     }
-    /// Play needs game files and a chosen mode.
+    /// Missing files or a mode choice are handled by tapping Play; only a running engine locks it.
     private func updatePlayEnabled() {
-        let server = Self.isServerAddress(GameSettings.shared.assetServer)
-        launchButton.isEnabled = !engineStarted && !GameInstallManager.shared.isRunning && (GameFolder.isChosen || server) && GameSettings.shared.gameModeChoice != nil
+        launchButton.isEnabled = !engineStarted
     }
     static func isServerAddress(_ text: String) -> Bool {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), let host = url.host else { return false }

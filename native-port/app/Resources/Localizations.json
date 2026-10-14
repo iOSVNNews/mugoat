@@ -1902,5 +1902,41 @@
   "Quản lý Mod riêng biệt": {
     "vi": "Quản lý Mod riêng biệt",
     "en": "Dedicated Mod Manager"
+  },
+  "Chép tệp mod (.rpf, .meta, .yft, .ytd) vào Tệp › Trên iPhone › Mugoat › mods. Với tệp nén, bấm Nhập Mod để giải nén. Tệp hướng dẫn .txt không được tính là mod.": {
+    "vi": "Chép tệp mod (.rpf, .meta, .yft, .ytd) vào Tệp › Trên iPhone › Mugoat › mods. Với tệp nén, bấm Nhập Mod để giải nén. Tệp hướng dẫn .txt không được tính là mod.",
+    "en": "Copy mod files (.rpf, .meta, .yft, .ytd) into Files › On My iPhone › Mugoat › mods. Use Import Mod to extract archives. Readme .txt files are not counted as mods."
+  },
+  "Đã giải nén %d tệp vào thư mục mods. Tệp hướng dẫn không được tính là mod.": {
+    "vi": "Đã giải nén %d tệp vào thư mục mods. Tệp hướng dẫn không được tính là mod.",
+    "en": "Extracted %d files into mods. Readme files are not counted as mods."
+  },
+  "Đã thêm %d tệp mod.": {
+    "vi": "Đã thêm %d tệp mod.",
+    "en": "Added %d mod files."
+  },
+  "Không thể nhập các tệp sau (định dạng không hỗ trợ hoặc không đọc/giải nén được):": {
+    "vi": "Không thể nhập các tệp sau (định dạng không hỗ trợ hoặc không đọc/giải nén được):",
+    "en": "Could not import these files (unsupported format or unable to read/extract):"
+  },
+  "Kết quả nhập Mod": {
+    "vi": "Kết quả nhập Mod",
+    "en": "Mod Import Results"
+  },
+  "Đang kiểm tra dữ liệu game. Vui lòng đợi kiểm tra xong rồi bấm Vào game.": {
+    "vi": "Đang kiểm tra dữ liệu game. Vui lòng đợi kiểm tra xong rồi bấm Vào game.",
+    "en": "Checking game files. Wait for the check to finish, then tap Play."
+  },
+  "Chọn chế độ chơi": {
+    "vi": "Chọn chế độ chơi",
+    "en": "Choose game mode"
+  },
+  "Không thể vào game": {
+    "vi": "Không thể vào game",
+    "en": "Unable to start game"
+  },
+  "Ứng dụng thiếu danh sách dữ liệu game. Vui lòng cài lại bản IPA đầy đủ.": {
+    "vi": "Ứng dụng thiếu danh sách dữ liệu game. Vui lòng cài lại bản IPA đầy đủ.",
+    "en": "The app is missing its game file manifest. Please reinstall the complete IPA."
   }
 }

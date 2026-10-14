@@ -885,8 +885,7 @@ final class TouchControlsView: UIView {
             !roles.values.contains { if case .radioWheel = $0 { return true }; if case .characterWheel = $0 { return true }; return false }
         PGTouchCameraEnabled(available)
         let sensitivity = aiming ? GameSettings.shared.aimSensitivity : GameSettings.shared.lookSensitivity
-        var delta = dragCamera.motion(sensitivity: sensitivity)
-        if GameSettings.shared.invertLookY { delta.y = -delta.y }
+        let delta = dragCamera.motion(sensitivity: sensitivity, invertedY: GameSettings.shared.invertLookY)
         if available { PGTouchCameraDrag(delta.x, delta.y) }
     }
 

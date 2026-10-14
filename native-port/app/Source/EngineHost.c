@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include "NativeEngineConfiguration.h"
 #include "NativeControllerLook.h"
+#include "NativeTouchCamera.h"
 #include "NativeTouchContext.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -958,31 +959,30 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
 #if TARGET_OS_SIMULATOR
   if (pad == 12840656) { pg_test_teleport(instance); pg_test_tv(instance); pg_test_video(instance); pg_test_car(instance); pg_test_loadscene(instance); pg_test_loadscene_monitor(instance); }
 #endif
-  if (pad != 12840656 || !atomic_load(&virtualPadActive) || atomic_load(&pg_cheat_in_progress)) return;
+  if (pad != 12840656) return;
+  static double lastCameraPoll;
+  static PGTouchCameraRemainder cameraRemainder;
+  if (!atomic_load(&virtualPadActive) || atomic_load(&pg_cheat_in_progress)) {
+    lastCameraPoll = 0;
+    cameraRemainder = (PGTouchCameraRemainder){0};
+    atomic_store(&touchCameraX, 0); atomic_store(&touchCameraY, 0);
+    return;
+  }
   uint64_t packed = atomic_load(&virtualPad);
   // UIKit may publish several times per engine frame. Consume queued relative
-  // motion exactly once here, preserving the pad's assisted-aim path.
-  static double lastCameraPoll;
+  // motion exactly once as mouse input; don't also add it to the right stick.
   double cameraNow=timeMS(CLOCK_MONOTONIC), cameraSeconds=(cameraNow-lastCameraPoll)/1000;
   lastCameraPoll=cameraNow;
-  if(atomic_load(&touchCameraEnabled)) {
-    double x=(double)atomic_exchange(&touchCameraX,0)/65536;
-    double y=(double)atomic_exchange(&touchCameraY,0)/65536;
-    if (isfinite(x) && isfinite(y)) {
-      static double fracX = 0, fracY = 0;
-      fracX += x * 1.6;
-      fracY += y * 1.6;
-      int32_t ix = (int32_t)trunc(fracX);
-      int32_t iy = (int32_t)trunc(fracY);
-      fracX -= ix;
-      fracY -= iy;
-      _Atomic uint8_t *keys = pg_input_keys();
-      if (keys) {
-        _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
-        if (ix) atomic_fetch_add(words + 2, ix);
-        if (iy) atomic_fetch_add(words + 3, iy);
-      }
-    }
+  double x=(double)atomic_exchange(&touchCameraX,0)/65536;
+  double y=(double)atomic_exchange(&touchCameraY,0)/65536;
+  _Atomic uint8_t *keys = pg_input_keys();
+  int32_t ix, iy;
+  pg_touch_camera_motion(&cameraRemainder, x, y, cameraSeconds,
+                        atomic_load(&touchCameraEnabled) && keys != NULL, &ix, &iy);
+  if (keys) {
+    _Atomic int32_t *words = (_Atomic int32_t *)((uint8_t *)(void *)keys + 256);
+    if (ix) atomic_fetch_add(words + 2, ix);
+    if (iy) atomic_fetch_add(words + 3, iy);
   }
   uint8_t *base = pg_pointer(&env, pad, 136);
   _Atomic uint32_t *buttons = (_Atomic uint32_t *)(base + 12);
