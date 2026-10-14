@@ -42,6 +42,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("GetPedArmour", "ped_commands::CommandGetPedArmour(int)"),
     ("GetPedBoneCoords", "ped_commands::CommandGetPedBoneCoords(int, int, rage::scrVector const&)"),
     ("SetPedIntoVehicle", "ped_commands::CommandSetPedIntoVehicle(int, int, int)"),
+    ("ResurrectPed", "ped_commands::CommandResurrectPed(int)"),
+    ("ReviveInjuredPed", "ped_commands::CommandReviveInjuredPed(int)"),
     ("SetBlockingOfNonTemporaryEvents", "ped_commands::CommandSetBlockingOfNonTemporaryEvents(int, bool)"),
     ("SetPedCanRagdoll", "ped_commands::CommandSetPedCanRagdoll(int, bool)"),
     ("SetPedKeepTask", "ped_commands::CommandSetPedKeepTask(int, bool)"),

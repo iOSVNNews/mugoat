@@ -16,6 +16,7 @@
 #include <os/proc.h>
 #include <mach/mach.h>
 #include "NativeMemoryBudget.h"
+#include "MugoatOnline.h"
 
 static struct w2c_env env;
 static struct w2c_wasi__snapshot__preview1 wasi = { .env = &env };
@@ -827,25 +828,45 @@ static void pg_apply_targeting_mode(w2c_game *instance) {
 }
 
 u64 w2c_game_f100(w2c_game*, u64); // operator new
-u32 w2c_game_f58715(w2c_game*); // player_commands::CommandPlayerPedId
-void w2c_game_f50028(w2c_game*, u64, u32, u32); // entity_commands::CommandGetEntityCoords
-f32 w2c_game_f50032(w2c_game*, u32); // entity_commands::CommandGetEntityHeading
-void w2c_game_f50133(w2c_game*, u32, u64, u32, u32, u32); // entity_commands::CommandSetEntityCoordsNoOffset
-void w2c_game_f50136(w2c_game*, u32, u32, u32); // entity_commands::CommandSetEntityHealth
-u32 w2c_game_f57118(w2c_game*, u32, u32); // ped_commands::CommandIsPedInAnyVehicle
-u32 w2c_game_f57128(w2c_game*, u32, u32); // ped_commands::CommandIsPedDeadOrDying
-u32 w2c_game_f57184(w2c_game*, u32, u32); // ped_commands::CommandGetVehiclePedIsIn
-void w2c_game_f57485(w2c_game*, u32); // ped_commands::CommandReviveInjuredPed
-void w2c_game_f57486(w2c_game*, u32); // ped_commands::CommandResurrectPed
-void w2c_game_f60572(w2c_game*, u32, u32, u32); // task_commands::CommandTaskLeaveVehicle
-void w2c_game_f60648(w2c_game*, u32, u32, u32); // task_commands::CommandTaskLeaveAnyVehicle
-void w2c_game_f60722(w2c_game*, u32); // task_commands::CommandClearPedTasksImmediately
-u32 w2c_game_f61608(w2c_game*, u32, u32); // vehicle_commands::CommandIsVehDriveable
-void w2c_game_f62910(w2c_game*, u32, u32, u32, u32, u32); // weapon_commands::CommandGiveWeaponToPed
-void w2c_game_f60322(w2c_game*, u32); // streaming_commands::CommandRequestModel
-u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
-u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
-void w2c_game_f57201(w2c_game*, u32, u32, u32); // ped_commands::CommandSetPedIntoVehicle
+
+static inline MugoatValue mg_u32(uint32_t val) {
+  MugoatValue v = { .type = 1, .reserved = 0, .bits = (uint64_t)val };
+  return v;
+}
+static inline MugoatValue mg_u64(uint64_t val) {
+  MugoatValue v = { .type = 2, .reserved = 0, .bits = val };
+  return v;
+}
+static inline MugoatValue mg_f32(float f) {
+  uint32_t b = 0;
+  memcpy(&b, &f, 4);
+  MugoatValue v = { .type = 3, .reserved = 0, .bits = (uint64_t)b };
+  return v;
+}
+
+static inline uint32_t mg_call_u32(w2c_game *instance, const char *name, const MugoatValue *args, uint32_t count) {
+  MugoatValue res = { 0 };
+  if (mugoat_command_call((void *)instance, name, args, count, &res)) {
+    return (uint32_t)res.bits;
+  }
+  return 0;
+}
+
+static inline float mg_call_f32(w2c_game *instance, const char *name, const MugoatValue *args, uint32_t count) {
+  MugoatValue res = { 0 };
+  if (mugoat_command_call((void *)instance, name, args, count, &res)) {
+    float f = 0.0f;
+    uint32_t b = (uint32_t)res.bits;
+    memcpy(&f, &b, 4);
+    return f;
+  }
+  return 0.0f;
+}
+
+static inline void mg_call_void(w2c_game *instance, const char *name, const MugoatValue *args, uint32_t count) {
+  MugoatValue res = { 0 };
+  mugoat_command_call((void *)instance, name, args, count, &res);
+}
 
 u64* w2c_game_mugoat0x3Atls0x2Dbase(w2c_game*);
 
@@ -919,8 +940,10 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   uint32_t model = pg_spawn_model_hash;
   pg_spawn_frames++;
   uint64_t previous = pg_test_enter_script(instance);
-  w2c_game_f60322(instance, model);
-  if (!w2c_game_f60324(instance, model)) {
+  MugoatValue reqArgs[1] = { mg_u32(model) };
+  mg_call_void(instance, "mp:RequestModel", reqArgs, 1);
+  MugoatValue loadedArgs[1] = { mg_u32(model) };
+  if (!mg_call_u32(instance, "mp:HasModelLoaded", loadedArgs, 1)) {
     pg_test_leave_script(instance, previous);
     if (pg_spawn_frames > 300) {
       char msg[128];
@@ -931,7 +954,7 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
     pthread_mutex_unlock(&pg_spawn_lock);
     return;
   }
-  uint32_t ped = w2c_game_f58715(instance);
+  uint32_t ped = mg_call_u32(instance, "mp:PlayerPedId", NULL, 0);
   if (!ped) {
     pg_test_leave_script(instance, previous);
     pg_log("Spawn vehicle: player ped not found");
@@ -940,10 +963,12 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
     return;
   }
   uint64_t coordsVector = w2c_game_f100(instance, 32);
-  w2c_game_f50028(instance, coordsVector, ped, 1);
+  MugoatValue coordArgs[3] = { mg_u64(coordsVector), mg_u32(ped), mg_u32(1) };
+  mg_call_void(instance, "mp:GetEntityCoords", coordArgs, 3);
   float *coords = pg_pointer(&env, coordsVector, 24);
   float px = coords[0], py = coords[2], pz = coords[4];
-  float heading = w2c_game_f50032(instance, ped);
+  MugoatValue headArgs[1] = { mg_u32(ped) };
+  float heading = mg_call_f32(instance, "mp:GetEntityHeading", headArgs, 1);
   float rad = heading * 0.0174532925f;
   float vx = px - sinf(rad) * 3.5f;
   float vy = py + cosf(rad) * 3.5f;
@@ -951,9 +976,11 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   uint64_t vehVector = w2c_game_f100(instance, 32);
   float *vv = pg_pointer(&env, vehVector, 24);
   vv[0] = vx; vv[1] = 0; vv[2] = vy; vv[3] = 0; vv[4] = vz; vv[5] = 0;
-  uint32_t vehicle = w2c_game_f61266(instance, model, vehVector, heading, 0, 0, 1);
+  MugoatValue vehArgs[6] = { mg_u32(model), mg_u64(vehVector), mg_f32(heading), mg_u32(0), mg_u32(0), mg_u32(1) };
+  uint32_t vehicle = mg_call_u32(instance, "mp:CreateVehicle", vehArgs, 6);
   if (vehicle) {
-    w2c_game_f57201(instance, ped, vehicle, (uint32_t)-1);
+    MugoatValue sitArgs[3] = { mg_u32(ped), mg_u32(vehicle), mg_u32((uint32_t)-1) };
+    mg_call_void(instance, "mp:SetPedIntoVehicle", sitArgs, 3);
     char msg[128];
     snprintf(msg, sizeof msg, "Spawned vehicle %s (%u) id %u at %.1f, %.1f, %.1f", pg_spawn_model_name, model, vehicle, vx, vy, vz);
     pg_log(msg);
@@ -980,10 +1007,11 @@ static const PGHospital pg_hospitals[] = {
 static int pg_death_frames = 0;
 static void pg_process_player_respawn(w2c_game *instance) {
   if (!atomic_load(&inputBlock)) return;
-  uint32_t ped = w2c_game_f58715(instance);
+  uint32_t ped = mg_call_u32(instance, "mp:PlayerPedId", NULL, 0);
   if (!ped) { pg_death_frames = 0; return; }
 
-  uint32_t isDead = w2c_game_f57128(instance, ped, 1);
+  MugoatValue deadArgs[2] = { mg_u32(ped), mg_u32(1) };
+  uint32_t isDead = mg_call_u32(instance, "mp:IsPedDeadOrDying", deadArgs, 2);
   if (isDead) {
     pg_death_frames++;
     if (pg_death_frames < 180) return; // ~3.0s delay at 60fps for wasted screen
@@ -992,7 +1020,8 @@ static void pg_process_player_respawn(w2c_game *instance) {
 
     // Get death location to find nearest hospital
     uint64_t coordsVector = w2c_game_f100(instance, 32);
-    w2c_game_f50028(instance, coordsVector, ped, 1);
+    MugoatValue coordArgs[3] = { mg_u64(coordsVector), mg_u32(ped), mg_u32(1) };
+    mg_call_void(instance, "mp:GetEntityCoords", coordArgs, 3);
     float *coords = pg_pointer(&env, coordsVector, 24);
     float px = coords[0], py = coords[2], pz = coords[4];
 
@@ -1009,18 +1038,26 @@ static void pg_process_player_respawn(w2c_game *instance) {
     }
 
     // If player died inside a vehicle (car or plane), detach and force leave
-    if (w2c_game_f57118(instance, ped, 0)) {
-      uint32_t deadVeh = w2c_game_f57184(instance, ped, 0);
-      if (deadVeh) w2c_game_f60572(instance, ped, deadVeh, 16);
+    MugoatValue inVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+    if (mg_call_u32(instance, "mp:IsPedInAnyVehicle", inVehArgs, 2)) {
+      MugoatValue getVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+      uint32_t deadVeh = mg_call_u32(instance, "mp:GetVehiclePedIsIn", getVehArgs, 2);
+      if (deadVeh) {
+        MugoatValue leaveVehArgs[3] = { mg_u32(ped), mg_u32(deadVeh), mg_u32(16) };
+        mg_call_void(instance, "mp:TaskLeaveVehicle", leaveVehArgs, 3);
+      }
     }
-    w2c_game_f60722(instance, ped); // task_commands::CommandClearPedTasksImmediately
-    w2c_game_f60648(instance, ped, 0, 16); // task_commands::CommandTaskLeaveAnyVehicle warp out
+    MugoatValue clearArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ClearPedTasksImmediately", clearArgs, 1);
 
     // Revive & resurrect player ped
-    w2c_game_f57486(instance, ped); // ped_commands::CommandResurrectPed
-    w2c_game_f57485(instance, ped); // ped_commands::CommandReviveInjuredPed
-    w2c_game_f50136(instance, ped, 200, 0); // entity_commands::CommandSetEntityHealth(ped, 200, 0)
-    w2c_game_f60722(instance, ped); // task_commands::CommandClearPedTasksImmediately
+    MugoatValue pedOnlyArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ResurrectPed", pedOnlyArgs, 1);
+    mg_call_void(instance, "mp:ReviveInjuredPed", pedOnlyArgs, 1);
+
+    MugoatValue healthArgs[3] = { mg_u32(ped), mg_u32(200), mg_u32(0) };
+    mg_call_void(instance, "mp:SetEntityHealth", healthArgs, 3);
+    mg_call_void(instance, "mp:ClearPedTasksImmediately", pedOnlyArgs, 1);
 
     // Teleport to nearest hospital
     uint64_t hospVector = w2c_game_f100(instance, 32);
@@ -1031,7 +1068,8 @@ static void pg_process_player_respawn(w2c_game *instance) {
     hv[3] = 0;
     hv[4] = pg_hospitals[bestIndex].z;
     hv[5] = 0;
-    w2c_game_f50133(instance, ped, hospVector, 0, 0, 0);
+    MugoatValue tpArgs[5] = { mg_u32(ped), mg_u64(hospVector), mg_u32(0), mg_u32(0), mg_u32(0) };
+    mg_call_void(instance, "mp:SetEntityCoordsNoOffset", tpArgs, 5);
 
     // Reset control disable flags if stuck in playerInfo
     const uint8_t *m = (const uint8_t *)(void *)env.memory.data;
@@ -1063,25 +1101,31 @@ void PGEmergencyExitVehicle(int mode) {
 static void pg_process_vehicle_exit(w2c_game *instance) {
   int mode = atomic_exchange(&pg_emergency_exit_mode, 0);
   if (!mode) return;
-  uint32_t ped = w2c_game_f58715(instance);
+  uint32_t ped = mg_call_u32(instance, "mp:PlayerPedId", NULL, 0);
   if (!ped) return;
-  if (!w2c_game_f57118(instance, ped, 0)) return;
-  uint32_t veh = w2c_game_f57184(instance, ped, 0);
+  MugoatValue inVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+  if (!mg_call_u32(instance, "mp:IsPedInAnyVehicle", inVehArgs, 2)) return;
+  MugoatValue getVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+  uint32_t veh = mg_call_u32(instance, "mp:GetVehiclePedIsIn", getVehArgs, 2);
   if (!veh) return;
 
   uint64_t previous = pg_test_enter_script(instance);
   if (mode == 2) {
     // Aircraft Bailout / Parachute Jump
     // Give parachute weapon (0xFBAB5776 = GADGET_PARACHUTE) so player can safely parachute down
-    w2c_game_f62910(instance, ped, 0xFBAB5776, 1, 0, 1);
+    MugoatValue weapArgs[5] = { mg_u32(ped), mg_u32(0xFBAB5776), mg_u32(1), mg_u32(0), mg_u32(1) };
+    mg_call_void(instance, "mp:GiveWeaponToPed", weapArgs, 5);
     // TaskLeaveVehicle with flags 4096 (EFLAG_BAIL_OUT) | 256 (EFLAG_JUMP_OUT)
-    w2c_game_f60572(instance, ped, veh, 4096 | 256);
+    MugoatValue leaveArgs[3] = { mg_u32(ped), mg_u32(veh), mg_u32(4096 | 256) };
+    mg_call_void(instance, "mp:TaskLeaveVehicle", leaveArgs, 3);
     pg_log("Aircraft bailout executed (parachute given + bailout task).");
   } else {
     // Car / Jammed / Exploded / Overturned vehicle emergency exit
     // Flag 16 = EFLAG_WARPOUT (teleports immediately outside vehicle, ignoring jammed/crushed doors)
-    w2c_game_f60722(instance, ped);
-    w2c_game_f60572(instance, ped, veh, 16);
+    MugoatValue clearArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ClearPedTasksImmediately", clearArgs, 1);
+    MugoatValue leaveArgs[3] = { mg_u32(ped), mg_u32(veh), mg_u32(16) };
+    mg_call_void(instance, "mp:TaskLeaveVehicle", leaveArgs, 3);
     pg_log("Vehicle emergency warp exit executed.");
   }
   pg_test_leave_script(instance, previous);
