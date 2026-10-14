@@ -9,12 +9,12 @@ enum ControlContext: Equatable {
         if pauseMenu { self = .menu; return }
         switch vehicle {
         case 0: self = .onFoot
-        case 2: self = .plane
-        case 9, 10, 11: self = .heli
+        case 2, 17: self = .plane
+        case 9, 10, 11, 16: self = .heli
         case 12: self = .bike
         case 13: self = .bicycle
-        case 14: self = .boat
-        case 16: self = .sub
+        case 14, 15: self = .boat
+        case 1: self = .car
         default: self = .car
         }
     }
