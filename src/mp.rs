@@ -444,7 +444,7 @@ struct SpeakerQueue {
     last_heard: Instant,
 }
 
-static SPEAKER_QUEUES: Mutex<HashMap<u8, SpeakerQueue>> = Mutex::new(HashMap::new());
+static SPEAKER_QUEUES: Mutex<Vec<(u8, SpeakerQueue)>> = Mutex::new(Vec::new());
 static ACTIVE_SPEAKERS: Mutex<Vec<(u8, String, Instant)>> = Mutex::new(Vec::new());
 static VOICE_SEQ: AtomicU16 = AtomicU16::new(0);
 static LOCAL_POS: Mutex<Option<[f32; 3]>> = Mutex::new(None);
@@ -521,10 +521,10 @@ pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
 
     // Drop stale queues (silent for > 3s)
     let now = Instant::now();
-    queues.retain(|_, q| now.duration_since(q.last_heard) < Duration::from_secs(3) || !q.samples.is_empty());
+    queues.retain(|(_, q)| now.duration_since(q.last_heard) < Duration::from_secs(3) || !q.samples.is_empty());
 
     // Mix active speakers into left and right audio channels sequentially
-    for q in queues.values_mut() {
+    for (_, q) in queues.iter_mut() {
         let take = count.min(q.samples.len());
         for i in 0..take {
             let s = q.samples[i];
@@ -1527,10 +1527,15 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
     }).collect();
 
     let mut queues = SPEAKER_QUEUES.lock().unwrap();
-    let q = queues.entry(sender_id).or_insert_with(|| SpeakerQueue {
-        samples: VecDeque::with_capacity(9600),
-        last_heard: now,
-    });
+    let q = if let Some(idx) = queues.iter().position(|(id, _)| *id == sender_id) {
+        &mut queues[idx].1
+    } else {
+        queues.push((sender_id, SpeakerQueue {
+            samples: VecDeque::with_capacity(9600),
+            last_heard: now,
+        }));
+        &mut queues.last_mut().unwrap().1
+    };
     q.last_heard = now;
     q.samples.extend(incoming_samples);
     // Keep max 150ms buffer (7200 samples @ 48kHz) to prevent latency buildup
