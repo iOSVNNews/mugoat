@@ -14,7 +14,7 @@ struct Player {
 }
 
 pub fn run(port: u16, max: usize) -> std::io::Result<()> {
-    let max = max.clamp(2, 64);
+    let max = max.clamp(2, MAX_ROOM_PLAYERS);
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_read_timeout(Some(Duration::from_millis(500)))?;
     println!("[server] listening on UDP port {port} (up to {max} players per room)");
@@ -72,9 +72,8 @@ fn handle(sock: &UdpSocket, players: &mut HashMap<SocketAddr, Player>, max: usiz
     match kind {
         HELLO => {
             let (room, name) = parse_room_and_name(payload);
-            if let Some(p) = players.get_mut(&from) {
+            if let Some(p) = players.get_mut(&from).filter(|p| p.room == room) {
                 p.last = Instant::now();
-                p.room = room;
                 p.name = name;
                 let _ = sock.send_to(&packet(WELCOME, &[p.id]), from);
                 return;
@@ -83,6 +82,11 @@ fn handle(sock: &UdpSocket, players: &mut HashMap<SocketAddr, Player>, max: usiz
             if room_count >= max {
                 let _ = sock.send_to(&packet(FULL, &[]), from);
                 return;
+            }
+            // A socket changing rooms must re-enter capacity/ID allocation,
+            // rather than keeping an ID which may already exist in that room.
+            if players.contains_key(&from) {
+                leave(sock, players, from, "changed rooms");
             }
             let id = (1..=255u8).find(|i| !players.values().any(|p| p.room == room && p.id == *i)).unwrap();
             let p = Player { id, room: room.clone(), name, last: Instant::now() };

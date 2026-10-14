@@ -64,4 +64,73 @@ async function main() {
     server.kill();
   }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+async function capacity(limit) {
+  const probe = dgram.createSocket('udp4');
+  await new Promise(resolve => probe.bind(0, '127.0.0.1', resolve));
+  const port = probe.address().port;
+  await new Promise(resolve => probe.close(resolve));
+  // The 64-player case deliberately tests the binary's DEFAULT, not an override.
+  const args = limit === 64 ? [String(port)] : [String(port), String(limit)];
+  const server = spawn(process.argv[2], args, {stdio: ['ignore', 'pipe', 'pipe']});
+  let output = ''; server.stdout.on('data', data => { output += data; });
+  server.stderr.on('data', data => { output += data; });
+  const clients = [];
+  async function create() {
+    const socket = dgram.createSocket('udp4'), queue = [];
+    socket.on('message', message => queue.push(message));
+    await new Promise(resolve => socket.bind(0, '127.0.0.1', resolve));
+    const c = {socket, queue}; clients.push(c); return c;
+  }
+  async function send(c, kind, body = Buffer.alloc(0)) {
+    await new Promise((resolve,reject) => c.socket.send(Buffer.concat([Buffer.from([0x47,kind]),body]),port,'127.0.0.1',e=>e?reject(e):resolve()));
+  }
+  async function packet(c, kind) {
+    const end = Date.now()+4000;
+    while(Date.now()<end) {
+      const index=c.queue.findIndex(b=>b[0]===0x47 && b[1]===kind);
+      if(index>=0)return c.queue.splice(index,1)[0].subarray(2);
+      await sleep(5);
+    }
+    throw new Error(`${limit}-player test timed out for kind ${kind}: ${output}`);
+  }
+  const hello = (room,name) => Buffer.from(`${room}\0${name}`);
+  try {
+    const end = Date.now()+4000;
+    while(!output.includes('listening on UDP') && Date.now()<end) await sleep(10);
+    assert(output.includes(`up to ${limit} players per room`),output);
+    const ids=[];
+    for(let i=0;i<limit;i++) {
+      const c=await create();await send(c,1,hello('capacity',`P${i}`));
+      ids.push((await packet(c,2))[0]);
+    }
+    assert.equal(new Set(ids).size,limit,'Each connected player needs a unique ID');
+    const extra=await create();await send(extra,1,hello('capacity','overflow'));
+    assert.equal((await packet(extra,7)).length,0,'Only the next player is full');
+    for(let i=0;i<limit;i++)await send(clients[i],3,Buffer.from([i]));
+    for(const observer of [0,limit-1]) {
+      const received=new Set();
+      for(let n=0;n<limit-1;n++) {
+        const state=await packet(clients[observer],3);
+        assert.equal(state[1],ids.indexOf(state[0]));received.add(state[0]);
+      }
+      assert.equal(received.size,limit-1,'First and last players must see every peer');
+    }
+    await send(extra,1,hello('other-room','visitor'));await packet(extra,2);
+    await send(extra,1,hello('capacity','visitor'));await packet(extra,7);
+    clients[0].queue.length=0;
+    await send(extra,3,Buffer.from([251,252]));await sleep(60);
+    assert(!clients[0].queue.some(b=>b[1]===3),'A rejected room switch must not bypass full-room isolation');
+    const slot=Math.floor(limit/2);await send(clients[slot],6);
+    assert.equal((await packet(clients[0],5))[0],ids[slot]);
+    await send(extra,1,hello('capacity','replacement'));
+    const replacement=(await packet(extra,2))[0];
+    assert.equal(replacement,ids[slot],'Leave/rejoin should reuse only the vacant ID');
+    await send(extra,3,Buffer.from([253]));
+    assert.deepEqual(await packet(clients[0],3),Buffer.from([replacement,253]));
+    console.log(`UDP capacity ${limit}: all IDs, peer relay, full boundary, room isolation and slot reuse PASS`);
+  } finally {
+    clients.forEach(c=>c.socket.close());server.kill();
+  }
+}
+async function run() { await main(); await capacity(32); await capacity(64); }
+run().catch(error => { console.error(error); process.exitCode = 1; });

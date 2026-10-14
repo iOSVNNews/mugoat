@@ -311,7 +311,7 @@ struct Net {
 
     hits: Mutex<Vec<(u8, u8, u16, u32)>>,
 
-    car_hits: Mutex<Vec<(u8, i16, i16, u8, i16, bool)>>,
+    car_hits: Mutex<Vec<(u8, i16, i16, u8, i16, Option<u32>)>>,
 
     time: Mutex<Option<(u8, [u8; 4], Option<(u8, u8, f32)>)>>,
 
@@ -458,7 +458,7 @@ fn net() -> Option<&'static Net> {
             std::thread::Builder::new()
                 .name("mp-server".into())
                 .spawn(|| {
-                    if let Err(e) = crate::server::run(proto::DEFAULT_PORT, 32) {
+                    if let Err(e) = crate::server::run(proto::DEFAULT_PORT, proto::MAX_ROOM_PLAYERS) {
                         eprintln!("[mp] cannot host on port {}: {e}", proto::DEFAULT_PORT);
                     }
                 })
@@ -622,8 +622,13 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
             proto::VHIT if p.len() >= 7 => {
                 let mut h = net.car_hits.lock().unwrap();
                 let (tank, destroyed) = if p.len() >= 10 { (i16::from_le_bytes([p[7], p[8]]), p[9] & 1 != 0) } else { (0, false) };
-                if h.len() < 64 {
-                    h.push((p[1], i16::from_le_bytes([p[2], p[3]]), i16::from_le_bytes([p[4], p[5]]), p[6], tank, destroyed));
+                let engine = i16::from_le_bytes([p[2], p[3]]);
+                let body = i16::from_le_bytes([p[4], p[5]]);
+                let model = (p.len() >= 14).then(|| u32::from_le_bytes(p[10..14].try_into().unwrap()));
+                // Legacy replica-death claims are not permission to explode
+                // the owner's current (possibly different) vehicle.
+                if !destroyed && p[0] != p[1] && [engine,body,tank].iter().all(|v| (0..=5000).contains(v)) && h.len() < 64 {
+                    h.push((p[1], engine, body, p[6] & 0x3f, tank, model));
                 }
             }
             proto::TIME if p.len() >= 5 => {
@@ -806,7 +811,7 @@ struct Avatar {
 
     bullet: u16,
 
-    car_hit: (i16, i16, u8, i16, bool),
+    car_hit: (i16, i16, u8, i16),
     blip: i32,
     walk: Walker,
     weapon: u32,
@@ -1629,15 +1634,16 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             send_reliable(net, proto::HIT, &p, Some(*id));
             a.hit = 0;
         }
-        if a.car_hit != (0, 0, 0, 0, false) {
+        if a.car_hit != (0, 0, 0, 0) {
             let mut p = vec![*id];
             p.extend(a.car_hit.0.to_le_bytes());
             p.extend(a.car_hit.1.to_le_bytes());
             p.push(a.car_hit.2);
             p.extend(a.car_hit.3.to_le_bytes());
-            p.push(a.car_hit.4 as u8);
+            p.push(0); // Vehicle death is authoritative in the owner's STATE.
+            p.extend(a.veh_model.to_le_bytes());
             send_reliable(net, proto::VHIT, &p, Some(*id));
-            a.car_hit = (0, 0, 0, 0, false);
+            a.car_hit = (0, 0, 0, 0);
         }
     }
     if game_marker.map(|m| m.0) != game.marker.map(|m| m.0) {
@@ -1691,17 +1697,13 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         }
     }
     let car_hits = std::mem::take(&mut *net.car_hits.lock().unwrap());
-    if my_car != 0 {
-        for (target, de, db, tyres, dk, destroyed) in car_hits {
+    if my_car != 0 && pvp_enabled() && c.i("GetPedInVehicleSeat", &[i(my_car), i(-1), b(false)]) == ped {
+        let model = c.i("GetEntityModel", &[i(my_car)]) as u32;
+        for (target, de, db, tyres, dk, reported_model) in car_hits {
             if Some(target) != my_id {
                 continue;
             }
-            if destroyed {
-                if c.i("IsEntityDead", &[i(my_car), b(false)]) == 0 {
-                    c.i("ExplodeVehicle", &[i(my_car), b(true), b(false)]);
-                }
-                continue;
-            }
+            if reported_model != Some(model) { continue; }
             if dk > 0 {
                 let t = c.f("GetVehiclePetrolTankHealth", &[i(my_car)]);
                 c.i("SetVehiclePetrolTankHealth", &[i(my_car), f(t - dk as f32)]);
@@ -1803,7 +1805,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
     let kills = std::mem::take(&mut *net.kills.lock().unwrap());
     for (owner, key) in kills {
         let ent = key as i32;
-        if Some(owner) != my_id || !c.exists(ent) || c.i("IsEntityAMissionEntity", &[i(ent)]) != 0 {
+        if Some(owner) != my_id || ent == my_car || !c.exists(ent) || c.i("IsEntityAMissionEntity", &[i(ent)]) != 0 {
             continue;
         }
         if c.i("IsEntityAPed", &[i(ent)]) != 0 {
@@ -2553,23 +2555,26 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
             a.entering = None;
         }
 
-        if !a.veh_damage.5 && !s.veh_dead {
-            if c.i("IsEntityDead", &[i(veh), b(false)]) != 0 {
-                a.car_hit.4 = true;
-                a.veh_damage.5 = true;
-            }
+        if !s.veh_dead && c.i("IsEntityDead", &[i(veh), b(false)]) != 0 {
+            // Repair an observer-only wreck; never report it as owner death.
+            c.i("SetVehicleFixed", &[i(veh)]);
+            c.i("SetVehicleDeformationFixed", &[i(veh)]);
+            a.veh_damage = (1000, 1000, 1000, 0, 0, false);
         }
         if !a.veh_damage.5 {
             let engine = c.f("GetVehicleEngineHealth", &[i(veh)]) as i16;
             let body = c.f("GetVehicleBodyHealth", &[i(veh)]) as i16;
             let tank = c.f("GetVehiclePetrolTankHealth", &[i(veh)]) as i16;
             let tyres = (0..6).filter(|w| c.i("IsVehicleTyreBurst", &[i(veh), i(*w), b(false)]) != 0).fold(0u8, |m, w| m | 1 << w);
-            let de = (a.veh_damage.0 - engine).max(0);
-            let db = (a.veh_damage.1 - body).max(0);
-            let dk = (a.veh_damage.2 - tank).max(0);
+            let me = c.i("PlayerPedId", &[]);
+            let local_attack = pvp_enabled() && me != 0 && c.i("HasEntityBeenDamagedByEntity", &[i(veh), i(me), b(true)]) != 0;
+            let [de, db, dk] = proto::vehicle_hit_delta([a.veh_damage.0, a.veh_damage.1, a.veh_damage.2], [engine,body,tank], local_attack);
             let dt = tyres & !a.veh_damage.3;
-            if de > 5 || db > 5 || dk > 5 || dt != 0 {
-                a.car_hit = (a.car_hit.0.saturating_add(de), a.car_hit.1.saturating_add(db), a.car_hit.2 | dt, a.car_hit.3.saturating_add(dk), a.car_hit.4);
+            if local_attack && (de > 5 || db > 5 || dk > 5 || dt != 0) {
+                a.car_hit = (a.car_hit.0.saturating_add(de).min(5000), a.car_hit.1.saturating_add(db).min(5000), a.car_hit.2 | dt, a.car_hit.3.saturating_add(dk).min(5000));
+            }
+            if local_attack { c.i("ClearEntityLastDamageEntity", &[i(veh)]); }
+            if (a.veh_damage.0 as i32 - engine as i32).abs() > 5 || (a.veh_damage.1 as i32 - body as i32).abs() > 5 || (a.veh_damage.2 as i32 - tank as i32).abs() > 5 {
                 c.i("SetVehiclePetrolTankHealth", &[i(veh), f(a.veh_damage.2 as f32)]);
 
                 c.i("SetVehicleEngineHealth", &[i(veh), f(a.veh_damage.0 as f32)]);
@@ -2790,7 +2795,7 @@ fn apply_car_damage(c: &mut Cmd, veh: i32, have: &mut (i16, i16, i16, u8, u8, bo
         c.i("SetVehicleDeformationFixed", &[i(veh)]);
         *have = (1000, 1000, 1000, 0, 0, false);
     }
-    let close = |a: i16, b: i16| (a - b).abs() < 5;
+    let close = |a: i16, b: i16| (a as i32 - b as i32).abs() < 5;
     if !close(want.0, have.0) {
         c.i("SetVehicleEngineHealth", &[i(veh), f(want.0 as f32)]);
     }
@@ -3182,7 +3187,10 @@ fn mirror_population(c: &mut Cmd, game: &mut Game, net: &Net, owner: u8, entries
                 } else {
                     c.i("SetEntityHealth", &[i(m.ent), i(0), i(0)]);
                 }
-            } else if !e.dead {
+            } else if !e.dead && {
+                let me = c.i("PlayerPedId", &[]);
+                me != 0 && c.i("HasEntityBeenDamagedByEntity", &[i(m.ent), i(me), b(true)]) != 0
+            } {
                 let mut payload = vec![owner & !EXTRAS];
                 payload.extend(e.key.to_le_bytes());
                 send_reliable(net, proto::KILL, &payload, Some(owner & !EXTRAS));

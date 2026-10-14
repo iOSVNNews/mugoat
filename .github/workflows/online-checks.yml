@@ -1,0 +1,29 @@
+name: Online server and vehicle authority
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'native-port/online-bridge/**'
+      - 'tools/test-server.cjs'
+      - '.github/workflows/online-checks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test native bridge and replica damage authority
+        run: cargo test --manifest-path native-port/online-bridge/Cargo.toml --lib
+      - name: Build dedicated server and test 32/64 actual UDP clients
+        run: |
+          cargo build --release --manifest-path native-port/online-bridge/Cargo.toml --bin mugoat-server
+          node tools/test-server.cjs native-port/online-bridge/target/release/mugoat-server
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Mugoat-Server-Linux-x64
+          path: native-port/online-bridge/target/release/mugoat-server
+          if-no-files-found: error

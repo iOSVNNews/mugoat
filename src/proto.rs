@@ -5,6 +5,31 @@
 pub const DEFAULT_PORT: u16 = 47520;
 pub const MAGIC: u8 = 0x47;
 pub const TIMEOUT_SECS: u64 = 5;
+pub const MAX_ROOM_PLAYERS: usize = 64;
+
+// A replica's collision/streaming physics is not damage authority. Only a
+// confirmed local attack may produce a delta for the owning player's vehicle.
+pub fn vehicle_hit_delta(previous: [i16; 3], observed: [i16; 3], local_attack: bool) -> [i16; 3] {
+    if !local_attack { return [0; 3]; }
+    std::array::from_fn(|k| (previous[k] as i32 - observed[k] as i32).clamp(0, 5000) as i16)
+}
+
+#[cfg(test)]
+mod vehicle_tests {
+    use super::*;
+    #[test]
+    fn replicas_cannot_destroy_the_owner_by_simulating_a_collision() {
+        let mut owner = [1000i16; 3];
+        for _ in 0..64 {
+            let delta = vehicle_hit_delta([1000; 3], [-4000, 0, -1000], false);
+            for k in 0..3 { owner[k] -= delta[k]; }
+        }
+        assert_eq!(owner, [1000; 3]);
+        assert_eq!(vehicle_hit_delta([1000; 3], [950, 900, 1000], true), [50, 100, 0]);
+        assert_eq!(vehicle_hit_delta([500; 3], [1000; 3], true), [0; 3]);
+        assert_eq!(vehicle_hit_delta([i16::MAX; 3], [i16::MIN; 3], true), [5000; 3]);
+    }
+}
 
 pub const HELLO: u8 = 1;
 pub const WELCOME: u8 = 2;

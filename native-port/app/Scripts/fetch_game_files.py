@@ -13,6 +13,7 @@ import json
 import sys
 import urllib.request
 from pathlib import Path
+from download_ranges import download
 
 ENGINE = 'b/8b0b5899ed/game.wasm'
 ENGINE_SHA256 = '11ca8d2c04c5e843d18ff4aea4899d72c86973c6b031df334e67c446b2ae83e0'
@@ -25,16 +26,14 @@ parser.add_argument('--out', type=Path, required=True, help='folder to place a m
 args = parser.parse_args()
 server = args.server.rstrip('/')
 
-def fetch(relative):
+def fetch(relative, expected_sha256=None):
     target = args.out / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     print(f'Downloading {relative} from your server...', flush=True)
     last_error = None
     for attempt in range(1, 4):
         try:
-            with urllib.request.urlopen(f'{server}/{relative}', timeout=120) as response, target.open('wb') as stream:
-                while chunk := response.read(1 << 20):
-                    stream.write(chunk)
+            download(f'{server}/{relative}', target, expected_sha256)
             return target
         except Exception as error:
             last_error = error
@@ -43,12 +42,12 @@ def fetch(relative):
 
 engine = args.out / ENGINE
 if not (engine.exists() and hashlib.sha256(engine.read_bytes()).hexdigest() == ENGINE_SHA256):
-    engine = fetch(ENGINE)
+    engine = fetch(ENGINE, ENGINE_SHA256)
 if hashlib.sha256(engine.read_bytes()).hexdigest() != ENGINE_SHA256:
     sys.exit('Your game.wasm is not the build this port supports (8b0b5899ed). '
              'The engine patches are made for that exact file.')
 fetch('data/manifest.json')
-index = fetch(SHADERS + '/index.json')
+index = fetch(SHADERS + '/index.json', SHADER_INDEX_SHA256)
 if hashlib.sha256(index.read_bytes()).hexdigest() != SHADER_INDEX_SHA256:
     sys.exit('Your shader index does not match game build 8b0b5899ed.')
 for pack in json.loads(index.read_text())['_packs']:
