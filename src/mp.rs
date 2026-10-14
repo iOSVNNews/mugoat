@@ -1684,14 +1684,17 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         update_economy_and_shops(c, ped, my_pos);
         update_voice_speakers_hud(c);
         if game.last_send.elapsed() >= SEND_EVERY {
-            game.last_send = Instant::now();
-            let s = local_state(c, game, ped, my_pos);
-            game.seq = game.seq.wrapping_add(1);
-            let mut payload = game.seq.to_le_bytes().to_vec();
-            s.encode(&mut payload);
-            payload.extend((START.get_or_init(Instant::now).elapsed().as_millis() as u32).to_le_bytes());
-            payload.extend(s.veh_key.to_le_bytes());
-            let _ = net.sock.send(&proto::packet(proto::STATE, &payload));
+            let valid_pos = my_pos[0].abs() > 1.0 || my_pos[1].abs() > 1.0 || my_pos[2].abs() > 1.0;
+            if valid_pos {
+                game.last_send = Instant::now();
+                let s = local_state(c, game, ped, my_pos);
+                game.seq = game.seq.wrapping_add(1);
+                let mut payload = game.seq.to_le_bytes().to_vec();
+                s.encode(&mut payload);
+                payload.extend((START.get_or_init(Instant::now).elapsed().as_millis() as u32).to_le_bytes());
+                payload.extend(s.veh_key.to_le_bytes());
+                let _ = net.sock.send(&proto::packet(proto::STATE, &payload));
+            }
         }
         let veh = if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 { c.i("GetVehiclePedIsIn", &[i(ped), b(false)]) } else { 0 };
         let own_car = veh != 0 && !game.avatars.values().any(|a| a.veh == veh);
@@ -1796,25 +1799,31 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             game.unfreeze_at = None;
         }
     }
-    if !game.met && game.seq > 100 && me_ok {
-        if let Some(me) = my_id {
-            let first = {
-                let peers = net.peers.lock().unwrap();
-                peers.iter().filter(|(id, p)| **id < me && !p.snaps.is_empty()).min_by_key(|(id, _)| **id).map(|(id, p)| (*id, p.snaps.back().unwrap().1))
-            };
-            if let Some((id, st)) = first {
-                if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 {
-                    let at = if st.in_vehicle() { st.veh_pos } else { st.pos };
-                    let pos = c.vec_arg(1, [at[0] + 2.5, at[1] + 2.5, at[2] + 0.5]);
-                    c.i("SetEntityCoordsNoOffset", &[i(ped), pos, b(false), b(false), b(false)]);
+    game.met = true;
 
-                    c.i("FreezeEntityPosition", &[i(ped), b(true)]);
-                    game.unfreeze_at = Some(Instant::now() + Duration::from_secs(2));
-                    game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
-                    eprintln!("[mp] moved next to player {id} at {at:.0?}");
-                }
-                game.met = true;
-            }
+    // Safety check: Prevent falling through map / spawning in ocean void / stuck in North Yankton
+    if me_ok {
+        let is_in_yankton = my_pos[0] > 2000.0 || my_pos[1] < -3500.0;
+        let is_in_ocean_origin = my_pos[0].abs() < 50.0 && my_pos[1].abs() < 50.0;
+        let is_under_map = my_pos[2] < -5.0;
+        let in_car = c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0;
+
+        static RESCUE_COOLDOWN: Mutex<Option<Instant>> = Mutex::new(None);
+        let mut rescue_cd = RESCUE_COOLDOWN.lock().unwrap();
+        let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(5)).unwrap_or(true);
+
+        if (is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
+            *rescue_cd = Some(Instant::now());
+            let spawn_pos = [215.0f32, -915.0f32, 30.6f32]; // Legion Square, Los Santos
+            let pos_arg = c.vec_arg(1, spawn_pos);
+            let zero_vel = c.vec_arg(2, [0.0f32, 0.0f32, 0.0f32]);
+            c.i("ClearPedTasksImmediately", &[i(ped)]);
+            c.i("SetEntityCoordsNoOffset", &[i(ped), pos_arg, b(false), b(false), b(false)]);
+            c.i("SetEntityVelocity", &[i(ped), zero_vel]);
+            c.i("SetEntityHeading", &[i(ped), f(0.0)]);
+            game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
+            c.feed("~g~[iOSVN] Đã chuyển vị trí về trung tâm Los Santos (Legion Square)~s~");
+            eprintln!("[mp] rescued player from out-of-bounds ({my_pos:?}) to Legion Square {spawn_pos:?}");
         }
     }
 
