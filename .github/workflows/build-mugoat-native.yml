@@ -71,7 +71,7 @@ jobs:
             native-port/app/GeneratedResources
             native-port/app/Build/MetalShaders
             native-port/app/Build/Release
-          key: mugoat-hybrid-ios150-v3-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'src/mp.rs') }}
+          key: mugoat-hybrid-ios150-v4-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'src/mp.rs') }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios

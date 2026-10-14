@@ -94,5 +94,5 @@ for sdk in options.sdk or ['iphoneos']:
     sdk_args += ['--sdk', sdk]
 run('python3', 'Scripts/build_metal_shaders.py', str(shaders), *sdk_args)
 run('xcodegen', 'generate', '--spec', 'project.yml')
-(root / 'Generated/native-prepared-v1.txt').write_text('ios15.0-native-online-v3\n')
+(root / 'Generated/native-prepared-v1.txt').write_text('ios15.0-native-online-v4\n')
 print('Prepared the native boot project. Open PlayGTA5Native.xcodeproj in Xcode.')

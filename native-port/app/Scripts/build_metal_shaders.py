@@ -30,7 +30,7 @@ def compile_batch(sdk, compiler, sources, air):
     """Compiles a batch of .metal files in one compiler process (process start-up dominates single-file compiles)."""
     tmp = tempfile.mkdtemp(dir=air)
     try:
-        run([compiler, '-c', '-std=metal2.4', '-target', TARGETS[sdk], '-ffast-math', '-Wno-unused-variable'] + sources, cwd=tmp)
+        run([compiler, '-c', '-std=ios-metal2.4', '-target', TARGETS[sdk], '-ffast-math', '-Wno-unused-variable'] + sources, cwd=tmp)
         for src in sources:
             name = os.path.splitext(os.path.basename(src))[0] + '.air'
             os.replace(os.path.join(tmp, name), os.path.join(air, name))
