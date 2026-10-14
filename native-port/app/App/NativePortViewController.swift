@@ -228,6 +228,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, top), maximum: top, preferred: top)
         }
         displayLink?.add(to: .main, forMode: .common)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioEngineConfigurationChange), name: .AVAudioEngineConfigurationChange, object: audioEngine)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidDisconnect, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidConnect, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(releaseTouchControls), name: UIApplication.willResignActiveNotification, object: nil)
@@ -662,8 +664,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private func startAudio() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
             try session.setPreferredSampleRate(48000)
+            try session.overrideOutputAudioPort(.speaker)
             try session.setActive(true)
             let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
             let source = AVAudioSourceNode(format: format) { _, _, count, audioBufferList in
@@ -690,7 +693,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             let session = AVAudioSession.sharedInstance()
             switch session.recordPermission {
             case .granted:
-                configureMicRecording(enabled: true)
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    self?.configureMicRecording(enabled: true)
+                }
             case .denied:
                 appendLog("[Voice] Quyền truy cập Micro bị từ chối trong Cài đặt iOS")
                 MugoatVoiceSetMicEnabled(false)
@@ -700,7 +705,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                     DispatchQueue.main.async {
                         guard let self = self else { return }
                         if granted {
-                            self.configureMicRecording(enabled: true)
+                            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                                self?.configureMicRecording(enabled: true)
+                            }
                         } else {
                             self.appendLog("[Voice] Quyền truy cập Micro bị từ chối")
                             MugoatVoiceSetMicEnabled(false)
@@ -712,7 +719,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 break
             }
         } else {
-            configureMicRecording(enabled: false)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.configureMicRecording(enabled: false)
+            }
         }
     }
 
@@ -720,7 +729,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         do {
             let session = AVAudioSession.sharedInstance()
             if enabled {
-                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+                try session.overrideOutputAudioPort(.speaker)
                 try session.setActive(true)
                 let inputNode = audioEngine.inputNode
                 let bus = 0
@@ -753,16 +763,41 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                         }
                     }
                 }
+                if !audioEngine.isRunning {
+                    try audioEngine.start()
+                }
                 appendLog("[Voice] Đã bật Micro")
             } else {
                 audioEngine.inputNode.removeTap(onBus: 0)
-                try session.setCategory(.playback, mode: .default)
-                try session.setActive(true)
+                try session.overrideOutputAudioPort(.speaker)
+                if !audioEngine.isRunning {
+                    try audioEngine.start()
+                }
                 appendLog("[Voice] Đã tắt Micro")
             }
         } catch {
             appendLog("[Voice] Lỗi cấu hình Micro: \(error.localizedDescription)")
         }
+    }
+
+    @objc private func handleAudioEngineConfigurationChange(_ notification: Notification) {
+        appendLog("[Audio] Cấu hình audio engine thay đổi, tự động khởi động lại...")
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+            try session.overrideOutputAudioPort(.speaker)
+            try session.setActive(true)
+            if !audioEngine.isRunning {
+                try audioEngine.start()
+            }
+        } catch {
+            appendLog("[Audio] Không thể khởi động lại audio engine: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func handleAudioRouteChange(_ notification: Notification) {
+        let session = AVAudioSession.sharedInstance()
+        try? session.overrideOutputAudioPort(.speaker)
     }
 
     @objc private func controllerChanged() { pollController() }
@@ -997,8 +1032,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     func showCheatMenu() {
-        guard !MugoatOnlineEnabled() else {
-            showCheatToast(L10n.text("Tiện ích cheat bị tắt khi chơi online.")); return
+        let isSandbox = (bootedMode ?? GameSettings.shared.gameMode) == .sandbox
+        guard !MugoatOnlineEnabled() || isSandbox else {
+            showCheatToast(L10n.text("Tiện ích cheat bị tắt khi chơi online ở chế độ cốt truyện.")); return
         }
         touchControls.reset()
         let cheatView = CheatMenuView(
@@ -1068,7 +1104,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func applyCheat(_ code: String, mode: CheatInputMode = .auto) {
-        guard !MugoatOnlineEnabled() else { return }
+        let isSandbox = (bootedMode ?? GameSettings.shared.gameMode) == .sandbox
+        guard !MugoatOnlineEnabled() || isSandbox else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return }
         if trimmed == "UNFREEZE" || trimmed == "SKIPSCENE" {

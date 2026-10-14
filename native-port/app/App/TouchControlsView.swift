@@ -51,6 +51,7 @@ final class ControlButton: UIView {
     private let progress = CAShapeLayer()
     private(set) var pressed = false
     var active = false { didSet { if active != oldValue { updateAppearance() } } }
+    private var currentIcon: String?
 
     init(_ name: String, icon iconName: String, label: String) {
         self.name = name
@@ -81,6 +82,8 @@ final class ControlButton: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func setIcon(_ iconName: String) {
+        guard iconName != currentIcon else { return }
+        currentIcon = iconName
         let image = UIImage(named: "icon_" + iconName)
             ?? UIImage(systemName: ControlStyle.fallbackSymbol[iconName] ?? "circle", withConfiguration: UIImage.SymbolConfiguration(weight: .bold))
         icon.image = image?.withRenderingMode(.alwaysTemplate)
@@ -405,7 +408,8 @@ final class TouchControlsView: UIView {
     }
     private func baseVisible() -> [ControlButton] {
         let online = MugoatOnlineEnabled()
-        let onlineButtons: [ControlButton] = online ? [speaker, mic, buyWeapon] : [cheat]
+        let isSandbox = (GameSettings.shared.gameMode == .sandbox)
+        let onlineButtons: [ControlButton] = online ? (isSandbox ? [speaker, mic, buyWeapon, cheat] : [speaker, mic, buyWeapon]) : [cheat]
         let utility: [ControlButton] = context.driving ? [radio, lights, camera, phone, pause, settings] + onlineButtons : [camera, phone, pause, settings] + onlineButtons
         if context == .menu { return [pause, settings] + onlineButtons + [up, down, left, right, accept, back, tabLeft, tabRight] }
         if phoneDock { return [camera, phone, pause, settings] + onlineButtons + [up, down, left, right, accept, back] }

@@ -255,8 +255,9 @@ pub fn wheel(notches: i32) {
 }
 
 pub fn apply_cheat(code: &str) {
-    if std::env::var("MUGUET_SERVER").is_ok() || std::env::var("MUGUET_HOST").is_ok() {
-        eprintln!("[cheat] blocked in multiplayer mode");
+    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+    if (std::env::var("MUGUET_SERVER").is_ok() || std::env::var("MUGUET_HOST").is_ok()) && mode != "sandbox" {
+        eprintln!("[cheat] blocked in story multiplayer mode");
         return;
     }
     let code = code.trim().to_uppercase();

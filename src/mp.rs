@@ -564,8 +564,9 @@ pub fn key_pressed(code: &str) {
 
         if t.ends_with("ineedmorebullets") {
             t.clear();
-            if crate::input::muguet_is_multiplayer() {
-                eprintln!("[anti-cheat] 'ineedmorebullets' cheat blocked in multiplayer");
+            let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+            if crate::input::muguet_is_multiplayer() && mode != "sandbox" {
+                eprintln!("[anti-cheat] 'ineedmorebullets' cheat blocked in story multiplayer");
             } else {
                 WANT_BULLETS.store(true, Ordering::Relaxed);
             }
@@ -605,13 +606,8 @@ fn net() -> Option<&'static Net> {
         let server = std::env::var("MUGUET_SERVER").ok().filter(|s| !s.trim().is_empty()).or(host.then(|| "127.0.0.1".to_string()))?;
         let server = if server.contains(':') { server } else { format!("{server}:{}", proto::DEFAULT_PORT) };
         let name = std::env::var("MUGUET_NAME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "Player".into()));
-        let mode = std::env::var("MUGUET_MODE").unwrap_or_else(|_| "sandbox".into());
         let raw_room = std::env::var("MUGUET_ROOM").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "default".into());
-        let room = if raw_room.starts_with("story-") || raw_room.starts_with("sandbox-") {
-            raw_room
-        } else {
-            format!("{mode}-{raw_room}")
-        };
+        let room = raw_room.trim().to_lowercase();
         let sock = match UdpSocket::bind("0.0.0.0:0").and_then(|s| s.connect(&server).map(|_| s)) {
             Ok(s) => s,
             Err(e) => {
@@ -1541,6 +1537,8 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
 
 fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     if ped == 0 || !c.exists(ped) { return; }
+    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+    if mode == "sandbox" { return; }
     let _ = c.i("RemoveAllPedWeapons", &[i(ped), b(true)]);
     let _ = c.i("RemoveAllPedWeapons2", &[i(ped), b(true)]);
     for w in ALL_CHEAT_WEAPONS {
@@ -1571,16 +1569,19 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     }
 
     // 2. Anti-cheat check: Remove banned cheat weapons (RPG, Minigun, Explosives)
-    let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
-    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
-    for banned in BANNED_CHEAT_WEAPONS {
-        let bh = weapon(banned);
-        if cur_w == bh && !purchased.contains(&bh) {
-            let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
-            let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
-            let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
-            eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
-            c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
+    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+    if mode != "sandbox" {
+        let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
+        let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+        for banned in BANNED_CHEAT_WEAPONS {
+            let bh = weapon(banned);
+            if cur_w == bh && !purchased.contains(&bh) {
+                let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
+                let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
+                let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+                eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
+                c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
+            }
         }
     }
 
