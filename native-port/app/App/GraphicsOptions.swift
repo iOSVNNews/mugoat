@@ -8,13 +8,13 @@ import os
 enum GraphicsPreset: Int, CaseIterable {
     case battery, performance, balanced, quality, ultra, max
 
-    var title: String { [L10n.text("Tiết kiệm pin"), L10n.text("Ưu tiên mượt"), L10n.text("Cân bằng"), L10n.text("Rõ nét"), L10n.text("Cao"), L10n.text("Tối đa")][rawValue] }
+    var title: String { [L10n.text("Tiết kiệm pin"), L10n.text("Ưu tiên mượt"), L10n.text("Cân bằng"), L10n.text("Rõ nét"), L10n.text("Cao"), L10n.text("Tối đa (4K)")][rawValue] }
     /// Render height in pixels; width follows the screen's shape.
-    var height: Int { [432, 540, 720, 900, 1080, 1290][rawValue] }
+    var height: Int { [432, 540, 720, 900, 1080, 2160][rawValue] }
     var detail: String {
         [L10n.text("432p · ít tốn RAM và pin"), L10n.text("540p · giảm hiệu ứng nặng"), L10n.text("720p · cân bằng hình ảnh và tốc độ"),
          L10n.text("900p · tăng chi tiết và khoảng nhìn"), L10n.text("1080p · bóng và phản chiếu cao"),
-         L10n.text("1290p · chi tiết đồ họa tối đa (Native)")][rawValue]
+         L10n.text("2160p (4K) · chi tiết đồ họa tối đa (Native 4K)")][rawValue]
     }
 
     /// Engine command-line options. Shader quality never goes below 1 (the
@@ -94,19 +94,19 @@ enum GraphicsConfiguration {
     /// Resolutions offered in Settings, besides "Auto" (the detail preset's own).
     static var resolutionChoices: [Int] {
         let standard = [540, 720, 900, 1080, 1290, 1440, 1620, 2160]
-        var list = standard.filter { $0 < nativeHeight }
+        var list = standard
         if !list.contains(nativeHeight) && nativeHeight >= 540 {
             list.append(nativeHeight)
         }
         list.sort()
-        return list.isEmpty ? [720] : list
+        return list
     }
     /// Width/height to render at: the chosen height (or the preset's), shaped like the screen so the
     /// picture is not stretched.
     static func size(for preset: GraphicsPreset, renderHeight: Int, screen: CGSize, matchScreenShape: Bool) -> (Int, Int) {
         let aspect = matchScreenShape && screen.height > 0 ? max(screen.width, screen.height) / min(screen.width, screen.height) : 16.0 / 9.0
         var height = Double(renderHeight > 0 ? renderHeight : preset.height)
-        height = min(max(height, 360), Double(max(nativeHeight, 720)))
+        height = min(max(height, 360), 2160.0)
         let width = min(height * aspect, 3840.0)
         func even(_ value: Double) -> Int { Int(value.rounded()) & ~1 }
         return (max(even(width), 320), max(even(height), 240))

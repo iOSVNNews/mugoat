@@ -95,6 +95,8 @@ void PGSetTargetingMode(int32_t mode);
 bool PGPauseMenuActive(void);
 void PGFillAudio(float *left, float *right, uint32_t count);
 // Health counters for the periodic log line.
+uint64_t PGMemoryBudgetQueries(void);
+uint64_t PGMemoryBudgetClamps(void);
 void PGAssetHealth(uint64_t out[6]);
 bool PGSpawnVehicle(const char *modelName);
 int PGSpawnVehicleStatus(void);

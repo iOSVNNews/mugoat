@@ -14,7 +14,10 @@
 #include <sys/mman.h>
 #include <TargetConditionals.h>
 #include <sys/sysctl.h>
+#include <os/proc.h>
+#include <mach/mach.h>
 #include "NativeEngineMemory.h"
+#include "NativeMemoryBudget.h"
 #include "MugoatOnline.h"
 
 static struct w2c_env env;
@@ -72,6 +75,40 @@ f64 w2c_env_emscripten_get_now(struct w2c_env *host) { return timeMS(CLOCK_MONOT
 f64 w2c_env_wasm_now_ms(struct w2c_env *host) { return timeMS(CLOCK_REALTIME); }
 f64 w2c_env_emscripten_date_now(struct w2c_env *host) { return timeMS(CLOCK_REALTIME); }
 u64 w2c_env_emscripten_get_heap_max(struct w2c_env *host) { wasm_rt_shared_memory_t *memory=w2c_env_memory(host);return memory->max_pages*memory->page_size; }
+static bool nativeMemoryGuard;
+static _Atomic uint64_t memoryBudgetClamps,memoryBudgetQueries;
+uint64_t PGMemoryBudgetQueries(void){return atomic_load(&memoryBudgetQueries);}
+uint64_t PGMemoryBudgetClamps(void){return atomic_load(&memoryBudgetClamps);}
+static uint64_t simulatedProcessLimit;
+static bool nativeProcessHeadroom(uint64_t *headroom){
+ if(!nativeMemoryGuard)return false;
+ atomic_fetch_add(&memoryBudgetQueries,1);
+ uint64_t available;
+#if TARGET_OS_SIMULATOR
+ if(!simulatedProcessLimit)return false;
+ task_vm_info_data_t info={};mach_msg_type_number_t count=TASK_VM_INFO_COUNT;
+ if(task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&info,&count)!=KERN_SUCCESS)return false;
+ available=simulatedProcessLimit>info.phys_footprint?simulatedProcessLimit-info.phys_footprint:0;
+#else
+ available=os_proc_available_memory();
+#endif
+ *headroom=available;
+ return true;
+}
+uint64_t pg_streaming_available_memory(uint64_t engineAvailable){
+ uint64_t available;
+ if(!nativeProcessHeadroom(&available))return engineAvailable;
+ uint64_t result=pg_streaming_headroom_budget(engineAvailable,available,384ull*1048576);
+ if(result<engineAvailable)atomic_fetch_add(&memoryBudgetClamps,1);
+ return result;
+}
+uint64_t pg_streaming_resource_memory(uint64_t engineAvailable){
+ uint64_t available;
+ if(!nativeProcessHeadroom(&available))return engineAvailable;
+ int64_t result=pg_streaming_resource_budget((int64_t)engineAvailable,available,384ull*1048576);
+ if(result<(int64_t)engineAvailable)atomic_fetch_add(&memoryBudgetClamps,1);
+ return (uint64_t)result;
+}
 static u32 nativeEngineCores=2;
 u32 w2c_env_emscripten_num_logical_cores(struct w2c_env *host) { return nativeEngineCores; }
 void w2c_env_emscripten_check_blocking_allowed(struct w2c_env *host) {}
@@ -80,6 +117,8 @@ void w2c_env_wasm_hang_line_js(struct w2c_env *host, u64 address) { pg_log(pg_st
 u32 w2c_env_wasm_has_page_js(struct w2c_env *host) { return 1; }
 u32 w2c_env_wasm_userdata_page_js(struct w2c_env *host) { return 0; }
 u32 w2c_env_wasm_module_int_js(struct w2c_env *host, u64 address, u32 fallback) {
+  const char *key = pg_string(host, address);
+  if (!strcmp(key, "lowMemory")) return 1;
   return fallback;
 }
 void w2c_env_0x5Femscripten_init_main_thread_js(struct w2c_env *host, u64 thread) {
@@ -1465,6 +1504,12 @@ void PGSetBackBufferSize(int width,int height){
   atomic_store((_Atomic int32_t *)(base+436),height&~1);
 }
 static void *boot(void *ignored) {
+  const char *guard=getenv("PG_MEMORY_GUARD");nativeMemoryGuard=guard?atoi(guard)==1:!TARGET_OS_SIMULATOR;
+#if TARGET_OS_SIMULATOR
+  const char *limit=getenv("PG_STREAM_MEMORY_LIMIT_MB");
+  if(limit){char *end;unsigned long mb=strtoul(limit,&end,10);if(end!=limit&&!*end&&mb>=2048&&mb<=8192)simulatedProcessLimit=(uint64_t)mb*1048576;}
+#endif
+  if(nativeMemoryGuard)pg_log("Native streaming memory guard enabled with 384 MB of reserve.");
   pg_assets_prewarm();
   nativeEngineCores=pg_engine_core_configuration(getenv("PG_ENGINE_CORES"));
   char coresOption[32];snprintf(coresOption,sizeof coresOption,"-numCores=%u",nativeEngineCores);
@@ -1473,7 +1518,7 @@ static void *boot(void *ignored) {
   uint64_t physicalMemory=0;size_t physicalMemorySize=sizeof physicalMemory;
   if(sysctlbyname("hw.memsize",&physicalMemory,&physicalMemorySize,NULL,0)!=0)pg_log("Physical RAM query failed; using the engine's declared maximum address space.");
   PGEngineMemory memoryConfiguration=pg_engine_memory(physicalMemory,wasm2c_game_pagesize_env_memory);
-  char memoryLog[224];snprintf(memoryLog,sizeof memoryLog,"Device RAM: %llu MB; engine virtual capacity: %llu MB; initial logical heap: %llu MB. No app streaming RAM clamp.",physicalMemory/1048576,memoryConfiguration.maximumPages*wasm2c_game_pagesize_env_memory/1048576,memoryConfiguration.initialPages*wasm2c_game_pagesize_env_memory/1048576);pg_log(memoryLog);
+  char memoryLog[256];snprintf(memoryLog,sizeof memoryLog,"Device RAM: %llu MB; engine virtual capacity: %llu MB; initial logical heap: %llu MB. Native streaming RAM clamp active with 384 MB headroom reserve.",physicalMemory/1048576,memoryConfiguration.maximumPages*wasm2c_game_pagesize_env_memory/1048576,memoryConfiguration.initialPages*wasm2c_game_pagesize_env_memory/1048576);pg_log(memoryLog);
 #if defined(PG_HAS_ARM64_SHARED_VECTORS) && !defined(PG_SHARED_SIMD_BYTEWISE)
   pg_log("Shared vector memory uses native ARM64 instructions with bounds checks.");
 #else

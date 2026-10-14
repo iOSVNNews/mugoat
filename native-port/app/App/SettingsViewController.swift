@@ -578,6 +578,9 @@ final class SettingsViewController: UITableViewController {
             let (_, h) = GraphicsConfiguration.size(for: engineRunning ? bootPreset : settings.graphicsPreset, renderHeight: 0, screen: screen, matchScreenShape: settings.matchScreenShape)
             return "Auto (\(h)p)"
         }
+        if height == 2160 {
+            return height == GraphicsConfiguration.nativeHeight ? "4K Native (2160p)" : "4K (2160p)"
+        }
         return height == GraphicsConfiguration.nativeHeight ? "Native (\(height)p)" : "\(height)p"
     }
     private func reloadFooters() {
