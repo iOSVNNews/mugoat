@@ -311,7 +311,7 @@ struct Net {
 
     hits: Mutex<Vec<(u8, u8, u16, u32)>>,
 
-    car_hits: Mutex<Vec<(u8, i16, i16, u8, i16, Option<u32>)>>,
+    car_hits: Mutex<Vec<(u8, i16, i16, u8, i16, Option<(u32, u32)>)>>,
 
     time: Mutex<Option<(u8, [u8; 4], Option<(u8, u8, f32)>)>>,
 
@@ -624,7 +624,7 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
                 let (tank, destroyed) = if p.len() >= 10 { (i16::from_le_bytes([p[7], p[8]]), p[9] & 1 != 0) } else { (0, false) };
                 let engine = i16::from_le_bytes([p[2], p[3]]);
                 let body = i16::from_le_bytes([p[4], p[5]]);
-                let model = (p.len() >= 14).then(|| u32::from_le_bytes(p[10..14].try_into().unwrap()));
+                let model = (p.len() >= 18).then(|| (u32::from_le_bytes(p[10..14].try_into().unwrap()), u32::from_le_bytes(p[14..18].try_into().unwrap())));
                 // Legacy replica-death claims are not permission to explode
                 // the owner's current (possibly different) vehicle.
                 if !destroyed && p[0] != p[1] && [engine,body,tank].iter().all(|v| (0..=5000).contains(v)) && h.len() < 64 {
@@ -800,6 +800,7 @@ struct Avatar {
     ped_model: u32,
     veh: i32,
     veh_model: u32,
+    veh_key: u32,
     veh_colours: [u8; 2],
 
     veh_damage: (i16, i16, i16, u8, u8, bool),
@@ -1353,6 +1354,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             let mut payload = game.seq.to_le_bytes().to_vec();
             s.encode(&mut payload);
             payload.extend((START.get_or_init(Instant::now).elapsed().as_millis() as u32).to_le_bytes());
+            payload.extend(s.veh_key.to_le_bytes());
             let _ = net.sock.send(&proto::packet(proto::STATE, &payload));
         }
         let veh = if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 { c.i("GetVehiclePedIsIn", &[i(ped), b(false)]) } else { 0 };
@@ -1642,6 +1644,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             p.extend(a.car_hit.3.to_le_bytes());
             p.push(0); // Vehicle death is authoritative in the owner's STATE.
             p.extend(a.veh_model.to_le_bytes());
+            p.extend(a.veh_key.to_le_bytes());
             send_reliable(net, proto::VHIT, &p, Some(*id));
             a.car_hit = (0, 0, 0, 0);
         }
@@ -1703,7 +1706,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             if Some(target) != my_id {
                 continue;
             }
-            if reported_model != Some(model) { continue; }
+            if !proto::vehicle_hit_targets_current_car(reported_model,model,my_car as u32) { continue; }
             if dk > 0 {
                 let t = c.f("GetVehiclePetrolTankHealth", &[i(my_car)]);
                 c.i("SetVehiclePetrolTankHealth", &[i(my_car), f(t - dk as f32)]);
@@ -2052,6 +2055,7 @@ fn local_state(c: &mut Cmd, game: &Game, ped: i32, pos: [f32; 3]) -> State {
     let veh = if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 { c.i("GetVehiclePedIsIn", &[i(ped), b(false)]) } else { 0 };
     if veh != 0 {
         s.flags |= proto::FLAG_IN_VEHICLE;
+        s.veh_key = veh as u32;
         s.veh_model = c.i("GetEntityModel", &[i(veh)]) as u32;
         s.veh_pos = c.v("GetEntityCoords", &[i(veh), b(false)]);
         s.veh_rot = c.v_packed("GetEntityRotation", &[i(veh), i(2)]);
@@ -2401,6 +2405,7 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
         } else {
             a.veh = old.veh;
             a.veh_model = old.veh_model;
+            a.veh_key = old.veh_key;
         }
         a.hit = hit;
     }
@@ -2502,7 +2507,7 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     }
 
     if s.in_vehicle() {
-        if a.veh != 0 && (!c.exists(a.veh) || a.veh_model != s.veh_model) {
+        if a.veh != 0 && (!c.exists(a.veh) || a.veh_model != s.veh_model || (s.veh_key != 0 && a.veh_key != s.veh_key)) {
             delete_vehicle(c, a.veh);
             a.veh = 0;
         }
@@ -2534,9 +2539,11 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
             }
             a.veh = veh;
             a.veh_model = s.veh_model;
+            a.veh_key = s.veh_key;
             a.veh_colours = [255, 255];
             eprintln!("[mp] avatar car {veh} (model {:#x})", s.veh_model);
             a.veh_damage = (1000, 1000, 1000, 0, 0, false);
+            a.car_hit = (0, 0, 0, 0);
             a.veh_look = None;
             a.vctl = None;
             c.i("SetVehicleEngineOn", &[i(veh), b(true), b(true), b(false)]);

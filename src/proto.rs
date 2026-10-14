@@ -14,6 +14,10 @@ pub fn vehicle_hit_delta(previous: [i16; 3], observed: [i16; 3], local_attack: b
     std::array::from_fn(|k| (previous[k] as i32 - observed[k] as i32).clamp(0, 5000) as i16)
 }
 
+pub fn vehicle_hit_targets_current_car(reported: Option<(u32, u32)>, model: u32, entity: u32) -> bool {
+    reported == Some((model, entity))
+}
+
 #[cfg(test)]
 mod vehicle_tests {
     use super::*;
@@ -28,6 +32,19 @@ mod vehicle_tests {
         assert_eq!(vehicle_hit_delta([1000; 3], [950, 900, 1000], true), [50, 100, 0]);
         assert_eq!(vehicle_hit_delta([500; 3], [1000; 3], true), [0; 3]);
         assert_eq!(vehicle_hit_delta([i16::MAX; 3], [i16::MIN; 3], true), [5000; 3]);
+    }
+    #[test]
+    fn old_vehicle_hits_do_not_transfer_to_a_new_vehicle_of_the_same_model() {
+        assert!(vehicle_hit_targets_current_car(Some((123, 77)), 123, 77));
+        assert!(!vehicle_hit_targets_current_car(Some((123, 77)), 123, 78));
+        assert!(!vehicle_hit_targets_current_car(Some((123, 77)), 124, 77));
+        assert!(!vehicle_hit_targets_current_car(None, 123, 77));
+        let mut wire=Vec::new();State::default().encode(&mut wire);
+        assert_eq!(wire.len(), STATE_SIZE);
+        assert_eq!(State::decode(&wire).unwrap().veh_key,0);
+        wire.extend(1234u32.to_le_bytes()); // existing send timestamp
+        wire.extend(77u32.to_le_bytes());   // optional owner-side vehicle handle
+        assert_eq!(State::decode(&wire).unwrap().veh_key,77);
     }
 }
 
@@ -97,6 +114,8 @@ pub struct State {
     pub vel: [f32; 3],
     pub flags: u8,
     pub veh_model: u32,
+    // Optional STATE trailer after its timestamp; base wire layout is unchanged.
+    pub veh_key: u32,
     pub veh_pos: [f32; 3],
     pub veh_rot: [f32; 3],
     pub veh_vel: [f32; 3],
@@ -184,6 +203,7 @@ impl State {
         let aim = [a(0), a(1), a(2)];
         let s = State {
             ped_model, pos, heading, vel, flags, veh_model, veh_pos, veh_rot, veh_vel,
+            veh_key: b.get(STATE_SIZE+4..STATE_SIZE+8).map(|v| u32::from_le_bytes(v.try_into().unwrap())).unwrap_or(0),
             weapon, health, armour: t[0], veh_owner: t[1], seat: t[2] as i8, veh_colours: [t[3], t[4]],
             veh_engine: h(5), veh_body: h(7), veh_tank: h(9), veh_tyres: t[11], veh_windows: t[12], veh_dead: t[13] != 0, aim,
         };

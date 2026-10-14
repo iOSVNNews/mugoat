@@ -11,7 +11,6 @@ import argparse
 import hashlib
 import json
 import sys
-import urllib.request
 from pathlib import Path
 from download_ranges import download
 
@@ -26,7 +25,7 @@ parser.add_argument('--out', type=Path, required=True, help='folder to place a m
 args = parser.parse_args()
 server = args.server.rstrip('/')
 
-def fetch(relative, expected_sha256=None):
+def fetch(relative, expected_sha256=None, expected_bytes=None):
     target = args.out / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     print(f'Downloading {relative} from your server...', flush=True)
@@ -34,6 +33,8 @@ def fetch(relative, expected_sha256=None):
     for attempt in range(1, 4):
         try:
             download(f'{server}/{relative}', target, expected_sha256)
+            if expected_bytes is not None and target.stat().st_size != expected_bytes:
+                raise ValueError('Shader pack size does not match the pinned index')
             return target
         except Exception as error:
             last_error = error
@@ -51,7 +52,8 @@ index = fetch(SHADERS + '/index.json', SHADER_INDEX_SHA256)
 if hashlib.sha256(index.read_bytes()).hexdigest() != SHADER_INDEX_SHA256:
     sys.exit('Your shader index does not match game build 8b0b5899ed.')
 for pack in json.loads(index.read_text())['_packs']:
-    if not (args.out / SHADERS / pack['file']).exists():
-        fetch(SHADERS + '/' + pack['file'])
+    target = args.out / SHADERS / pack['file']
+    if not target.exists() or target.stat().st_size != pack['bytes']:
+        fetch(SHADERS + '/' + pack['file'], expected_bytes=pack['bytes'])
 print('Game files OK.')
 
