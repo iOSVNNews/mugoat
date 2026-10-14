@@ -855,6 +855,8 @@ struct Game {
     my_car: i32,
 
     was_dead: bool,
+    was_enter_pressed: bool,
+    last_enter_task: Option<Instant>,
     last_tidy: Instant,
     last_pop: Instant,
     sent_vlook: Option<(Instant, VehLook)>,
@@ -1078,6 +1080,8 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
         last_swing: Instant::now(),
         my_car: 0,
         was_dead: false,
+        was_enter_pressed: false,
+        last_enter_task: None,
         last_tidy: Instant::now(),
         last_pop: Instant::now(),
         sent_vlook: None,
@@ -1844,16 +1848,45 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         }
     }
 
-    if WANT_ENTER.swap(false, Ordering::Relaxed) && me_ok && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 {
-        let near = game.avatars.values().filter(|a| a.veh != 0).map(|a| a.veh).min_by(|x, y| {
+    const INPUT_ENTER: i32 = 23;
+    let enter_held = c.i("IsControlPressed", &[i(0), i(INPUT_ENTER)]) != 0;
+    let just_enter = (enter_held && !game.was_enter_pressed) || WANT_ENTER.swap(false, Ordering::Relaxed);
+    game.was_enter_pressed = enter_held;
+
+    if me_ok && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 {
+        let near = game.avatars.values().filter(|a| a.veh != 0 && c.exists(a.veh)).map(|a| a.veh).min_by(|x, y| {
             let dx = dist(c_pos(c, *x), my_pos);
             let dy = dist(c_pos(c, *y), my_pos);
             dx.total_cmp(&dy)
         });
-        if let Some(veh) = near.filter(|v| dist(c_pos(c, *v), my_pos) < 10.0) {
-            if let Some(seat) = (0..6).find(|s| c.i("IsVehicleSeatFree", &[i(veh), i(*s), b(false)]) != 0) {
-                c.i("TaskEnterVehicle", &[i(ped), i(veh), i(10000), i(seat), f(1.0), i(1), Val::I64(0)]);
-                eprintln!("[mp] getting in a friend's car, seat {seat}");
+
+        let trying = c.i("GetVehiclePedIsTryingToEnter", &[i(ped)]);
+        let trying_friend = trying != 0 && game.avatars.values().any(|a| a.veh == trying);
+        let entering_seat = if trying_friend { c.i("GetSeatPedIsTryingToEnter", &[i(ped)]) } else { -2 };
+        let hijack_attempt = trying_friend && entering_seat == -1 && c.i("IsVehicleSeatFree", &[i(trying), i(-1), b(false)]) == 0;
+
+        let debounce_ok = game.last_enter_task.map(|t| t.elapsed() > Duration::from_millis(1200)).unwrap_or(true);
+
+        if (just_enter || hijack_attempt) && debounce_ok {
+            let target_veh = if trying_friend { Some(trying) } else { near.filter(|v| dist(c_pos(c, *v), my_pos) < 8.0) };
+            if let Some(veh) = target_veh {
+                let driver = c.i("GetPedInVehicleSeat", &[i(veh), i(-1), b(false)]);
+                if driver != 0 && driver != ped {
+                    if let Some(seat) = (0..6).find(|s| c.i("IsVehicleSeatFree", &[i(veh), i(*s), b(false)]) != 0) {
+                        game.last_enter_task = Some(Instant::now());
+                        let d = dist(c_pos(c, veh), my_pos);
+                        let moving = c.f("GetEntitySpeed", &[i(veh)]) > 1.2;
+                        if d < 2.5 && (moving || enter_held) {
+                            c.i("ClearPedTasksImmediately", &[i(ped)]);
+                            c.i("SetPedIntoVehicle", &[i(ped), i(veh), i(seat)]);
+                            eprintln!("[mp] instant passenger enter friend's car {veh}, seat {seat}");
+                        } else {
+                            c.i("ClearPedTasks", &[i(ped)]);
+                            c.i("TaskEnterVehicle", &[i(ped), i(veh), i(10000), i(seat), f(2.0), i(1), Val::I64(0)]);
+                            eprintln!("[mp] entering friend's car {veh}, seat {seat}");
+                        }
+                    }
+                }
             }
         }
     }
@@ -2000,7 +2033,8 @@ fn local_state(c: &mut Cmd, game: &Game, ped: i32, pos: [f32; 3]) -> State {
         s.veh_vel = c.v("GetEntityVelocity", &[i(veh)]);
         s.seat = (-1..6).find(|seat| c.i("GetPedInVehicleSeat", &[i(veh), i(*seat), b(false)]) == ped).unwrap_or(-1) as i8;
 
-        s.veh_owner = game.avatars.iter().find(|(_, a)| a.veh == veh).map(|(id, _)| *id).unwrap_or(0);
+        let driver_ped = c.i("GetPedInVehicleSeat", &[i(veh), i(-1), b(false)]);
+        s.veh_owner = game.avatars.iter().find(|(_, a)| (driver_ped != 0 && a.ped == driver_ped) || (a.veh != 0 && a.veh == veh)).map(|(id, _)| *id).unwrap_or(0);
         let (p1, p2) = (c.ptr(S_INT), c.ptr(S_INT2));
         c.i("GetVehicleColours", &[i(veh), p1, p2]);
         s.veh_colours = [c.read_i32(S_INT).clamp(0, 255) as u8, c.read_i32(S_INT2).clamp(0, 255) as u8];
@@ -2407,8 +2441,16 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     if s.in_vehicle() && s.veh_owner != 0 {
         delete_vehicle(c, std::mem::take(&mut a.veh));
         if let Some(&car) = cars.get(&s.veh_owner) {
-            if c.i("GetVehiclePedIsIn", &[i(ped), b(false)]) != car && c.i("IsVehicleSeatFree", &[i(car), i(s.seat as i32), b(false)]) != 0 {
-                c.i("SetPedIntoVehicle", &[i(ped), i(car), i(s.seat as i32)]);
+            let in_car = c.i("GetVehiclePedIsIn", &[i(ped), b(false)]);
+            if in_car != car {
+                let free_seat = if c.i("IsVehicleSeatFree", &[i(car), i(s.seat as i32), b(false)]) != 0 {
+                    Some(s.seat as i32)
+                } else {
+                    (0..6).find(|&seat| c.i("IsVehicleSeatFree", &[i(car), i(seat), b(false)]) != 0)
+                };
+                if let Some(target_seat) = free_seat {
+                    c.i("SetPedIntoVehicle", &[i(ped), i(car), i(target_seat)]);
+                }
             }
         } else {
             let pos = c.vec_arg(1, s.pos);
