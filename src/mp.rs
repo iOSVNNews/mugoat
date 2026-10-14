@@ -1749,7 +1749,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         const INPUT_ATTACK: i32 = 24;
         const INPUT_MELEE_LIGHT: i32 = 140;
         const INPUT_MELEE_HEAVY: i32 = 141;
-        let melee = !gun && c.i("IsPedArmed", &[i(ped), i(ARMED_THROWN)]) == 0 && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0;
+        let melee = !gun && c.i("IsPedArmed", &[i(ped), i(ARMED_THROWN)]) == 0
+            && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0
+            && c.i("IsPedRagdoll", &[i(ped)]) == 0;
         if melee && game.last_swing.elapsed() >= Duration::from_millis(450)
             && (c.i("IsPedShooting", &[i(ped)]) != 0 || [INPUT_ATTACK, INPUT_MELEE_LIGHT, INPUT_MELEE_HEAVY].iter().any(|k| c.i("IsControlPressed", &[i(0), i(*k)]) != 0))
         {
@@ -2031,8 +2033,8 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             if w != 0 && c.i("GetWeaponDamageType", &[i(w as i32)]) == DAMAGE_MELEE {
                 c.c_str(S_NAME, "SMALL_EXPLOSION_SHAKE");
                 c.i("ShakeGameplayCam", &[c.ptr(S_NAME), f(0.25)]);
-                if w != weapon("weapon_unarmed") && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 {
-                    c.i("SetPedToRagdoll", &[i(ped), i(600), i(900), i(0), b(false), b(false), b(false)]);
+                if w != weapon("weapon_unarmed") && dmg >= 25 && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 && c.i("IsPedRagdoll", &[i(ped)]) == 0 {
+                    c.i("SetPedToRagdoll", &[i(ped), i(500), i(700), i(0), b(false), b(false), b(false)]);
                 }
             }
             let mut dmg = dmg as i32;
@@ -2590,7 +2592,7 @@ fn punch_anim(c: &mut Cmd) -> Option<(&'static str, &'static str)> {
 }
 
 fn swing(c: &mut Cmd, a: &mut Avatar, to: [f32; 3]) {
-    if a.veh != 0 {
+    if a.veh != 0 || a.ragdoll.is_some() || c.i("IsPedRagdoll", &[i(a.ped)]) != 0 {
         return;
     }
     let Some((dict, clip)) = punch_anim(c) else { return };
@@ -2976,11 +2978,11 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     }
 
     if s.ragdoll() {
-        let renew = a.ragdoll.map(|t| t.elapsed() > Duration::from_millis(1500)).unwrap_or(true);
+        let renew = a.ragdoll.map(|t| t.elapsed() > Duration::from_millis(400)).unwrap_or(true);
         if renew {
             let first = a.ragdoll.is_none();
             c.i("SetPedCanRagdoll", &[i(ped), b(true)]);
-            c.i("SetPedToRagdoll", &[i(ped), i(2500), i(2500), i(0), b(false), b(false), b(false)]);
+            c.i("SetPedToRagdoll", &[i(ped), i(600), i(800), i(0), b(false), b(false), b(false)]);
             if first {
                 let v = c.vec_arg(1, s.vel);
                 c.i("SetEntityVelocity", &[i(ped), v]);
@@ -2995,7 +2997,12 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
         return;
     }
     if a.ragdoll.take().is_some() {
+        c.i("ClearPedTasksImmediately", &[i(ped)]);
         c.i("SetPedCanRagdoll", &[i(ped), b(false)]);
+        a.walk.since = None;
+    }
+    if c.i("IsPedRagdoll", &[i(ped)]) != 0 {
+        return;
     }
 
     if s.entering() {
@@ -3233,6 +3240,9 @@ fn steer_vehicle(c: &mut Cmd, veh: i32, pos: [f32; 3], rot: [f32; 3], vel: [f32;
 }
 
 fn aim_walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], aim: [f32; 3]) {
+    if c.i("IsPedRagdoll", &[i(ped)]) != 0 {
+        return;
+    }
     let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
     let err = dist(cur, pos);
     if err > 0.15 {
@@ -3259,6 +3269,9 @@ fn aim_walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3],
 }
 
 fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], heading: f32) {
+    if c.i("IsPedRagdoll", &[i(ped)]) != 0 {
+        return;
+    }
     let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
     let speed = (vel[0].powi(2) + vel[1].powi(2)).sqrt();
     let err = dist(cur, pos);
