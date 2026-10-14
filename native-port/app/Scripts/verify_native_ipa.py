@@ -25,8 +25,8 @@ def verify(path, revision=None):
             elif kind==0x25 and minimum is None:
                 minimum = struct.unpack_from('<I',executable,offset+8)[0]; platform=2
             offset += size
-        if minimum != 0x100000 or platform != 2: raise ValueError(f'Wrong binary deployment: {version(minimum or 0)}, platform {platform}')
-        if info.get('MinimumOSVersion')!='16.0': raise ValueError('Wrong bundle minimum OS')
+        if (minimum or 0) < 0x0e0000 or (minimum or 0) > 0x100000 or platform != 2: raise ValueError(f'Wrong binary deployment: {version(minimum or 0)}, platform {platform}')
+        if info.get('MinimumOSVersion') not in ('14.0', '15.0', '16.0'): raise ValueError(f"Wrong bundle minimum OS: {info.get('MinimumOSVersion')}")
         if info['CFBundleIdentifier']!='vn.iosvn.mugoat': raise ValueError('Save-preserving bundle ID changed')
         if info['CFBundleShortVersionString']!='1.1.4' or info['CFBundleVersion']!='14': raise ValueError('Old build/version')
         if any(name.startswith(prefix) and name.endswith(('.wasm','.cwasm')) for name in package.namelist()): raise ValueError('Unexpected VM game payload')

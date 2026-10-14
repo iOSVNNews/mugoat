@@ -36,5 +36,5 @@ Bản cập nhật **v1.1.4** khắc phục triệt để các lỗi gameplay c�
 ---
 
 ### 📦 Tệp cài đặt:
-- **`Mugoat.ipa`**: Bản IPA chuẩn (Apple ID Free), hỗ trợ iOS 16.0+, tương thích mọi công cụ ký (TrollStore, ESign, Scarlet, AltStore, SideStore, Sideloadly).
+- **`Mugoat.ipa`**: Bản IPA chuẩn (Apple ID Free), hỗ trợ iOS 14.0+ (iOS 14, iOS 15, iOS 16, iOS 17, iOS 18+), tương thích mọi công cụ ký (TrollStore, ESign, Scarlet, AltStore, SideStore, Sideloadly).
 - **`Mugoat-Cert-Paid.ipa`**: Bản mở rộng bộ nhớ dành cho chứng chỉ nhà phát triển (Paid Developer Certificate).

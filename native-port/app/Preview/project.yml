@@ -1,7 +1,7 @@
 name: MugoatPreview
 options:
   deploymentTarget:
-    iOS: '16.0'
+    iOS: '14.0'
 targets:
   MugoatPreview:
     type: application

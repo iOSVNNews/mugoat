@@ -24,7 +24,7 @@ if [ -n "$SERVER" ]; then
 fi
 "$PY" Scripts/check_game_files.py --mirror "$MIRROR"
 mkdir -p Build/Online
-IPHONEOS_DEPLOYMENT_TARGET=16.0 cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
+IPHONEOS_DEPLOYMENT_TARGET=14.0 cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
 cp ../online-bridge/target/aarch64-apple-ios/release/libmugoat_online.a Build/Online/
 test -s Build/Online/libmugoat_online.a
 if [ "${PG_REUSE_PREPARED:-0}" = "1" ] && [ -s Generated/native-prepared-v1.txt ] && [ -s Generated/game_0.c ] && [ -s Generated/MugoatCommands.c ] && [ -s GeneratedResources/shaders-iphoneos.metallib ]; then

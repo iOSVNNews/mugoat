@@ -847,10 +847,14 @@ u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
 u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
 void w2c_game_f57201(w2c_game*, u32, u32, u32); // ped_commands::CommandSetPedIntoVehicle
 
+u64* w2c_game_mugoat0x3Atls0x2Dbase(w2c_game*);
+
 // Script commands that create entities need a running script: lends them the "main" script's
-// thread (the active thread is per engine thread, at g1 + 3088). Returns the previous one.
+// thread (the active thread is per engine thread, at tls + 3088). Returns the previous one.
 static uint64_t pg_test_enter_script(w2c_game *instance) {
-  uint64_t *active = pg_pointer(&env, instance->w2c_g1 + 3088, 8), previous = *active;
+  u64 *base = w2c_game_mugoat0x3Atls0x2Dbase(instance);
+  if (!base) return 0;
+  uint64_t *active = pg_pointer(&env, *base + 3088, 8), previous = *active;
   uint64_t threads = *(uint64_t *)pg_pointer(&env, 15409704, 8);
   uint16_t count = *(uint16_t *)pg_pointer(&env, 15409712, 2);
   for (uint16_t i = 0; i < count; i++) {
@@ -860,7 +864,9 @@ static uint64_t pg_test_enter_script(w2c_game *instance) {
   return previous;
 }
 static void pg_test_leave_script(w2c_game *instance, uint64_t previous) {
-  *(uint64_t *)pg_pointer(&env, instance->w2c_g1 + 3088, 8) = previous;
+  u64 *base = w2c_game_mugoat0x3Atls0x2Dbase(instance);
+  if (!base) return;
+  *(uint64_t *)pg_pointer(&env, *base + 3088, 8) = previous;
 }
 
 static inline uint32_t pg_joaat(const char *key) {
