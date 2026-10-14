@@ -49,6 +49,7 @@ struct ResBinding {
 };
 struct ShaderInfo {
 	std::string hash, label;
+	bool water = false;
 	uint8_t stage = 0;		// 0 vs, 1 ps, 2 cs
 	std::vector<ResBinding> res;
 	std::vector<uint32_t> inputs, outputs;

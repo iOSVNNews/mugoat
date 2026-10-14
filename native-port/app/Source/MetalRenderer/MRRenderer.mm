@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdarg>
+#include <cstring>
 
 namespace mr {
 
@@ -201,6 +202,7 @@ struct Renderer {
 	// statistics
 	uint64_t commitReasons[4] = {}, skipReasons[8] = {};
 	uint64_t draws = 0, skipped = 0, pendingSkips = 0, clamped = 0, presents = 0, commits = 0;
+	uint64_t waterDraws = 0, waterSkipped = 0, waterPending = 0, waterMissingTextures = 0;
 	double statT = 0, busyMs = 0, lastCommitMs = 0, lastPresentMs = 0;
 	FrameWork work;
 	uint64_t statDraws = 0, statPresents = 0, statSkips = 0, statPending = 0, statCommits = 0;
@@ -1069,6 +1071,12 @@ static bool bindStage(int stage, ShaderInfo *info) {
 				} else tex = srvTexture(v, t, b);
 				if (tex) { t->lastUse = R->serial; if (t->floatNoFilter && b.pairedSampler >= 0) texFloatNoFilterSamplers |= 1u << b.pairedSampler; }
 			}
+			if (!tex && info->water) {
+				R->waterMissingTextures++;
+				logOnce("water-srv-" + info->hash + "-" + std::to_string(b.binding),
+				        "[water] %s t%u unavailable: srv=%u texture=%u dxgi=%u kind=%u; using fallback",
+				        info->label.c_str(), b.binding - 32, v ? v->oid : 0, t ? t->oid : 0, t ? t->dxgi : 0, (unsigned)b.kind);
+			}
 			setTexture(stage, tex ?: dummyTexture(b.kind, b.dim, b.sample), b.index);
 		}
 		}
@@ -1238,7 +1246,20 @@ static void drawInner(const uint32_t *p);
 static const char *drawOutcome;
 static void draw(const uint32_t *p) {
 	drawOutcome = "ok";
+	Shader *waterVs = R->objs.as<Shader>(R->shader[0], OShader), *waterPs = R->objs.as<Shader>(R->shader[1], OShader);
+	bool water = (waterVs && waterVs->info && waterVs->info->water) || (waterPs && waterPs->info && waterPs->info->water);
+	uint64_t before = R->draws;
 	drawInner(p);
+	if (water) {
+		if (R->draws != before) R->waterDraws++;
+		else if (!strcmp(drawOutcome, "SKIP-pending")) R->waterPending++;
+		else {
+			R->waterSkipped++;
+			logOnce(std::string("water-draw-") + (waterPs && waterPs->info ? waterPs->info->hash : waterVs->info->hash) + drawOutcome,
+			        "[water] draw skipped: %s + %s (%s)", waterVs && waterVs->info ? waterVs->info->label.c_str() : "-",
+			        waterPs && waterPs->info ? waterPs->info->label.c_str() : "-", drawOutcome);
+		}
+	}
 #if MR_TRACE
 	if (T.state == 2) {
 		traceDraw(p, R->objs.as<Shader>(R->shader[0], OShader), R->objs.as<Shader>(R->shader[1], OShader), R->objs.as<Layout>(R->layout, OLayout), drawOutcome);
@@ -1999,6 +2020,11 @@ static void report() {
 	std::string skips;
 	for (int i = 0; i < 5; i++) if (R->skipReasons[i]) { char b[64]; snprintf(b, sizeof b, "%s%s %llu", skips.empty() ? "" : ", ", skipNames[i], (unsigned long long)R->skipReasons[i]); skips += b; }
 	logf("[metal] command buffers per frame: %s; skipped draws: %s", reasons.c_str(), skips.empty() ? "none" : skips.c_str());
+	if (R->waterDraws || R->waterSkipped || R->waterPending || R->waterMissingTextures) {
+		logf("[water] interval: draws=%llu skipped=%llu awaiting_pipeline=%llu fallback_textures=%llu",
+		     (unsigned long long)R->waterDraws, (unsigned long long)R->waterSkipped, (unsigned long long)R->waterPending, (unsigned long long)R->waterMissingTextures);
+		R->waterDraws = R->waterSkipped = R->waterPending = R->waterMissingTextures = 0;
+	}
 	memset(R->commitReasons, 0, sizeof R->commitReasons); memset(R->skipReasons, 0, sizeof R->skipReasons);
 	R->statT = now; R->statDraws = R->draws; R->statPresents = R->presents; R->statSkips = R->skipped; R->statPending = R->pendingSkips; R->statCommits = R->commits; R->busyMs = 0;
 }

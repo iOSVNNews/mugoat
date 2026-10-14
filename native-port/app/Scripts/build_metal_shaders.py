@@ -38,6 +38,31 @@ def compile_batch(sdk, compiler, sources, air):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def compile_batches(sdk, compiler, sources, air):
+    batches = [sources[i:i + 48] for i in range(0, len(sources), 48)]
+    errors = []
+    with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 8) as pool:
+        for fut in concurrent.futures.as_completed([pool.submit(compile_batch, sdk, compiler, b, air) for b in batches]):
+            try:
+                fut.result()
+            except Exception as error:
+                errors.append(str(error)[-3000:])
+    # A failed batch may leave older AIR files in the cache. Never link those
+    # into a successful-looking library for newly translated shader sources.
+    if errors:
+        raise RuntimeError(f'{sdk}: {len(errors)} shader batches failed; refusing cached AIR\n' + '\n'.join(errors[:3]))
+    print('%s: compiled %d shaders in %d batches' % (sdk, len(sources), len(batches)))
+
+
+def check_reflection(entries, records):
+    expected = {h: r['stage'] for h, r in entries}
+    actual = {r['h']: r['st'] for r in records}
+    if len(actual) != len(records) or actual != expected:
+        raise ValueError('Translated shader coverage/stages do not match the pinned index')
+    water = sum(r.get('effect', '').lower().startswith('water') for _, r in entries)
+    print(f'Shader coverage OK: {len(actual)} total, {water} water programs')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('shaders')
@@ -61,6 +86,9 @@ def main():
     print(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'pgmsl: no output')
     if r.returncode:
         sys.exit(r.stderr)
+    with open(reflection) as source:
+        records = [json.loads(line) for line in source if line.strip()]
+    check_reflection(entries, records)
 
     # reflection + labels + constant tables (binding 15: one u32 per 16-byte row)
     with open(os.path.join(OUT, 'shader-reflection.jsonl'), 'w') as out:
@@ -72,7 +100,7 @@ def main():
                 o['k'] = json.load(open(os.path.join(args.shaders, o['h'] + '.consts.json')))
             out.write(json.dumps(o, separators=(',', ':')) + '\n')
 
-    hashes = [json.loads(l)['h'] for l in open(reflection)]
+    hashes = [record['h'] for record in records]
     for sdk in sdks:
         air = os.path.join(WORK, 'air-' + sdk)
         os.makedirs(air, exist_ok=True)
@@ -82,17 +110,7 @@ def main():
             src, dst = os.path.join(msl, h + '.metal'), os.path.join(air, h + '.air')
             if not (os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src)):
                 stale.append(src)
-        batches = [stale[i:i + 48] for i in range(0, len(stale), 48)]
-        failed = 0
-        with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 8) as pool:
-            for fut in concurrent.futures.as_completed([pool.submit(compile_batch, sdk, compiler, b, air) for b in batches]):
-                try:
-                    fut.result()
-                except Exception as e:
-                    failed += 1
-                    if failed <= 3:
-                        print(str(e)[-3000:])
-        print('%s: compiled %d shaders in %d batches' % (sdk, len(stale), len(batches)))
+        compile_batches(sdk, compiler, stale, air)
         files = os.path.join(WORK, 'air-' + sdk + '.txt')
         with open(files, 'w') as f:
             for h in hashes:

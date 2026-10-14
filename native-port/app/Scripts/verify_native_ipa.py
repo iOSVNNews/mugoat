@@ -33,6 +33,11 @@ def verify(path, revision=None):
         for forbidden in [b'wasmtime_runtime',b'wgpu_core',b'wasmtime::']:
             if forbidden in executable: raise ValueError('Old VM/graphics runtime remains in executable')
         if not any(name.startswith(prefix) and name.endswith('.metallib') for name in package.namelist()): raise ValueError('Missing precompiled Metal shaders')
+        reflection = [json.loads(line) for line in package.read(prefix+'shader-reflection.jsonl').decode().splitlines() if line.strip()]
+        water = [r for r in reflection if r.get('label', '').lower().startswith('water')]
+        required_water = {'32e84be21524b7c6', '42a59be5a7691926', '2ca24ae3085bc3b8', 'ff354dbd42b652b9', '27f7ce1f40d20b20'}
+        if len(water) != 100 or len({r['h'] for r in water}) != 100 or not required_water <= {r['h'] for r in water}:
+            raise ValueError('Incomplete water shader coverage for pinned game build 8b0b5899ed')
         actual_revision = package.read(prefix+'iosvn-build-revision.txt').decode().strip()
         if revision and actual_revision!=revision: raise ValueError('IPA source revision mismatch')
         icon_files=[name for name in package.namelist() if name.startswith(prefix+'AppIcon') and name.endswith('.png')]
@@ -40,6 +45,7 @@ def verify(path, revision=None):
         return {'ipa':str(path),'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
                 'architecture':'ARM64 native','binary_minimum_os':version(minimum),'bundle_minimum_os':info['MinimumOSVersion'],
                 'bundle_id':info['CFBundleIdentifier'],'version':'1.1.6 (16)','revision':actual_revision,'metal_library':True,
+                'water_shader_programs':len(water),
                 'vm_game_payload':False,'old_vm_graphics_runtime':False,'app_icon_files':icon_files}
 
 if __name__=='__main__':

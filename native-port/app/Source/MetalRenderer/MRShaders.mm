@@ -84,6 +84,7 @@ bool loadShaderLibrary(id<MTLDevice> device) {
 		auto info = std::make_unique<ShaderInfo>();
 		info->hash = [o[@"h"] UTF8String];
 		info->label = [o[@"label"] UTF8String] ?: "";
+		info->water = [o[@"label"] hasPrefix:@"water"];
 		NSString *st = o[@"st"];
 		info->stage = [st isEqualToString:@"vs"] ? 0 : [st isEqualToString:@"ps"] ? 1 : 2;
 		for (NSArray *r in o[@"res"]) {
@@ -130,6 +131,16 @@ bool loadShaderLibrary(id<MTLDevice> device) {
 		}
 	}
 	logf("Metal renderer: %zu precompiled shaders (%zu with constant tables).", shaders.size(), withConsts.size());
+	NSSet<NSString *> *functions = [NSSet setWithArray:library.functionNames];
+	size_t waterCount = 0, waterMissing = 0;
+	for (auto &entry : shaders) if (entry.second->water) {
+		waterCount++;
+		if (![functions containsObject:[NSString stringWithFormat:@"s_%s", entry.first.c_str()]]) {
+			waterMissing++;
+			logf("[water] missing Metal function: %s (%s)", entry.second->label.c_str(), entry.first.c_str());
+		}
+	}
+	logf("[water] library: %zu programs, %zu missing functions", waterCount, waterMissing);
 	return true;
 }
 

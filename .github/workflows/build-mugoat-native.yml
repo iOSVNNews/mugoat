@@ -92,6 +92,7 @@ jobs:
       - name: Fetch and validate compatible engine and shaders
         run: |
           python3 native-port/app/Tests/download_ranges.py
+          python3 native-port/app/Tests/shader_build.py
           mkdir -p "$RUNNER_TEMP/game-files/b/8b0b5899ed"
           MUGUET_WASM_DEST="$RUNNER_TEMP/game-files/b/8b0b5899ed/game.wasm" node native-port/app/Scripts/download-wasm.cjs
           /usr/bin/python3 native-port/app/Scripts/fetch_game_files.py --server 'https://hml.sinimediata.com.br' --out "$RUNNER_TEMP/game-files"
