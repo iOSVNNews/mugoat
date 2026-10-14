@@ -62,6 +62,7 @@ struct SpawnerPreset: Identifiable {
 }
 
 let COMMON_VEHICLES: [SpawnerPreset] = [
+    SpawnerPreset(name: "Mercedes-Benz SLK 55 AMG (Mod RPF)", model: "mbslk", icon: "car.side.fill", category: "Xe Mod (RPF)"),
     SpawnerPreset(name: "Karin Sultan", model: "sultan", icon: "car.fill", category: "Xe 4 cửa"),
     SpawnerPreset(name: "Truffade Adder (Bugatti)", model: "adder", icon: "car.side.fill", category: "Siêu xe"),
     SpawnerPreset(name: "Pegassi Zentorno", model: "zentorno", icon: "car.side.fill", category: "Siêu xe"),
@@ -75,35 +76,6 @@ let COMMON_VEHICLES: [SpawnerPreset] = [
     SpawnerPreset(name: "Rhino Tank (Xe tăng)", model: "rhino", icon: "shield.fill", category: "Quân sự")
 ]
 
-struct SkinPreset: Identifiable {
-    let id = UUID()
-    let name: String
-    let model: String
-    let icon: String
-    let category: String
-}
-
-let COMMON_SKINS: [SkinPreset] = [
-    // Người Nhện (Mod Spider-Man)
-    SkinPreset(name: "🕷️ Spider-Man PS4", model: "spiderman_advanced_suit_ps4", icon: "figure.walk", category: "Người Nhện (Spider-Man)"),
-    SkinPreset(name: "🦾 Iron Spider (Infinity War)", model: "ironspider_infinitywar", icon: "bolt.shield.fill", category: "Người Nhện (Spider-Man)"),
-    SkinPreset(name: "🕸️ Spider-Man (Homecoming)", model: "2017_SMHC", icon: "figure.walk.motion", category: "Người Nhện (Spider-Man)"),
-    SkinPreset(name: "🖤 Spider-Man (Far From Home)", model: "2019_FFH", icon: "figure.walk.diamond", category: "Người Nhện (Spider-Man)"),
-
-    // Cốt truyện GTA V
-    SkinPreset(name: "🟢 Franklin Clinton", model: "player_one", icon: "person.crop.circle.fill", category: "Cốt truyện GTA V"),
-    SkinPreset(name: "🔵 Michael De Santa", model: "player_zero", icon: "person.crop.circle.fill", category: "Cốt truyện GTA V"),
-    SkinPreset(name: "🔴 Trevor Philips", model: "player_two", icon: "person.crop.circle.fill", category: "Cốt truyện GTA V"),
-
-    // Đặc biệt & Độc lạ
-    SkinPreset(name: "👮 Cảnh sát SWAT", model: "s_m_y_swat_01", icon: "shield.lefthalf.filled", category: "Đặc biệt & Hài hước"),
-    SkinPreset(name: "🧟 Xác sống Zombie", model: "u_m_y_zombie_01", icon: "allergens", category: "Đặc biệt & Hài hước"),
-    SkinPreset(name: "👽 Người ngoài hành tinh Alien", model: "s_m_m_movalien_01", icon: "sparkles", category: "Đặc biệt & Hài hước"),
-    SkinPreset(name: "🐵 Khỉ Pogo the Monkey", model: "u_m_m_pogo_01", icon: "pawprint.fill", category: "Đặc biệt & Hài hước"),
-    SkinPreset(name: "🦹 Chú hề Clown", model: "s_m_m_clown_01", icon: "theatermasks.fill", category: "Đặc biệt & Hài hước"),
-    SkinPreset(name: "🚀 Phi hành gia Astronaut", model: "s_m_m_movspace_01", icon: "globe.americas.fill", category: "Đặc biệt & Hài hước")
-]
-
 enum CheatInputMode: String, CaseIterable, Identifiable {
     case auto = "Tự động"
     case console = "Console (`)"
@@ -114,7 +86,6 @@ enum CheatInputMode: String, CaseIterable, Identifiable {
 enum CheatMenuTab: String, CaseIterable, Identifiable {
     case cheats = "Lệnh Cheat"
     case spawner = "🚗 Triệu hồi Xe"
-    case skins = "🦸 Đổi Nhân vật"
     var id: String { rawValue }
 }
 
@@ -151,14 +122,12 @@ struct CheatMenuView: View {
     @State private var selectedTab: CheatMenuTab = .cheats
     @State private var customCode = ""
     @State private var customVehicleModel = ""
-    @State private var customSkinModel = ""
     @State private var searchText = ""
     @State private var inputMode: CheatInputMode = .console
     @State private var toastMessage: String?
     @State private var modVehicles: [String] = []
     let onApply: (String, CheatInputMode) -> Void
     var onSpawnVehicle: ((String) -> Void)? = nil
-    var onChangePlayerModel: ((String) -> Void)? = nil
     var onOpenMods: (() -> Void)? = nil
 
     private let categories = ["Nhân vật", "Phương tiện", "Chiến đấu", "Thế giới"]
@@ -181,16 +150,6 @@ struct CheatMenuView: View {
             $0.name.lowercased().contains(q) ||
             $0.code.lowercased().contains(q) ||
             $0.desc.lowercased().contains(q) ||
-            $0.category.lowercased().contains(q)
-        }
-    }
-
-    private var filteredSkins: [SkinPreset] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return COMMON_SKINS }
-        return COMMON_SKINS.filter {
-            $0.name.lowercased().contains(q) ||
-            $0.model.lowercased().contains(q) ||
             $0.category.lowercased().contains(q)
         }
     }
@@ -266,7 +225,7 @@ struct CheatMenuView: View {
                     // MARK: - Vehicle & Mod Spawner
                     Section(header: Text("Gọi xe theo tên Model (Custom Spawn)")) {
                         HStack {
-                            TextField("Tên model (vd: mbs1k, sultan, t20)", text: $customVehicleModel)
+                            TextField("Tên model (vd: mbslk, sultan, t20)", text: $customVehicleModel)
                                 .textInputAutocapitalization(.never)
                                 .disableAutocorrection(true)
                             Button("Triệu hồi") {
@@ -288,7 +247,7 @@ struct CheatMenuView: View {
                                 Text("Chưa phát hiện xe mod Add-on nào.")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-                                Text("Bấm 'Mở Quản lý Mod' bên dưới để nhập tệp .rpf (như mbs1k). Cần khởi động lại game sau khi thêm mod mới để engine nạp DLC.")
+                                Text("Bấm 'Mở Quản lý Mod' bên dưới để nhập tệp .rpf (như mbslk). Cần khởi động lại game sau khi thêm mod mới để engine nạp DLC.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -359,76 +318,9 @@ struct CheatMenuView: View {
                             }
                         }
                     }
-                } else if selectedTab == .skins {
-                    // MARK: - Player Ped & Skin Changer
-                    Section(header: Text("Đổi nhân vật theo tên Model (Custom Ped/Skin)")) {
-                        HStack {
-                            TextField("Tên model (vd: 2017_SMHC, player_zero, s_m_y_swat_01)", text: $customSkinModel)
-                                .textInputAutocapitalization(.never)
-                                .disableAutocorrection(true)
-                            Button("Biến hình") {
-                                let m = customSkinModel.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !m.isEmpty else { return }
-                                changeSkin(m)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                        }
-                        Text("Nhập mã model ped bất kỳ từ bản mod add-on (vd: 2017_SMHC, 2019_FFH) hoặc ped GTA V gốc. Nhân vật sẽ biến hình ngay tức thì!")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ForEach(["Người Nhện (Spider-Man)", "Cốt truyện GTA V", "Đặc biệt & Hài hước"], id: \.self) { cat in
-                        let skins = filteredSkins.filter { $0.category == cat }
-                        if !skins.isEmpty {
-                            Section(header: Text(cat)) {
-                                ForEach(skins) { skin in
-                                    HStack {
-                                        Image(systemName: skin.icon)
-                                            .foregroundColor(cat.contains("Nhện") ? .red : Color(red: 0.365, green: 0.714, blue: 0.898))
-                                            .frame(width: 24)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(skin.name).fontWeight(.semibold)
-                                            Text("Model: \(skin.model)")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Button("Chọn") {
-                                            changeSkin(skin.model)
-                                        }
-                                        .buttonStyle(.borderedProminent)
-                                        .tint(cat.contains("Nhện") ? .red : .blue)
-                                        .font(.caption.weight(.bold))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Section(header: Text("Quản lý tệp Mod")) {
-                        Button(action: {
-                            dismiss()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                onOpenMods?()
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "folder.fill.badge.gearshape")
-                                    .foregroundColor(.orange)
-                                Text("Mở Quản lý Mod (Thêm / Bật / Tắt Mod)")
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
                 }
             }
-            .searchable(text: $searchText, prompt: selectedTab == .skins ? "Tìm kiếm nhân vật..." : selectedTab == .spawner ? "Tìm kiếm phương tiện..." : "Tìm kiếm lệnh cheat...")
+            .searchable(text: $searchText, prompt: selectedTab == .spawner ? "Tìm kiếm phương tiện..." : "Tìm kiếm lệnh cheat...")
             .navigationTitle("Menu Mod & Cheat GTA V")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -474,20 +366,12 @@ struct CheatMenuView: View {
     }
 
     private func spawnVehicle(_ model: String) {
-        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if clean == "mbs1k" { clean = "mbslk" }
         guard !clean.isEmpty else { return }
         dismiss()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             onSpawnVehicle?(clean)
-        }
-    }
-
-    private func changeSkin(_ model: String) {
-        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !clean.isEmpty else { return }
-        dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            onChangePlayerModel?(clean)
         }
     }
 }

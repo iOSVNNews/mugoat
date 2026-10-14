@@ -9,8 +9,8 @@ enum ControlContext: Equatable {
         if pauseMenu { self = .menu; return }
         switch vehicle {
         case 0: self = .onFoot
-        case 1, 2: self = .plane
-        case 8, 9, 10, 11: self = .heli
+        case 2: self = .plane
+        case 9, 10, 11: self = .heli
         case 12: self = .bike
         case 13: self = .bicycle
         case 14: self = .boat
@@ -425,12 +425,9 @@ final class TouchControlsView: UIView {
         }
     }
 
-    private var lastGameStatus: UInt32 = 0
-
     /// Game state from the engine (PGGameStatus bits: 1 control off, 2 phone out, 4 cutscene,
     /// 8 warning screen, 16 no player).
     func updateGameState(_ status: UInt32, now: CFTimeInterval = CACurrentMediaTime()) {
-        lastGameStatus = status
         let phoneOut = status & 2 != 0
         if phoneOut != gamePhoneOut {
             gamePhoneOut = phoneOut
@@ -439,12 +436,11 @@ final class TouchControlsView: UIView {
             if context != .menu { reset(publish: false) }
             updateVisibility()
         }
-        // Accept/Back prompt: player control off (status & 1), cutscene (status & 4), warning screen (status & 8),
-        // or player dead / mission failed (status & 16 with control off).
-        // Held for a moment (0.35s) so brief control transitions don't flicker.
-        let wanted = ((status & 1 != 0) || (status & 4 != 0) || (status & 8 != 0) || (status & 16 != 0 && status != 0))
+        // Accept/Back prompt: player control off outside cutscenes (Mission failed and similar
+        // screens), or a warning screen. Held for a moment so brief control locks don't flicker.
+        let wanted = status & 16 == 0 && ((status & 1 != 0 && status & 4 == 0) || status & 8 != 0)
         if wanted { if promptSince == nil { promptSince = now } } else { promptSince = nil }
-        let show = wanted && now - (promptSince ?? now) > 0.35
+        let show = wanted && now - (promptSince ?? now) > 0.6
         if show != promptActive {
             promptActive = show
             reset(publish: false)
@@ -654,17 +650,6 @@ final class TouchControlsView: UIView {
             let leftZone = point.x < safe.minX + safe.width * 0.45
             if let button = button(at: point) {
                 press(button, touch: touch, at: point)
-            } else if promptActive || (lastGameStatus & 4 != 0) {
-                // Tapping anywhere on screen during Mission Failed, Cutscenes, or Prompts
-                // triggers the primary action (Continue / Retry Checkpoint / Skip Scene)
-                haptics.impactOccurred(intensity: 0.7)
-                pulse([.a, .x], for: 0.35)
-                PGSetKey(0x0D, true) // VK_RETURN
-                PGSetKey(0x20, true) // VK_SPACE
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    PGSetKey(0x0D, false)
-                    PGSetKey(0x20, false)
-                }
             } else if context == .menu {
                 let existing = currentMapTouches()
                 if existing.isEmpty {
@@ -701,31 +686,6 @@ final class TouchControlsView: UIView {
         roles[id] = .button(button)
         defer { if case .fireLook = roles[id] { dragCamera.begin(id, at: point) } }
         switch button {
-        case enter:
-            if context == .heli || context == .plane {
-                // In helicopter or plane: Bail out / jump with parachute immediately
-                PGEmergencyExitVehicle(2)
-                pulse(.y, for: 1.5)
-                PGSetKey(0x46, true) // VK_KEY_F
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    PGSetKey(0x46, false)
-                }
-            } else if context != .onFoot {
-                // In car / boat / sub:
-                // Warp-out if jammed against walls/traffic or exploded, otherwise normal exit
-                PGEmergencyExitVehicle(1)
-                pulse(.y, for: 0.6)
-                PGSetKey(0x46, true) // VK_KEY_F
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    PGSetKey(0x46, false)
-                }
-            } else {
-                pulse(.y, for: 0.25)
-                PGSetKey(0x46, true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    PGSetKey(0x46, false)
-                }
-            }
         case weapons:
             roles[id] = .weaponWheel(start: point, current: point)
             updateVisibility()
@@ -757,6 +717,8 @@ final class TouchControlsView: UIView {
             leftAim.active = aimToggled
             roles[id] = .button(button)
             updateVisibility()
+        case enter where context.flying:
+            exitHoldStart = now
         case phone:
             if gamePhoneOut {
                 // The phone is out: this button now puts it away (Back), the dock follows the game.
@@ -771,25 +733,7 @@ final class TouchControlsView: UIView {
             DispatchQueue.main.async { self.openSettings?() }
         case cheat:
             DispatchQueue.main.async { self.openCheat?() }
-        case accept:
-            lastDockInput = now
-            pulse([.a, .x], for: 0.35)
-            PGSetKey(0x0D, true) // VK_RETURN
-            PGSetKey(0x20, true) // VK_SPACE
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                PGSetKey(0x0D, false)
-                PGSetKey(0x20, false)
-            }
-        case back:
-            lastDockInput = now
-            pulse(.b, for: 0.35)
-            PGSetKey(0x1B, true) // VK_ESCAPE
-            PGSetKey(0x08, true) // VK_BACK
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                PGSetKey(0x1B, false)
-                PGSetKey(0x08, false)
-            }
-        case up, down, left, right:
+        case up, down, left, right, accept, back:
             lastDockInput = now
         default:
             break
@@ -835,7 +779,7 @@ final class TouchControlsView: UIView {
                     roles[id] = .mapPointer(start: start, current: point, dragging: true)
                 } else {
                     let travel = hypot(point.x - start.x, point.y - start.y)
-                    if travel > 14 { dragging = true }
+                    if travel > 6 { dragging = true }
                     roles[id] = .mapPointer(start: start, current: point, dragging: dragging)
                     sendMenuPointer(at: point, buttons: dragging ? 1 : 0)
                 }
@@ -877,12 +821,9 @@ final class TouchControlsView: UIView {
                 }
                 let pt = touch.location(in: self)
                 let travel = hypot(pt.x - start.x, pt.y - start.y)
-                if !dragging && travel <= 14 {
-                    // Tap on map: place GPS waypoint at cursor with a single clean click
-                    sendMenuPointer(at: pt, buttons: 0)
-                    haptics.impactOccurred(intensity: 0.7)
+                if !dragging && travel <= 8 {
                     sendMenuPointer(at: pt, buttons: 1)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                         self.sendMenuPointer(at: pt, buttons: 0)
                     }
                 } else {
@@ -1055,14 +996,19 @@ final class TouchControlsView: UIView {
         case .heli, .plane:
             state.leftX = Float(moveStick.value.x); state.leftY = Float(moveStick.value.y)
             // GTA V's controller flight: RT throttle up / climb, LT down / descend, LB/RB rudder.
-            if throttleUp.pressed { state.rightTrigger = 1; held.insert(.r2) }
-            if throttleDown.pressed { state.leftTrigger = 1; held.insert(.l2) }
+            if throttleUp.pressed { state.rightTrigger = 1 }
+            if throttleDown.pressed { state.leftTrigger = 1 }
             if yawLeft.pressed { held.insert(.l1) }
             if yawRight.pressed { held.insert(.r1) }
             if airFire.pressed { held.insert(.a) }
             if vehicleWeapon.pressed { held.insert(.left) }
             if gear.pressed { held.insert(.l3) }
-            if enter.pressed { held.insert(.y) }
+            if let start = exitHoldStart {
+                // Leaving an aircraft needs a short hold, so a slip cannot bail out.
+                let progress = (now - start) / 0.4
+                enter.setProgress(CGFloat(progress))
+                if progress >= 1 { held.insert(.y) }
+            }
         case .menu:
             break
         }

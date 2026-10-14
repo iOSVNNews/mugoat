@@ -929,9 +929,6 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             onSpawnVehicle: { [weak self] model in
                 self?.spawnVehicle(model)
             },
-            onChangePlayerModel: { [weak self] model in
-                self?.changePlayerModel(model)
-            },
             onOpenMods: { [weak self] in
                 self?.showModManager()
             }
@@ -974,7 +971,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func spawnVehicle(_ model: String) {
-        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if clean == "mbs1k" { clean = "mbslk" }
         guard !clean.isEmpty else { return }
         guard engineStarted else {
             showCheatToast(L10n.text("Cần vào game trước khi triệu hồi xe"))
@@ -986,43 +984,6 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             appendLog("Vehicle spawn requested: \(clean)")
         } else {
             showCheatToast(L10n.text("Hệ thống đang bận triệu hồi xe khác!"))
-        }
-    }
-
-    private func changePlayerModel(_ model: String) {
-        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !clean.isEmpty else { return }
-        guard engineStarted else {
-            showCheatToast(L10n.text("Cần vào game trước khi đổi nhân vật"))
-            return
-        }
-        let started = clean.withCString { PGChangePlayerModel($0) }
-        if started {
-            showCheatToast(String(format: L10n.text("Đang biến hình thành: %@"), clean))
-            appendLog("Player model change requested: \(clean)")
-            var checks = 0
-            Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-                guard let self = self else { timer.invalidate(); return }
-                let status = PGChangePlayerModelStatus()
-                if status == 2 {
-                    self.showCheatToast(String(format: L10n.text("Biến hình thành công: %@"), clean))
-                    self.appendLog("Player model changed successfully to \(clean)")
-                    timer.invalidate()
-                } else if status == -1 {
-                    self.showCheatToast(String(format: L10n.text("Không thể nạp model: %@"), clean))
-                    self.appendLog("Failed to change player model to \(clean)")
-                    timer.invalidate()
-                } else if status == 0 {
-                    timer.invalidate()
-                } else {
-                    checks += 1
-                    if checks > 40 {
-                        timer.invalidate()
-                    }
-                }
-            }
-        } else {
-            showCheatToast(L10n.text("Hệ thống đang bận đổi nhân vật khác!"))
         }
     }
 

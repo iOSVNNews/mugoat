@@ -136,7 +136,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         case 2:
             if indexPath.row == 0 {
                 cell.textLabel?.text = L10n.text("Gọi xe theo tên Model (Custom Spawn…)")
-                cell.detailTextLabel?.text = L10n.text("Nhập tên model bất kỳ (ví dụ: mbs1k, sultan, buzzard…)")
+                cell.detailTextLabel?.text = L10n.text("Nhập tên model bất kỳ (ví dụ: mbslk, sultan, buzzard…)")
                 cell.imageView?.image = UIImage(systemName: "magnifyingglass.circle.fill")
                 cell.imageView?.tintColor = Theme.accent
                 cell.accessoryType = .disclosureIndicator
@@ -313,7 +313,8 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
             showAlert(L10n.text("Chưa vào game"), L10n.text("Vui lòng khởi động và vào game trước khi gọi phương tiện."))
             return
         }
-        let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if cleanModel == "mbs1k" { cleanModel = "mbslk" }
         guard !cleanModel.isEmpty else { return }
         let started = cleanModel.withCString { PGSpawnVehicle($0) }
         if started {
@@ -326,11 +327,11 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     private func promptCustomVehicleSpawn() {
         let alert = UIAlertController(
             title: L10n.text("Gọi xe theo tên Model"),
-            message: L10n.text("Nhập tên model xe từ bản mod (ví dụ: mbs1k) hoặc GTA V gốc (ví dụ: sultan, adder, buzzard):"),
+            message: L10n.text("Nhập tên model xe từ bản mod (ví dụ: mbslk) hoặc GTA V gốc (ví dụ: sultan, adder, buzzard):"),
             preferredStyle: .alert
         )
         alert.addTextField { tf in
-            tf.placeholder = "mbs1k, sultan, buzzard..."
+            tf.placeholder = "mbslk, sultan, buzzard..."
             tf.autocapitalizationType = .none
             tf.autocorrectionType = .no
         }

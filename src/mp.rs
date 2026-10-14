@@ -1614,6 +1614,11 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             a.hit = 0;
         }
         if a.hit > 0 {
+            if my_weapon == weapon("weapon_unarmed") || my_weapon == 0 {
+                a.hit = a.hit.min(15);
+            } else if c.i("GetWeaponDamageType", &[i(my_weapon as i32)]) == 2 {
+                a.hit = a.hit.min(30);
+            }
             let mut p = vec![*id];
             p.extend(a.hit.to_le_bytes());
             p.extend(my_weapon.to_le_bytes());
@@ -1667,6 +1672,11 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                 }
             }
             let mut dmg = dmg as i32;
+            if w == weapon("weapon_unarmed") || w == 0 {
+                dmg = dmg.clamp(5, 15);
+            } else if c.i("GetWeaponDamageType", &[i(w as i32)]) == DAMAGE_MELEE {
+                dmg = dmg.clamp(10, 30);
+            }
             let armour = c.i("GetPedArmour", &[i(ped)]);
             let soak = armour.min(dmg);
             if soak > 0 {
@@ -2373,7 +2383,7 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
             let me = c.i("PlayerPedId", &[]);
             if me != 0 && (c.i("GetPedSourceOfDeath", &[i(a.ped)]) == me || c.i("HasEntityBeenDamagedByEntity", &[i(a.ped), i(me), b(true)]) != 0) {
                 let unarmed = c.i("GetSelectedPedWeapon", &[i(me)]) as u32 == weapon("weapon_unarmed");
-                hit = hit.saturating_add(if unarmed { 50 } else { 100 });
+                hit = hit.saturating_add(if unarmed { 15 } else { 35 });
                 eprintln!("[mp] finished avatar {} here: hit {hit}", a.ped);
             }
         }
@@ -2437,7 +2447,15 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     if !s.dead() && !a.dead {
         let h = c.i("GetEntityHealth", &[i(ped)]);
         if h < AVATAR_HEALTH && h > 0 {
-            a.hit = a.hit.saturating_add((AVATAR_HEALTH - h).min(1000) as u16);
+            let my_weapon = c.i("GetSelectedPedWeapon", &[i(c.i("PlayerPedId", &[]))]) as u32;
+            let cap = if my_weapon == weapon("weapon_unarmed") || my_weapon == 0 {
+                15
+            } else if c.i("GetWeaponDamageType", &[i(my_weapon as i32)]) == 2 {
+                30
+            } else {
+                150
+            };
+            a.hit = a.hit.saturating_add(((AVATAR_HEALTH - h) as u16).min(cap));
             c.i("SetEntityHealth", &[i(ped), i(AVATAR_HEALTH), i(0)]);
         }
     }

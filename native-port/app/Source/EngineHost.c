@@ -933,6 +933,9 @@ bool PGSpawnVehicle(const char *modelName) {
   while (len > 0 && (pg_spawn_model_name[len - 1] == ' ' || pg_spawn_model_name[len - 1] == '\t' || pg_spawn_model_name[len - 1] == '\r' || pg_spawn_model_name[len - 1] == '\n')) {
     pg_spawn_model_name[--len] = '\0';
   }
+  if (!strcasecmp(pg_spawn_model_name, "mbs1k")) {
+    strcpy(pg_spawn_model_name, "mbslk");
+  }
   if (pg_spawn_model_name[0] == '0' && (pg_spawn_model_name[1] == 'x' || pg_spawn_model_name[1] == 'X')) {
     pg_spawn_model_hash = (uint32_t)strtoul(pg_spawn_model_name, NULL, 16);
   } else {
@@ -995,7 +998,7 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   uint64_t vehVector = w2c_game_f100(instance, 32);
   float *vv = pg_pointer(&env, vehVector, 24);
   vv[0] = vx; vv[1] = 0; vv[2] = vy; vv[3] = 0; vv[4] = vz; vv[5] = 0;
-  MugoatValue vehArgs[6] = { mg_u32(model), mg_u64(vehVector), mg_f32(heading), mg_u32(0), mg_u32(0), mg_u32(1) };
+  MugoatValue vehArgs[6] = { mg_u32(model), mg_u64(vehVector), mg_f32(heading), mg_u32(0), mg_u32(0), mg_u32(0) };
   uint32_t vehicle = mg_call_u32(instance, "mp:CreateVehicle", vehArgs, 6);
   if (!vehicle) {
     // Retry with higher elevation in case of slope/curb collision
@@ -1018,6 +1021,11 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
 
     MugoatValue sitArgs[3] = { mg_u32(ped), mg_u32(vehicle), mg_u32((uint32_t)-1) };
     mg_call_void(instance, "mp:SetPedIntoVehicle", sitArgs, 3);
+
+    // Turn engine on immediately
+    MugoatValue engArgs[4] = { mg_u32(vehicle), mg_u32(1), mg_u32(1), mg_u32(0) };
+    mg_call_void(instance, "mp:SetVehicleEngineOn", engArgs, 4);
+
     char msg[128];
     snprintf(msg, sizeof msg, "Spawned vehicle %s (0x%08X) id %u at %.1f, %.1f, %.1f", pg_spawn_model_name, model, vehicle, vx, vy, vz);
     pg_log(msg);
@@ -1030,119 +1038,6 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   }
   pg_test_leave_script(instance, previous);
   pthread_mutex_unlock(&pg_spawn_lock);
-}
-
-static _Atomic int pg_skin_status = 0; // 0 = idle, 1 = loading/processing, 2 = success, -1 = failed
-static char pg_skin_model_name[64];
-static uint32_t pg_skin_model_hash = 0;
-static int pg_skin_frames = 0;
-static pthread_mutex_t pg_skin_lock = PTHREAD_MUTEX_INITIALIZER;
-
-bool PGChangePlayerModel(const char *modelName) {
-  if (!modelName || !*modelName) return false;
-  pthread_mutex_lock(&pg_skin_lock);
-  if (atomic_load(&pg_skin_status) == 1) {
-    pthread_mutex_unlock(&pg_skin_lock);
-    return false;
-  }
-  while (*modelName == ' ' || *modelName == '\t') modelName++;
-  strncpy(pg_skin_model_name, modelName, sizeof(pg_skin_model_name) - 1);
-  pg_skin_model_name[sizeof(pg_skin_model_name) - 1] = '\0';
-  int len = (int)strlen(pg_skin_model_name);
-  while (len > 0 && (pg_skin_model_name[len - 1] == ' ' || pg_skin_model_name[len - 1] == '\t' || pg_skin_model_name[len - 1] == '\r' || pg_skin_model_name[len - 1] == '\n')) {
-    pg_skin_model_name[--len] = '\0';
-  }
-  if (pg_skin_model_name[0] == '0' && (pg_skin_model_name[1] == 'x' || pg_skin_model_name[1] == 'X')) {
-    pg_skin_model_hash = (uint32_t)strtoul(pg_skin_model_name, NULL, 16);
-  } else {
-    pg_skin_model_hash = pg_joaat(pg_skin_model_name);
-  }
-  pg_skin_frames = 0;
-  atomic_store(&pg_skin_status, 1);
-  pthread_mutex_unlock(&pg_skin_lock);
-  char msg[128];
-  snprintf(msg, sizeof msg, "Change player skin requested: %s (hash 0x%08X / %u)", pg_skin_model_name, pg_skin_model_hash, pg_skin_model_hash);
-  pg_log(msg);
-  return true;
-}
-
-int PGChangePlayerModelStatus(void) {
-  return atomic_load(&pg_skin_status);
-}
-
-static void pg_process_player_model_change(w2c_game *instance) {
-  if (atomic_load(&pg_skin_status) != 1) return;
-  pthread_mutex_lock(&pg_skin_lock);
-  uint32_t model = pg_skin_model_hash;
-  pg_skin_frames++;
-  uint64_t previous = pg_test_enter_script(instance);
-  MugoatValue reqArgs[1] = { mg_u32(model) };
-  mg_call_void(instance, "mp:RequestModel", reqArgs, 1);
-  MugoatValue loadedArgs[1] = { mg_u32(model) };
-  if (!mg_call_u32(instance, "mp:HasModelLoaded", loadedArgs, 1)) {
-    pg_test_leave_script(instance, previous);
-    if (pg_skin_frames > 1800) {
-      char msg[128];
-      snprintf(msg, sizeof msg, "Change skin timed out loading %s (0x%08X)", pg_skin_model_name, model);
-      pg_log(msg);
-      atomic_store(&pg_skin_status, -1);
-    }
-    pthread_mutex_unlock(&pg_skin_lock);
-    return;
-  }
-  uint32_t ped = mg_call_u32(instance, "mp:PlayerPedId", NULL, 0);
-  if (!ped) {
-    pg_test_leave_script(instance, previous);
-    pg_log("Change skin: player ped not found");
-    atomic_store(&pg_skin_status, -1);
-    pthread_mutex_unlock(&pg_skin_lock);
-    return;
-  }
-  uint64_t coordsVector = w2c_game_f100(instance, 32);
-  MugoatValue coordArgs[3] = { mg_u64(coordsVector), mg_u32(ped), mg_u32(1) };
-  mg_call_void(instance, "mp:GetEntityCoords", coordArgs, 3);
-  float *coords = pg_pointer(&env, coordsVector, 24);
-  float px = coords[0], py = coords[2], pz = coords[4];
-  MugoatValue headArgs[1] = { mg_u32(ped) };
-  float heading = mg_call_f32(instance, "mp:GetEntityHeading", headArgs, 1);
-
-  uint64_t pedVector = w2c_game_f100(instance, 32);
-  float *pv = pg_pointer(&env, pedVector, 24);
-  pv[0] = px; pv[1] = 0; pv[2] = py; pv[3] = 0; pv[4] = pz; pv[5] = 0;
-  MugoatValue pedArgs[6] = { mg_u32(4), mg_u32(model), mg_u64(pedVector), mg_f32(heading), mg_u32(0), mg_u32(0) };
-  uint32_t newPed = mg_call_u32(instance, "mp:CreatePed", pedArgs, 6);
-  if (newPed) {
-    MugoatValue compArgs[1] = { mg_u32(newPed) };
-    mg_call_void(instance, "mp:SetPedDefaultComponentVariation", compArgs, 1);
-    mg_call_void(instance, "mp:ClearPedTasksImmediately", compArgs, 1);
-
-    const uint8_t *m = (const uint8_t *)(void *)env.memory.data;
-    uint64_t size = env.memory.size;
-    uint64_t info = 0, oldPedPtr = 0, playerInfo = 0;
-    if (pg_context_u64(m, size, 20159720, &info) && info &&
-        pg_context_u64(m, size, info + 8, &oldPedPtr) && oldPedPtr &&
-        pg_context_u64(m, size, oldPedPtr + 4328, &playerInfo) && playerInfo) {
-      MugoatValue guidArg[1] = { mg_u32(newPed) };
-      uint64_t newPedPtr = mg_call_u64(instance, "mp:GetBaseFromGuid", guidArg, 1);
-      if (newPedPtr) {
-        *(uint64_t *)pg_pointer(&env, newPedPtr + 4328, 8) = playerInfo;
-        *(uint64_t *)pg_pointer(&env, info + 8, 8) = newPedPtr;
-        MugoatValue oldArgs[1] = { mg_u32(ped) };
-        mg_call_void(instance, "mp:DeletePed", oldArgs, 1);
-      }
-    }
-    char msg[128];
-    snprintf(msg, sizeof msg, "Changed player skin to %s (0x%08X) id %u", pg_skin_model_name, model, newPed);
-    pg_log(msg);
-    atomic_store(&pg_skin_status, 2);
-  } else {
-    char msg[128];
-    snprintf(msg, sizeof msg, "Failed to create ped for skin %s (0x%08X)", pg_skin_model_name, model);
-    pg_log(msg);
-    atomic_store(&pg_skin_status, -1);
-  }
-  pg_test_leave_script(instance, previous);
-  pthread_mutex_unlock(&pg_skin_lock);
 }
 
 
@@ -1451,7 +1346,6 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
   if (pad == 12840656) {
     pg_apply_targeting_mode(instance);
     pg_process_vehicle_spawn(instance);
-    pg_process_player_model_change(instance);
     pg_process_vehicle_exit(instance);
     pg_process_force_skip_scene(instance);
     pg_process_player_respawn(instance);

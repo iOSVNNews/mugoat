@@ -243,6 +243,14 @@ pub fn handle(name: &str, mem: &SharedMemory, p: &[Val], results: &mut [Val]) ->
         "__syscall_fcntl64" => if a(0) <= 2 || fs.fds.contains_key(&a(0)) { 0 } else { -EBADF },
         "__syscall_ioctl" => -ENOTTY,
         "__syscall_statfs64" => { write_bytes(mem, a(2) as u64, &statfs()); 0 }
+        "__syscall_fsync" | "__syscall_fdatasync" => match fs.fds.get(&a(0)) {
+            Some(Entry::File { file, .. }) => if file.sync_all().is_ok() { 0 } else { -EINVAL },
+            _ => -EBADF,
+        },
+        "fd_sync" | "fd_datasync" => match fs.fds.get(&a(0)) {
+            Some(Entry::File { file, .. }) => if file.sync_all().is_ok() { 0 } else { EINVAL },
+            _ => EBADF,
+        },
 
         "__syscall_socket" | "__syscall_connect" | "__syscall_accept4" | "__syscall_sendto"
         | "__syscall_recvfrom" | "__syscall_setsockopt" | "__syscall_getsockopt"
