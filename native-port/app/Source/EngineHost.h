@@ -100,5 +100,7 @@ uint64_t PGMemoryBudgetClamps(void);
 void PGAssetHealth(uint64_t out[6]);
 bool PGSpawnVehicle(const char *modelName);
 int PGSpawnVehicleStatus(void);
+bool PGChangePlayerModel(const char *modelName);
+int PGChangePlayerModelStatus(void);
 void PGEmergencyExitVehicle(int mode);
 void PGForceSkipScene(void);

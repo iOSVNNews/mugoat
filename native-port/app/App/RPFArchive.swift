@@ -132,18 +132,28 @@ struct ModPack {
         name = String(device.dropFirst(4)); self.url = url; self.archive = archive
         var models = Set<String>()
         for entry in archive.entries where entry.path.hasSuffix("vehicles.meta") {
-            for model in try ModXML.read(archive.metadata(entry)).values["modelName"] ?? [] {
+            for model in (try? ModXML.read(archive.metadata(entry)).values["modelName"]) ?? [] {
                 let model = model.lowercased(); guard Self.validName(model) else { throw ModError("Tên model không hợp lệ: \(model)") }; models.insert(model)
+            }
+        }
+        for entry in archive.entries where entry.path.hasSuffix("peds.meta") {
+            let meta = try? ModXML.read(archive.metadata(entry))
+            for model in (meta?.values["ModelName"] ?? []) + (meta?.values["Name"] ?? []) {
+                let model = model.lowercased(); if Self.validName(model) { models.insert(model) }
             }
         }
         for entry in archive.entries where entry.path.hasSuffix(".rpf") {
             let nested = try archive.nested(entry)
-            for resource in nested.entries where resource.path.hasSuffix(".yft") || resource.path.hasSuffix(".ytd") {
-                let expected = resource.path.hasSuffix(".yft") ? 162 : 13
-                guard resource.resourceVersion == expected else { throw ModError("Gói \(name) dùng model/texture Enhanced không tương thích. Hãy dùng bản Legacy.") }
+            for resource in nested.entries where resource.path.hasSuffix(".yft") || resource.path.hasSuffix(".ytd") || resource.path.hasSuffix(".ydd") {
+                let expected = resource.path.hasSuffix(".yft") ? 162 : resource.path.hasSuffix(".ytd") ? 13 : 165
+                guard resource.resourceVersion == expected else { throw ModError("Gói \(name) dùng tài nguyên Enhanced không tương thích. Hãy dùng bản Legacy.") }
+                let base = (resource.path as NSString).lastPathComponent.components(separatedBy: ".").first?.lowercased() ?? ""
+                if !base.isEmpty && Self.validName(base) && !base.hasSuffix("_hi") {
+                    models.insert(base)
+                }
             }
         }
-        guard !models.isEmpty else { throw ModError("DLC chưa có vehicles.meta chứa model xe.") }
+        guard !models.isEmpty else { throw ModError("DLC chưa có model xe hoặc nhân vật hợp lệ.") }
         self.models = models.sorted()
     }
 }

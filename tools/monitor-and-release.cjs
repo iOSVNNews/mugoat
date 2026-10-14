@@ -93,6 +93,11 @@ async function main() {
     ipaPaid
   ];
 
+  const spidermanRpf = 'D:\\Telegram\\spiderman.rpf';
+  if (fs.existsSync(spidermanRpf)) filesToUpload.push(spidermanRpf);
+  const mbslkRpf = 'D:\\Telegram\\mbslk.rpf';
+  if (fs.existsSync(mbslkRpf)) filesToUpload.push(mbslkRpf);
+
   const sumsFile = path.join(outputDir, 'SHA256SUMS.txt');
   if (fs.existsSync(sumsFile)) filesToUpload.push(sumsFile);
 
