@@ -1854,11 +1854,17 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
     game.was_enter_pressed = enter_held;
 
     if me_ok && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 {
-        let near = game.avatars.values().filter(|a| a.veh != 0 && c.exists(a.veh)).map(|a| a.veh).min_by(|x, y| {
-            let dx = dist(c_pos(c, *x), my_pos);
-            let dy = dist(c_pos(c, *y), my_pos);
-            dx.total_cmp(&dy)
-        });
+        let mut near: Option<i32> = None;
+        let mut min_d = f32::MAX;
+        for a in game.avatars.values() {
+            if a.veh != 0 && c.exists(a.veh) {
+                let d = dist(c_pos(c, a.veh), my_pos);
+                if d < min_d {
+                    min_d = d;
+                    near = Some(a.veh);
+                }
+            }
+        }
 
         let trying = c.i("GetVehiclePedIsTryingToEnter", &[i(ped)]);
         let trying_friend = trying != 0 && game.avatars.values().any(|a| a.veh == trying);
@@ -1868,11 +1874,18 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         let debounce_ok = game.last_enter_task.map(|t| t.elapsed() > Duration::from_millis(1200)).unwrap_or(true);
 
         if (just_enter || hijack_attempt) && debounce_ok {
-            let target_veh = if trying_friend { Some(trying) } else { near.filter(|v| dist(c_pos(c, *v), my_pos) < 8.0) };
+            let target_veh = if trying_friend { Some(trying) } else if min_d < 8.0 { near } else { None };
             if let Some(veh) = target_veh {
                 let driver = c.i("GetPedInVehicleSeat", &[i(veh), i(-1), b(false)]);
                 if driver != 0 && driver != ped {
-                    if let Some(seat) = (0..6).find(|s| c.i("IsVehicleSeatFree", &[i(veh), i(*s), b(false)]) != 0) {
+                    let mut free_seat: Option<i32> = None;
+                    for s in 0..6 {
+                        if c.i("IsVehicleSeatFree", &[i(veh), i(s), b(false)]) != 0 {
+                            free_seat = Some(s);
+                            break;
+                        }
+                    }
+                    if let Some(seat) = free_seat {
                         game.last_enter_task = Some(Instant::now());
                         let d = dist(c_pos(c, veh), my_pos);
                         let moving = c.f("GetEntitySpeed", &[i(veh)]) > 1.2;
@@ -2443,13 +2456,21 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
         if let Some(&car) = cars.get(&s.veh_owner) {
             let in_car = c.i("GetVehiclePedIsIn", &[i(ped), b(false)]);
             if in_car != car {
-                let free_seat = if c.i("IsVehicleSeatFree", &[i(car), i(s.seat as i32), b(false)]) != 0 {
+                let mut target_seat: Option<i32> = if c.i("IsVehicleSeatFree", &[i(car), i(s.seat as i32), b(false)]) != 0 {
                     Some(s.seat as i32)
                 } else {
-                    (0..6).find(|&seat| c.i("IsVehicleSeatFree", &[i(car), i(seat), b(false)]) != 0)
+                    None
                 };
-                if let Some(target_seat) = free_seat {
-                    c.i("SetPedIntoVehicle", &[i(ped), i(car), i(target_seat)]);
+                if target_seat.is_none() {
+                    for seat in 0..6 {
+                        if c.i("IsVehicleSeatFree", &[i(car), i(seat), b(false)]) != 0 {
+                            target_seat = Some(seat);
+                            break;
+                        }
+                    }
+                }
+                if let Some(ts) = target_seat {
+                    c.i("SetPedIntoVehicle", &[i(ped), i(car), i(ts)]);
                 }
             }
         } else {
