@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   workflow_call:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: mugoat-native-ipa
   cancel-in-progress: false
@@ -144,6 +144,13 @@ jobs:
         run: |
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-AppleID-Free.ipa Mugoat-AppleID-Free.enc
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-Cert-Paid.ipa Mugoat-Cert-Paid.enc
+      - name: Publish Mugoat.ipa to Release v1.1.7
+        working-directory: native-port
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp Mugoat-AppleID-Free.ipa Mugoat.ipa
+          gh release upload v1.1.7 Mugoat.ipa SHA256SUMS.txt Native-IPA-Free-validation.json --repo "$GITHUB_REPOSITORY" --clobber
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: Mugoat-Native-IPAs-encrypted
@@ -153,6 +160,11 @@ jobs:
             native-port/SHA256SUMS.txt
             native-port/Native-IPA-*-validation.json
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Mugoat-Native-IPA
+          path: native-port/Mugoat-AppleID-Free.ipa
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
