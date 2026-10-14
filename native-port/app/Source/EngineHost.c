@@ -852,6 +852,14 @@ static inline uint32_t mg_call_u32(w2c_game *instance, const char *name, const M
   return 0;
 }
 
+static inline uint64_t mg_call_u64(w2c_game *instance, const char *name, const MugoatValue *args, uint32_t count) {
+  MugoatValue res = { 0 };
+  if (mugoat_command_call((void *)instance, name, args, count, &res)) {
+    return res.bits;
+  }
+  return 0;
+}
+
 static inline float mg_call_f32(w2c_game *instance, const char *name, const MugoatValue *args, uint32_t count) {
   MugoatValue res = { 0 };
   if (mugoat_command_call((void *)instance, name, args, count, &res)) {
