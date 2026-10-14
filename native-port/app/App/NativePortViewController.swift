@@ -735,13 +735,12 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 let inputNode = audioEngine.inputNode
                 let bus = 0
                 inputNode.removeTap(onBus: bus)
-                let inputFormat = inputNode.inputFormat(forBus: bus)
-                guard inputFormat.sampleRate > 0 else { return }
-                inputNode.installTap(onBus: bus, bufferSize: 1024, format: inputFormat) { buffer, _ in
+                inputNode.installTap(onBus: bus, bufferSize: 1024, format: nil) { buffer, _ in
                     guard let channelData = buffer.floatChannelData?[0] else { return }
                     let frameCount = Int(buffer.frameLength)
-                    guard frameCount > 0 else { return }
-                    if abs(buffer.format.sampleRate - 48000.0) < 1.0 {
+                    let sampleRate = buffer.format.sampleRate
+                    guard frameCount > 0, sampleRate > 0 else { return }
+                    if abs(sampleRate - 48000.0) < 1.0 {
                         MugoatVoiceSubmitMicAudio(channelData, UInt32(frameCount))
                     } else {
                         let ratio = 48000.0 / buffer.format.sampleRate
@@ -1032,9 +1031,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     func showCheatMenu() {
-        let isSandbox = (bootedMode ?? GameSettings.shared.gameMode) == .sandbox
-        guard !MugoatOnlineEnabled() || isSandbox else {
-            showCheatToast(L10n.text("Tiện ích cheat bị tắt khi chơi online ở chế độ cốt truyện.")); return
+        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else {
+            showCheatToast(L10n.text("Tiện ích cheat bị vô hiệu hóa trong chế độ Sandbox & Online.")); return
         }
         touchControls.reset()
         let cheatView = CheatMenuView(
@@ -1087,6 +1085,10 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func spawnVehicle(_ model: String) {
+        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else {
+            showCheatToast(L10n.text("Triệu hồi xe bị vô hiệu hóa trong Sandbox & Online"))
+            return
+        }
         var clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if clean == "mbs1k" { clean = "mbslk" }
         guard !clean.isEmpty else { return }
@@ -1104,8 +1106,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func applyCheat(_ code: String, mode: CheatInputMode = .auto) {
-        let isSandbox = (bootedMode ?? GameSettings.shared.gameMode) == .sandbox
-        guard !MugoatOnlineEnabled() || isSandbox else { return }
+        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return }
         if trimmed == "UNFREEZE" || trimmed == "SKIPSCENE" {

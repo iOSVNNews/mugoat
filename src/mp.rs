@@ -486,9 +486,9 @@ pub fn submit_mic_audio(samples: &[f32]) {
     let Some(Some(net)) = NET.get() else { return; };
     if net.my_id.lock().unwrap().is_none() { return; }
 
-    // Noise gate: skip transmitting silence / low ambient noise
+    // Noise gate: skip transmitting only total digital silence
     let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt();
-    if rms < 0.012 { return; }
+    if rms < 0.001 { return; }
 
     let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
     let pos_dm = [
@@ -500,7 +500,10 @@ pub fn submit_mic_audio(samples: &[f32]) {
     // Transmit in 20ms chunks (960 samples @ 48kHz) to stay well within network MTU
     for chunk_samples in samples.chunks(960) {
         let seq = VOICE_SEQ.fetch_add(1, Ordering::Relaxed);
-        let data: Vec<u8> = chunk_samples.iter().map(|&s| ((s.clamp(-1.0, 1.0) * 127.0) + 128.0) as u8).collect();
+        let data: Vec<u8> = chunk_samples.iter().map(|&s| {
+            let boosted = (s * 2.5).clamp(-1.0, 1.0);
+            ((boosted * 127.0) + 128.0) as u8
+        }).collect();
         let chunk = proto::VoiceChunk { seq, pos: pos_dm, data };
         let mut payload = Vec::new();
         chunk.encode(&mut payload);
@@ -515,7 +518,7 @@ pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
     if count == 0 || inc.is_empty() { return; }
 
     // Drop backlog to maintain real-time playback
-    while inc.len() > 15 {
+    while inc.len() > 30 {
         inc.pop_front();
     }
 
@@ -527,7 +530,7 @@ pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
         let take = count.min(available);
         let vol = chunk.volume;
         for j in 0..take {
-            let s = chunk.samples[j] * vol;
+            let s = chunk.samples[j] * vol * 2.0;
             left[j] += s;
             right[j] += s;
         }
@@ -564,9 +567,8 @@ pub fn key_pressed(code: &str) {
 
         if t.ends_with("ineedmorebullets") {
             t.clear();
-            let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
-            if crate::input::muguet_is_multiplayer() && mode != "sandbox" {
-                eprintln!("[anti-cheat] 'ineedmorebullets' cheat blocked in story multiplayer");
+            if crate::input::muguet_is_multiplayer() {
+                eprintln!("[anti-cheat] 'ineedmorebullets' cheat blocked in multiplayer");
             } else {
                 WANT_BULLETS.store(true, Ordering::Relaxed);
             }
@@ -1517,28 +1519,32 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
     let dz = my_pos[2] - sender_z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-    // 3D Spatial Audio: 35 meter max hearing range
-    if dist <= 35.0 {
-        let volume = ((35.0 - dist) / 30.0).clamp(0.05, 1.0);
-        let samples: Vec<f32> = chunk.data.iter().map(|&b| (b as f32 - 128.0) / 128.0).collect();
-        let mut inc = VOICE_INCOMING.lock().unwrap();
-        if inc.len() < 30 {
-            inc.push_back(IncomingVoiceSample { samples, volume });
-        }
-        let mut speakers = ACTIVE_SPEAKERS.lock().unwrap();
-        if let Some(entry) = speakers.iter_mut().find(|(id, _, _)| *id == sender_id) {
-            entry.1 = sender_name;
-            entry.2 = now;
-        } else {
-            speakers.push((sender_id, sender_name, now));
-        }
+    // Volume calculation: full volume up close (<= 30m), fading to 60% radio volume at distance
+    // so players in the same room can ALWAYS hear each other anywhere on the map!
+    let volume = if dist <= 30.0 {
+        1.0
+    } else if dist <= 120.0 {
+        (1.0 - (dist - 30.0) / 90.0 * 0.4).clamp(0.6, 1.0)
+    } else {
+        0.6
+    };
+
+    let samples: Vec<f32> = chunk.data.iter().map(|&b| (b as f32 - 128.0) / 128.0).collect();
+    let mut inc = VOICE_INCOMING.lock().unwrap();
+    if inc.len() < 50 {
+        inc.push_back(IncomingVoiceSample { samples, volume });
+    }
+    let mut speakers = ACTIVE_SPEAKERS.lock().unwrap();
+    if let Some(entry) = speakers.iter_mut().find(|(id, _, _)| *id == sender_id) {
+        entry.1 = sender_name;
+        entry.2 = now;
+    } else {
+        speakers.push((sender_id, sender_name, now));
     }
 }
 
 fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     if ped == 0 || !c.exists(ped) { return; }
-    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
-    if mode == "sandbox" { return; }
     let _ = c.i("RemoveAllPedWeapons", &[i(ped), b(true)]);
     let _ = c.i("RemoveAllPedWeapons2", &[i(ped), b(true)]);
     for w in ALL_CHEAT_WEAPONS {
@@ -1557,6 +1563,19 @@ fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
 fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     if ped == 0 || !c.exists(ped) { return; }
 
+    // Neutralize in-game cell phone godmode / invincibility (1-999-PAINKILLER)
+    c.i("SetEntityInvincible", &[i(ped), b(false)]);
+    let player_id = c.i("PlayerId", &[]);
+    if player_id != 0 {
+        c.i("SetPlayerInvincible", &[i(player_id), b(false)]);
+    }
+
+    // Neutralize in-game cell phone infinite ammo cheats
+    c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+
+    // Neutralize in-game cell phone slow-motion cheat (1-999-SLOWMO)
+    c.i("SetTimeScale", &[f(1.0)]);
+
     // 1. Paycheck every 180 seconds (+250$)
     let mut last_pay = LAST_PAYCHECK.lock().unwrap();
     if last_pay.map(|t| t.elapsed() > Duration::from_secs(180)).unwrap_or(true) {
@@ -1568,20 +1587,17 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
         *last_pay = Some(Instant::now());
     }
 
-    // 2. Anti-cheat check: Remove banned cheat weapons (RPG, Minigun, Explosives)
-    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
-    if mode != "sandbox" {
-        let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
-        let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
-        for banned in BANNED_CHEAT_WEAPONS {
-            let bh = weapon(banned);
-            if cur_w == bh && !purchased.contains(&bh) {
-                let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
-                let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
-                let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
-                eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
-                c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
-            }
+    // 2. Anti-cheat check: Remove banned cheat weapons (RPG, Minigun, Explosives from 1-999-TOOLUP)
+    let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    for banned in BANNED_CHEAT_WEAPONS {
+        let bh = weapon(banned);
+        if cur_w == bh && !purchased.contains(&bh) {
+            let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
+            let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
+            let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+            eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
+            c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
         }
     }
 

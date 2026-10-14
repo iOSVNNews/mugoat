@@ -1477,9 +1477,7 @@ void PGFillAudio(float *left, float *right, uint32_t count) {
     atomic_store(header + 1, read + take);
     atomic_fetch_add(header + 3, 1);
   }
-  if (MugoatOnlineEnabled()) {
-    MugoatVoiceMixAudio(left, right, count);
-  }
+  MugoatVoiceMixAudio(left, right, count);
 }
 
 static char *configuredQuality[32];static unsigned configuredQualityCount;
