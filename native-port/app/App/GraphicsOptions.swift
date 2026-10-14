@@ -10,11 +10,11 @@ enum GraphicsPreset: Int, CaseIterable {
 
     var title: String { [L10n.text("Tiết kiệm pin"), L10n.text("Ưu tiên mượt"), L10n.text("Cân bằng"), L10n.text("Rõ nét"), L10n.text("Cao"), L10n.text("Tối đa")][rawValue] }
     /// Render height in pixels; width follows the screen's shape.
-    var height: Int { [432, 540, 720, 900, 1080, 1080][rawValue] }
+    var height: Int { [432, 540, 720, 900, 1080, 1290][rawValue] }
     var detail: String {
         [L10n.text("432p · ít tốn RAM và pin"), L10n.text("540p · giảm hiệu ứng nặng"), L10n.text("720p · cân bằng hình ảnh và tốc độ"),
          L10n.text("900p · tăng chi tiết và khoảng nhìn"), L10n.text("1080p · bóng và phản chiếu cao"),
-         L10n.text("1080p · chi tiết đồ họa tối đa")][rawValue]
+         L10n.text("1290p · chi tiết đồ họa tối đa (Native)")][rawValue]
     }
 
     /// Engine command-line options. Shader quality never goes below 1 (the
@@ -85,32 +85,29 @@ struct DeviceTier {
 }
 
 enum GraphicsConfiguration {
-    /// The screen's height in pixels, clamped to safe 1080p maximum on iOS.
+    /// The screen's height in pixels (the "Native" resolution).
     static var nativeHeight: Int {
         let screen = UIScreen.main
         let raw = Int(min(screen.nativeBounds.width, screen.nativeBounds.height))
-        return min(raw > 0 ? raw : 720, 1080)
+        return raw > 0 ? raw : 720
     }
     /// Resolutions offered in Settings, besides "Auto" (the detail preset's own).
     static var resolutionChoices: [Int] {
-        let standard = [540, 720, 900, 1080]
-        var list = standard.filter { $0 <= nativeHeight }
+        let standard = [540, 720, 900, 1080, 1290, 1440, 1620, 2160]
+        var list = standard.filter { $0 < nativeHeight }
         if !list.contains(nativeHeight) && nativeHeight >= 540 {
             list.append(nativeHeight)
-            list.sort()
         }
+        list.sort()
         return list.isEmpty ? [720] : list
     }
     /// Width/height to render at: the chosen height (or the preset's), shaped like the screen so the
-    /// picture is not stretched, clamped to 2560x1080 safe ceiling (matching Muguet parity).
+    /// picture is not stretched.
     static func size(for preset: GraphicsPreset, renderHeight: Int, screen: CGSize, matchScreenShape: Bool) -> (Int, Int) {
         let aspect = matchScreenShape && screen.height > 0 ? max(screen.width, screen.height) / min(screen.width, screen.height) : 16.0 / 9.0
-        var height = Double(renderHeight > 0 ? min(renderHeight, 1080) : preset.height)
-        height = min(max(height, 360), Double(nativeHeight))
-        var width = height * aspect
-        let k = min(2560.0 / max(width, 1.0), min(1080.0 / max(height, 1.0), 1.0))
-        width *= k
-        height *= k
+        var height = Double(renderHeight > 0 ? renderHeight : preset.height)
+        height = min(max(height, 360), Double(max(nativeHeight, 720)))
+        let width = min(height * aspect, 3840.0)
         func even(_ value: Double) -> Int { Int(value.rounded()) & ~1 }
         return (max(even(width), 320), max(even(height), 240))
     }

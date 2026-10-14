@@ -50,6 +50,8 @@
 	<dict/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mugoat sử dụng micro để trò chuyện trong game qua voice chat (Loa &amp; Mic).</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>

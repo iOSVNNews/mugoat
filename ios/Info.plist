@@ -55,5 +55,6 @@
   <key>GCSupportedGameControllers</key>
   <array><dict><key>ProfileName</key><string>ExtendedGamepad</string></dict></array>
   <key>NSLocalNetworkUsageDescription</key><string>Multiplayer connects to a game server on your local network.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Mugoat sử dụng micro để trò chuyện trong game qua voice chat (Loa &amp; Mic).</string>
 </dict>
 </plist>

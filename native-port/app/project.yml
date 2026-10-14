@@ -99,6 +99,7 @@ targets:
           NSAllowsArbitraryLoads: true
         # Filled in by the cloud build so you don't have to type it.
         PGDefaultAssetServer: ""
+        NSMicrophoneUsageDescription: "Mugoat sử dụng micro để trò chuyện trong game qua voice chat (Loa & Mic)."
         # The app folder (logs) is visible in the Files app.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true

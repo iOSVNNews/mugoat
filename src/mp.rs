@@ -5,7 +5,7 @@ use crate::proto::{self, Look, PopEntry, Shot, State, VehLook};
 use crate::{read_cstr, read_u32, read_u64, write_u64, HostState};
 use std::collections::{HashMap, VecDeque};
 use std::net::UdpSocket;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 #[cfg(not(feature = "native-port"))]
@@ -197,6 +197,16 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("SetCurrentPedWeapon", "weapon_commands::CommandSetCurrentPedWeapon(int, int, bool)"),
     ("SetPedInfiniteAmmoClip", "weapon_commands::CommandSetPedInfiniteAmmoClip(int, bool)"),
     ("GetPedLastWeaponImpactCoord", "weapon_commands::CommandGetPedLastWeaponImpactCoord(int, rage::Vector3&)"),
+    ("RemoveAllPedWeapons", "weapon_commands::CommandRemoveAllPedWeapons(int, bool)"),
+    ("RemoveAllPedWeapons2", "weapon_commands::RemoveAllPedWeapons(int, bool)"),
+    ("RemoveWeaponFromPed", "weapon_commands::CommandRemoveWeaponFromPed(int, int)"),
+    ("RemoveWeaponFromPed2", "weapon_commands::RemoveWeaponFromPed(int, int)"),
+    ("HasPedGotWeapon", "weapon_commands::CommandHasPedGotWeapon(int, int, bool)"),
+    ("HasPedGotWeapon2", "weapon_commands::HasPedGotWeapon(int, int, bool)"),
+    ("GetAmmoInPedWeapon", "weapon_commands::CommandGetAmmoInPedWeapon(int, int)"),
+    ("GetAmmoInPedWeapon2", "weapon_commands::GetAmmoInPedWeapon(int, int)"),
+    ("SetPedAmmo", "weapon_commands::CommandSetPedAmmo(int, int, int)"),
+    ("SetPedAmmo2", "weapon_commands::SetPedAmmo(int, int, int)"),
     ("RequestModel", "streaming_commands::CommandRequestModel(int)"),
     ("HasModelLoaded", "streaming_commands::HasModelLoaded(int)"),
     ("TaskGoStraightToCoord", "task_commands::CommandTaskGoStraightToCoord(int, rage::scrVector const&, float, int, float, float)"),
@@ -416,9 +426,133 @@ static WANT_ENTER: AtomicBool = AtomicBool::new(false);
 static WANT_BULLETS: AtomicBool = AtomicBool::new(false);
 static TYPED: Mutex<String> = Mutex::new(String::new());
 
+// Economy & Gun Shop State
+pub static WALLET_CASH: AtomicI32 = AtomicI32::new(1000);
+pub static AMMU_BUY_REQUESTED: AtomicBool = AtomicBool::new(false);
+static SELECTED_AMMU_ITEM: AtomicUsize = AtomicUsize::new(0);
+static LAST_PAYCHECK: Mutex<Option<Instant>> = Mutex::new(None);
+static LAST_AMMU_BUY: Mutex<Option<Instant>> = Mutex::new(None);
+static WEAPONS_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static PURCHASED_WEAPONS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+// Voice Chat State (Loa & Mic)
+pub static VOICE_MIC_ENABLED: AtomicBool = AtomicBool::new(false);
+pub static VOICE_SPEAKER_ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub struct IncomingVoiceSample {
+    pub samples: Vec<f32>,
+    pub volume: f32,
+}
+
+static VOICE_INCOMING: Mutex<VecDeque<IncomingVoiceSample>> = Mutex::new(VecDeque::new());
+static ACTIVE_SPEAKERS: Mutex<Vec<(u8, String, Instant)>> = Mutex::new(Vec::new());
+static VOICE_SEQ: AtomicU16 = AtomicU16::new(0);
+static LOCAL_POS: Mutex<Option<[f32; 3]>> = Mutex::new(None);
+
+pub struct ShopItem {
+    pub name: &'static str,
+    pub weapon_hash: &'static str,
+    pub price: i32,
+    pub ammo: i32,
+    pub is_armor: bool,
+}
+
+pub const AMMU_ITEMS: &[ShopItem] = &[
+    ShopItem { name: "Súng Lục (Combat Pistol)", weapon_hash: "weapon_combatpistol", price: 500, ammo: 60, is_armor: false },
+    ShopItem { name: "Tiểu Liên (Micro SMG)", weapon_hash: "weapon_microsmg", price: 1200, ammo: 120, is_armor: false },
+    ShopItem { name: "Shotgun (Pump Shotgun)", weapon_hash: "weapon_pumpshotgun", price: 2000, ammo: 40, is_armor: false },
+    ShopItem { name: "Súng Trường (Carbine Rifle)", weapon_hash: "weapon_carbinerifle", price: 3500, ammo: 150, is_armor: false },
+    ShopItem { name: "Súng Ngắm (Sniper Rifle)", weapon_hash: "weapon_sniperrifle", price: 5000, ammo: 30, is_armor: false },
+    ShopItem { name: "Giáp Chống Đạn (100% Armor)", weapon_hash: "", price: 800, ammo: 0, is_armor: true },
+    ShopItem { name: "Nạp Full Đạn", weapon_hash: "AMMO_REFILL", price: 400, ammo: 999, is_armor: false },
+];
+
+pub const ALL_CHEAT_WEAPONS: &[&str] = &[
+    "weapon_knife", "weapon_bat", "weapon_pistol", "weapon_combatpistol", "weapon_appistol", "weapon_pistol50",
+    "weapon_microsmg", "weapon_smg", "weapon_assaultsmg", "weapon_assaultrifle", "weapon_carbinerifle",
+    "weapon_advancedrifle", "weapon_mg", "weapon_combatmg", "weapon_pumpshotgun", "weapon_sawnoffshotgun",
+    "weapon_assaultshotgun", "weapon_sniperrifle", "weapon_heavysniper", "weapon_grenadelauncher",
+    "weapon_rpg", "weapon_minigun", "weapon_grenade", "weapon_stickybomb", "weapon_molotov",
+    "weapon_railgun", "weapon_hominglauncher", "weapon_firework",
+];
+
+pub const BANNED_CHEAT_WEAPONS: &[&str] = &[
+    "weapon_rpg", "weapon_minigun", "weapon_grenadelauncher", "weapon_stickybomb", "weapon_molotov",
+    "weapon_railgun", "weapon_hominglauncher", "weapon_firework", "weapon_grenade",
+];
+
+pub fn submit_mic_audio(samples: &[f32]) {
+    if !VOICE_MIC_ENABLED.load(Ordering::Relaxed) { return; }
+    let Some(Some(net)) = NET.get() else { return; };
+    if net.my_id.lock().unwrap().is_none() { return; }
+
+    // Noise gate: skip transmitting silence / low ambient noise
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt();
+    if rms < 0.012 { return; }
+
+    let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
+    let pos_dm = [
+        (my_pos[0] * 10.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+        (my_pos[1] * 10.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+        (my_pos[2] * 10.0).clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+    ];
+
+    // Transmit in 20ms chunks (960 samples @ 48kHz) to stay well within network MTU
+    for chunk_samples in samples.chunks(960) {
+        let seq = VOICE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let data: Vec<u8> = chunk_samples.iter().map(|&s| ((s.clamp(-1.0, 1.0) * 127.0) + 128.0) as u8).collect();
+        let chunk = proto::VoiceChunk { seq, pos: pos_dm, data };
+        let mut payload = Vec::new();
+        chunk.encode(&mut payload);
+        let _ = net.sock.send(&proto::packet(proto::VOICE, &payload));
+    }
+}
+
+pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
+    if !VOICE_SPEAKER_ENABLED.load(Ordering::Relaxed) { return; }
+    let mut inc = VOICE_INCOMING.lock().unwrap();
+    let count = left.len().min(right.len());
+    if count == 0 || inc.is_empty() { return; }
+
+    // Drop backlog to maintain real-time playback
+    while inc.len() > 15 {
+        inc.pop_front();
+    }
+
+    // Parallel multi-speaker audio mixing
+    let mut i = 0;
+    while i < inc.len() {
+        let chunk = &mut inc[i];
+        let available = chunk.samples.len();
+        let take = count.min(available);
+        let vol = chunk.volume;
+        for j in 0..take {
+            let s = chunk.samples[j] * vol;
+            left[j] += s;
+            right[j] += s;
+        }
+        if take == available {
+            inc.remove(i);
+        } else {
+            chunk.samples.drain(..take);
+            i += 1;
+        }
+    }
+}
+
+pub fn voice_active_speakers() -> Vec<String> {
+    let now = Instant::now();
+    let mut speakers = ACTIVE_SPEAKERS.lock().unwrap();
+    speakers.retain(|(_, _, t)| now.duration_since(*t) < Duration::from_millis(1500));
+    speakers.iter().map(|(_, name, _)| name.clone()).collect()
+}
+
 pub fn key_pressed(code: &str) {
     if code == "KeyH" {
         WANT_ENTER.store(true, Ordering::Relaxed);
+    }
+    if code == "KeyE" {
+        AMMU_BUY_REQUESTED.store(true, Ordering::Relaxed);
     }
     if let Some(c) = code.strip_prefix("Key").filter(|c| c.len() == 1) {
         let mut t = TYPED.lock().unwrap();
@@ -430,7 +564,11 @@ pub fn key_pressed(code: &str) {
 
         if t.ends_with("ineedmorebullets") {
             t.clear();
-            WANT_BULLETS.store(true, Ordering::Relaxed);
+            if crate::input::muguet_is_multiplayer() {
+                eprintln!("[anti-cheat] 'ineedmorebullets' cheat blocked in multiplayer");
+            } else {
+                WANT_BULLETS.store(true, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -638,6 +776,14 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
             proto::VCTL if p.len() >= 5 => {
                 if let Some(peer) = net.peers.lock().unwrap().get_mut(&p[0]) {
                     peer.vctl = Some([p[1], p[2], p[3], p[4]]);
+                }
+            }
+            proto::VOICE if p.len() >= 9 => {
+                let sender_id = p[0];
+                if VOICE_SPEAKER_ENABLED.load(Ordering::Relaxed) {
+                    if let Some(chunk) = proto::VoiceChunk::decode(&p[1..]) {
+                        receive_voice_chunk(net, sender_id, chunk, now);
+                    }
                 }
             }
             proto::KILLFEED if p.len() >= 6 => {
@@ -1274,6 +1420,20 @@ impl Cmd<'_, '_> {
         let n = (self.i(cmd, &args).max(0) as u64).min(NEARBY_MAX);
         (0..n).map(|k| read_u32(m, self.scratch + off + 8 + 8 * k).unwrap_or(0) as i32).filter(|e| *e != 0).collect()
     }
+
+    fn feed(&mut self, text: &str) {
+        self.c_str(S_TEXT, "STRING");
+        self.c_str(S_NAME, text);
+        let _ = self.i("BeginTheFeedPost", &[self.ptr(S_TEXT)]);
+        let _ = self.i("AddTextComponentSubStringPlayerName", &[self.ptr(S_NAME)]);
+        let _ = self.i("EndTheFeedPostTicker", &[b(false), b(true)]);
+    }
+
+    fn play_frontend(&mut self, sound: &str, sound_set: &str) {
+        self.c_str(S_NAME, sound);
+        self.c_str(S_TEXT, sound_set);
+        let _ = self.i("PlaySoundFrontend", &[i(-1), self.ptr(S_NAME), self.ptr(S_TEXT), b(true)]);
+    }
 }
 
 fn b(v: bool) -> Val {
@@ -1346,11 +1506,164 @@ fn play_sound(name: &str) {
     }
 }
 
+fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: Instant) {
+    let sender_name = net.peers.lock().unwrap().get(&sender_id)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| format!("Player {sender_id}"));
+
+    let sender_x = chunk.pos[0] as f32 / 10.0;
+    let sender_y = chunk.pos[1] as f32 / 10.0;
+    let sender_z = chunk.pos[2] as f32 / 10.0;
+
+    let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
+    let dx = my_pos[0] - sender_x;
+    let dy = my_pos[1] - sender_y;
+    let dz = my_pos[2] - sender_z;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+    // 3D Spatial Audio: 35 meter max hearing range
+    if dist <= 35.0 {
+        let volume = ((35.0 - dist) / 30.0).clamp(0.05, 1.0);
+        let samples: Vec<f32> = chunk.data.iter().map(|&b| (b as f32 - 128.0) / 128.0).collect();
+        let mut inc = VOICE_INCOMING.lock().unwrap();
+        if inc.len() < 30 {
+            inc.push_back(IncomingVoiceSample { samples, volume });
+        }
+        let mut speakers = ACTIVE_SPEAKERS.lock().unwrap();
+        if let Some(entry) = speakers.iter_mut().find(|(id, _, _)| *id == sender_id) {
+            entry.1 = sender_name;
+            entry.2 = now;
+        } else {
+            speakers.push((sender_id, sender_name, now));
+        }
+    }
+}
+
+fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
+    if ped == 0 || !c.exists(ped) { return; }
+    let _ = c.i("RemoveAllPedWeapons", &[i(ped), b(true)]);
+    let _ = c.i("RemoveAllPedWeapons2", &[i(ped), b(true)]);
+    for w in ALL_CHEAT_WEAPONS {
+        let h = weapon(w) as i32;
+        let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(h)]);
+        let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(h)]);
+    }
+    // Give basic melee knife:
+    let knife = weapon("weapon_knife") as i32;
+    let _ = c.i("GiveWeaponToPed", &[i(ped), i(knife), i(1), b(false), b(false)]);
+    let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(knife), b(true)]);
+    let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+    eprintln!("[economy] stripped all cheat/singleplayer weapons; initialized player wallet at ${}", WALLET_CASH.load(Ordering::Relaxed));
+}
+
+fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
+    if ped == 0 || !c.exists(ped) { return; }
+
+    // 1. Paycheck every 180 seconds (+250$)
+    let mut last_pay = LAST_PAYCHECK.lock().unwrap();
+    if last_pay.map(|t| t.elapsed() > Duration::from_secs(180)).unwrap_or(true) {
+        if last_pay.is_some() {
+            let balance = WALLET_CASH.fetch_add(250, Ordering::Relaxed) + 250;
+            eprintln!("[economy] paycheck received: +$250 (balance: ${balance})");
+            c.feed(&format!("~g~+$250~s~ [Lương công dân] | Ví: ~g~${balance}~s~"));
+        }
+        *last_pay = Some(Instant::now());
+    }
+
+    // 2. Anti-cheat check: Remove banned cheat weapons (RPG, Minigun, Explosives)
+    let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    for banned in BANNED_CHEAT_WEAPONS {
+        let bh = weapon(banned);
+        if cur_w == bh && !purchased.contains(&bh) {
+            let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
+            let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
+            let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+            eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
+            c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
+        }
+    }
+
+    // 3. Ammu-Nation interaction near blips (sprite 110)
+    let near_shop = WORLD_SHOPS.iter().find(|s| {
+        if s.sprite != 110 { return false; }
+        let dx = my_pos[0] - s.pos[0];
+        let dy = my_pos[1] - s.pos[1];
+        let dz = my_pos[2] - s.pos[2];
+        (dx * dx + dy * dy + dz * dz) < 16.0 // 4.0 meters
+    });
+
+    if let Some(_shop) = near_shop {
+        let idx = SELECTED_AMMU_ITEM.load(Ordering::Relaxed) % AMMU_ITEMS.len();
+        let item = &AMMU_ITEMS[idx];
+        let cash = WALLET_CASH.load(Ordering::Relaxed);
+
+        // Draw screen banner notification
+        static LAST_BANNER: Mutex<Option<Instant>> = Mutex::new(None);
+        let mut banner_t = LAST_BANNER.lock().unwrap();
+        if banner_t.map(|t| t.elapsed() > Duration::from_millis(1500)).unwrap_or(true) {
+            c.feed(&format!("~g~[AMMU-NATION]~s~ Ví: ~g~${cash}~s~ | Chọn: ~y~{}~s~ (~g~${}~s~) [E/Còi]", item.name, item.price));
+            *banner_t = Some(Instant::now());
+        }
+
+        let buy_trigger = AMMU_BUY_REQUESTED.swap(false, Ordering::Relaxed);
+        let horn_trigger = crate::pad::horn_held();
+        let mut last_buy = LAST_AMMU_BUY.lock().unwrap();
+        let can_interact = last_buy.map(|t| t.elapsed() > Duration::from_millis(600)).unwrap_or(true);
+
+        if (buy_trigger || horn_trigger) && can_interact {
+            *last_buy = Some(Instant::now());
+            if cash >= item.price {
+                let remaining = WALLET_CASH.fetch_sub(item.price, Ordering::Relaxed) - item.price;
+                if item.is_armor {
+                    let _ = c.i("SetPedArmour", &[i(ped), i(100)]);
+                    c.feed(&format!("~g~Đã mua: {}!~s~ Còn lại: ~g~${remaining}~s~", item.name));
+                } else if item.weapon_hash == "AMMO_REFILL" {
+                    for &wh in &purchased {
+                        let _ = c.i("SetPedAmmo", &[i(ped), i(wh as i32), i(300)]);
+                        let _ = c.i("SetPedAmmo2", &[i(ped), i(wh as i32), i(300)]);
+                    }
+                    c.feed(&format!("~g~Đã nạp đầy đạn mọi vũ khí!~s~ Còn lại: ~g~${remaining}~s~"));
+                } else {
+                    let wh = weapon(item.weapon_hash) as i32;
+                    let _ = c.i("GiveWeaponToPed", &[i(ped), i(wh), i(item.ammo), b(false), b(true)]);
+                    let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(wh), b(true)]);
+                    let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+                    PURCHASED_WEAPONS.lock().unwrap().push(wh as u32);
+                    c.feed(&format!("~g~Đã mua: {}!~s~ Còn lại: ~g~${remaining}~s~", item.name));
+                }
+                c.play_frontend("PURCHASE", "HUD_LIQUOR_STORE_SOUNDSET");
+                SELECTED_AMMU_ITEM.fetch_add(1, Ordering::Relaxed);
+            } else {
+                c.feed(&format!("~r~Không đủ tiền! Cần ${} (Ví có ${cash})~s~", item.price));
+                c.play_frontend("ERROR", "HUD_AMMO_SHOP_SOUNDSET");
+            }
+        }
+    } else if AMMU_BUY_REQUESTED.swap(false, Ordering::Relaxed) {
+        let cash = WALLET_CASH.load(Ordering::Relaxed);
+        c.feed(&format!("~y~Ví: ~g~${cash}~y~. Hãy đến Ammu-Nation (~r~icon súng trên bản đồ~y~) để mua vũ khí!~s~"));
+    }
+}
+
+fn update_voice_speakers_hud(c: &mut Cmd<'_, '_>) {
+    let speakers = voice_active_speakers();
+    if !speakers.is_empty() {
+        static LAST_VOICE_HUD: Mutex<Option<Instant>> = Mutex::new(None);
+        let mut vhud = LAST_VOICE_HUD.lock().unwrap();
+        if vhud.map(|t| t.elapsed() > Duration::from_millis(1500)).unwrap_or(true) {
+            let names = speakers.join(", ");
+            c.feed(&format!("~b~🔊 [{names}] đang nói...~s~"));
+            *vhud = Some(Instant::now());
+        }
+    }
+}
+
 fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
     let my_id = *net.my_id.lock().unwrap();
     let ped = c.i("PlayerPedId", &[]);
     let me_ok = ped != 0 && c.exists(ped);
     let my_pos = if me_ok { c.v("GetEntityCoords", &[i(ped), b(false)]) } else { [0.0; 3] };
+    *LOCAL_POS.lock().unwrap() = Some(my_pos);
     let ptr_of = |c: &mut Cmd, e: i32| match call(c.caller, "mp:GetBaseFromGuid", &[i(e)]) { Some(Val::I64(p)) => p as u64, _ => 0 };
     LOCAL_PED.store(if me_ok { ptr_of(c, ped) } else { 0 }, Ordering::Relaxed);
     let my_car = if me_ok && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 { c.i("GetVehiclePedIsIn", &[i(ped), b(false)]) } else { 0 };
@@ -1365,6 +1678,11 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
     }
 
     if me_ok && my_id.is_some() {
+        if !WEAPONS_INITIALIZED.swap(true, Ordering::Relaxed) {
+            strip_all_unauthorized_weapons(c, ped);
+        }
+        update_economy_and_shops(c, ped, my_pos);
+        update_voice_speakers_hud(c);
         if game.last_send.elapsed() >= SEND_EVERY {
             game.last_send = Instant::now();
             let s = local_state(c, game, ped, my_pos);
@@ -1583,6 +1901,13 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                 net.deaths.lock().unwrap().push((me, killer, cause));
             }
         }
+        if dead && !game.was_dead {
+            let cur = WALLET_CASH.load(Ordering::Relaxed);
+            if cur > 100 {
+                WALLET_CASH.fetch_sub(100, Ordering::Relaxed);
+                eprintln!("[economy] hospital fee: -$100 (balance: ${})", cur - 100);
+            }
+        }
         if !dead && game.was_dead {
             game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
         }
@@ -1600,6 +1925,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         if killer != 0 && Some(killer) == my_id && Some(victim) != my_id {
             game.marker = Some((Instant::now(), true));
             frontend_sound(c, "CHECKPOINT_NORMAL", "HUD_MINI_GAME_SOUNDSET");
+            let balance = WALLET_CASH.fetch_add(500, Ordering::Relaxed) + 500;
+            eprintln!("[economy] kill bounty: +$500 (balance: ${balance})");
+            c.feed(&format!("~g~+$500~s~ [Tiền thưởng hạ gục] | Ví: ~g~${balance}~s~"));
         }
         c.c_str(S_TEXT, "STRING");
         c.c_str(S_NAME, &text);

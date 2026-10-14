@@ -95,6 +95,10 @@ final class CheatManager {
 
     /// Applies a cheat code via Gamepad combo, Console typing, or Auto selection.
     static func apply(code: String, mode: CheatInputMode = .console, completion: ((Bool) -> Void)? = nil) {
+        if MugoatOnlineEnabled() {
+            completion?(false)
+            return
+        }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
             completion?(false)
@@ -157,6 +161,17 @@ struct CheatMenuView: View {
     var body: some View {
         NavigationView {
             List {
+                if MugoatOnlineEnabled() {
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .foregroundColor(.yellow)
+                            Text("Chế độ Cheat bị vô hiệu hóa khi chơi Online để đảm bảo công bằng. Hãy kiếm tiền mua súng tại Ammu-Nation!")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
                 Section {
                     Picker("Danh mục", selection: $selectedTab) {
                         ForEach(CheatMenuTab.allCases) { tab in
@@ -351,6 +366,13 @@ struct CheatMenuView: View {
     }
 
     private func apply(_ code: String, forcedMode: CheatInputMode? = nil) {
+        if MugoatOnlineEnabled() {
+            withAnimation { toastMessage = "Không thể dùng cheat trong Multiplayer Online!" }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation { toastMessage = nil }
+            }
+            return
+        }
         if !engineRunning {
             withAnimation { toastMessage = "Game chưa chạy: \(code)" }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -366,6 +388,13 @@ struct CheatMenuView: View {
     }
 
     private func spawnVehicle(_ model: String) {
+        if MugoatOnlineEnabled() {
+            withAnimation { toastMessage = "Không thể triệu hồi xe bằng cheat trong Online!" }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation { toastMessage = nil }
+            }
+            return
+        }
         var clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if clean == "mbs1k" { clean = "mbslk" }
         guard !clean.isEmpty else { return }

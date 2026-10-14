@@ -35,7 +35,8 @@ enum ControlStyle {
         "detonate": "burst.fill", "zoom_in": "plus.magnifyingglass", "zoom_out": "minus.magnifyingglass",
         "weapon_prev": "chevron.left", "weapon_next": "chevron.right", "throttle_up": "chevron.up.2",
         "throttle_down": "chevron.down.2", "yaw_left": "rotate.left.fill", "yaw_right": "rotate.right.fill",
-        "cheat": "bolt.fill"]
+        "cheat": "bolt.fill", "speaker": "speaker.wave.2.fill", "speaker_muted": "speaker.slash.fill",
+        "mic": "mic.fill", "mic_muted": "mic.slash.fill", "buy_weapon": "cart.fill"]
 }
 
 /// One on-screen control: a glyph in a circle (or a rounded pedal), no caption.
@@ -227,6 +228,7 @@ final class TouchControlsView: UIView {
     weak var highlighted: ControlButton? { didSet { updateHighlight() } }
     var openSettings: (() -> Void)?
     var openCheat: (() -> Void)?
+    var onVoiceMicChanged: ((Bool) -> Void)?
     /// A line for the log when the game state behind the situational buttons changes.
     var hintsChanged: ((String) -> Void)?
     private(set) var context = ControlContext.onFoot
@@ -318,6 +320,9 @@ final class TouchControlsView: UIView {
     private let pause = ControlButton("pause", icon: "pause", label: "Pause menu")
     private let settings = ControlButton("settings", icon: "settings", label: L10n.text("Settings"))
     private let cheat = ControlButton("cheat", icon: "cheat", label: L10n.text("Lệnh cheat"))
+    private let speaker = ControlButton("speaker", icon: "speaker", label: "Loa Voice Chat")
+    private let mic = ControlButton("mic", icon: "mic", label: "Micro Voice Chat")
+    private let buyWeapon = ControlButton("buyWeapon", icon: "buy_weapon", label: "Mua súng Ammu-Nation")
     private let lights = ControlButton("lights", icon: "lights", label: "Headlights")
     private let radio = ControlButton("radio", icon: "radio", label: "Radio")
     // Menu and phone dock
@@ -333,7 +338,8 @@ final class TouchControlsView: UIView {
     private var allButtons: [ControlButton] {
         [fire, aim, leftFire, leftAim, jump, enter, weapons, reload, cover, crouch, switcher, special, interact, detonate, zoomIn, zoomOut,
          weaponPrev, weaponNext, gas, brake, handbrake, driveBy, horn, lookBack,
-         vehicleWeapon, dive, surface, airFire, gear, throttleUp, throttleDown, yawLeft, yawRight, camera, phone, pause, settings, cheat, lights, radio,
+         vehicleWeapon, dive, surface, airFire, gear, throttleUp, throttleDown, yawLeft, yawRight, camera, phone, pause, settings, cheat,
+         speaker, mic, buyWeapon, lights, radio,
          up, down, left, right, accept, back, tabLeft, tabRight]
     }
     private var visible: [ControlButton] = []
@@ -398,11 +404,13 @@ final class TouchControlsView: UIView {
         if changed { updateVisibility() }
     }
     private func baseVisible() -> [ControlButton] {
-        let utility: [ControlButton] = context.driving ? [radio, lights, camera, phone, pause, settings, cheat] : [camera, phone, pause, settings, cheat]
-        if context == .menu { return [pause, settings, cheat, up, down, left, right, accept, back, tabLeft, tabRight] }
-        if phoneDock { return [camera, phone, pause, settings, cheat, up, down, left, right, accept, back] }
+        let online = MugoatOnlineEnabled()
+        let onlineButtons: [ControlButton] = online ? [speaker, mic, buyWeapon] : [cheat]
+        let utility: [ControlButton] = context.driving ? [radio, lights, camera, phone, pause, settings] + onlineButtons : [camera, phone, pause, settings] + onlineButtons
+        if context == .menu { return [pause, settings] + onlineButtons + [up, down, left, right, accept, back, tabLeft, tabRight] }
+        if phoneDock { return [camera, phone, pause, settings] + onlineButtons + [up, down, left, right, accept, back] }
         // A prompt (Mission failed, warning screens) waits for Accept/Back; play controls do nothing then.
-        if promptActive && !editing { return [camera, pause, settings, cheat, accept, back] }
+        if promptActive && !editing { return [camera, pause, settings] + onlineButtons + [accept, back] }
         switch context {
         case .onFoot:
             return aimActive ? utility + [fire, aim, enter, weapons, reload, cover, leftFire, leftAim]
@@ -412,7 +420,7 @@ final class TouchControlsView: UIView {
         case .bike:
             return utility + [gas, brake, handbrake, enter, driveBy, horn, lookBack]
         case .bicycle:
-            return [camera, phone, pause, settings, cheat, radio, gas, brake, handbrake, enter, lookBack]
+            return [camera, phone, pause, settings] + onlineButtons + [radio, gas, brake, handbrake, enter, lookBack]
         case .sub:
             return utility + [gas, brake, enter, dive, surface, lookBack]
         // Aircraft: radio and next weapon are the same pad input, so one button does both.
@@ -471,6 +479,14 @@ final class TouchControlsView: UIView {
         weapons.setIcon("weapons")
         enter.accessibilityLabel = context == .onFoot ? "Enter vehicle" : context.flying ? "Hold to exit aircraft" : "Exit vehicle"
         gas.setIcon(context == .bicycle ? "pedal" : "gas")
+        if MugoatOnlineEnabled() {
+            let spkOn = MugoatVoiceIsSpeakerEnabled()
+            speaker.setIcon(spkOn ? "speaker" : "speaker_muted")
+            speaker.active = spkOn
+            let micOn = MugoatVoiceIsMicEnabled()
+            mic.setIcon(micOn ? "mic" : "mic_muted")
+            mic.active = micOn
+        }
         setNeedsLayout()
     }
 
@@ -499,7 +515,7 @@ final class TouchControlsView: UIView {
         moveStick.baseDiameter = 120 * scale; moveStick.travel = 48 * scale
 
         // Utility bar, top centre: rare actions in the hard-to-reach zone.
-        let order = [radio, lights, camera, phone, pause, settings, cheat]
+        let order = [radio, lights, camera, phone, pause, settings, cheat, speaker, mic, buyWeapon]
         let bar = order.filter { visible.contains($0) }
         for (i, button) in bar.enumerated() {
             let offset = (CGFloat(i) - CGFloat(bar.count - 1) / 2) * 54 * scale / safe.width
@@ -733,6 +749,19 @@ final class TouchControlsView: UIView {
             DispatchQueue.main.async { self.openSettings?() }
         case cheat:
             DispatchQueue.main.async { self.openCheat?() }
+        case speaker:
+            let enabled = !MugoatVoiceIsSpeakerEnabled()
+            MugoatVoiceSetSpeakerEnabled(enabled)
+            speaker.setIcon(enabled ? "speaker" : "speaker_muted")
+            speaker.active = enabled
+        case mic:
+            let enabled = !MugoatVoiceIsMicEnabled()
+            MugoatVoiceSetMicEnabled(enabled)
+            mic.setIcon(enabled ? "mic" : "mic_muted")
+            mic.active = enabled
+            DispatchQueue.main.async { self.onVoiceMicChanged?(enabled) }
+        case buyWeapon:
+            MugoatTriggerAmmuBuy()
         case up, down, left, right, accept, back:
             lastDockInput = now
         default:

@@ -107,6 +107,68 @@ pub extern "C" fn mugoat_explosion(args: u64) { if ENABLED.load(Ordering::Acquir
 #[no_mangle]
 pub extern "C" fn mugoat_time_warp(direction: u32) -> u32 { if ENABLED.load(Ordering::Acquire) { mp::time_warp(direction as i64) as u32 } else { direction } }
 
+#[no_mangle]
+pub extern "C" fn MugoatVoiceIsMicEnabled() -> bool {
+    mp::VOICE_MIC_ENABLED.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatVoiceSetMicEnabled(enabled: bool) {
+    mp::VOICE_MIC_ENABLED.store(enabled, Ordering::Release);
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatVoiceIsSpeakerEnabled() -> bool {
+    mp::VOICE_SPEAKER_ENABLED.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatVoiceSetSpeakerEnabled(enabled: bool) {
+    mp::VOICE_SPEAKER_ENABLED.store(enabled, Ordering::Release);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MugoatVoiceSubmitMicAudio(samples: *const f32, count: u32) {
+    if samples.is_null() || count == 0 { return; }
+    let slice = std::slice::from_raw_parts(samples, count as usize);
+    mp::submit_mic_audio(slice);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MugoatVoiceMixAudio(left: *mut f32, right: *mut f32, count: u32) {
+    if left.is_null() || right.is_null() || count == 0 { return; }
+    let l_slice = std::slice::from_raw_parts_mut(left, count as usize);
+    let r_slice = std::slice::from_raw_parts_mut(right, count as usize);
+    mp::voice_mix_audio(l_slice, r_slice);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MugoatVoiceActiveSpeakers(output: *mut c_char, capacity: usize) -> usize {
+    let list = mp::voice_active_speakers().join(", ");
+    if !output.is_null() && capacity > 0 {
+        let mut count = list.len().min(capacity - 1);
+        while !list.is_char_boundary(count) { count -= 1; }
+        std::ptr::copy_nonoverlapping(list.as_ptr(), output.cast(), count);
+        *output.add(count) = 0;
+    }
+    list.len()
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatGetWalletCash() -> i32 {
+    mp::WALLET_CASH.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatAddWalletCash(amount: i32) {
+    mp::WALLET_CASH.fetch_add(amount, Ordering::Relaxed);
+}
+
+#[no_mangle]
+pub extern "C" fn MugoatTriggerAmmuBuy() {
+    mp::AMMU_BUY_REQUESTED.store(true, Ordering::Relaxed);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

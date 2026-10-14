@@ -167,6 +167,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         touchControls.openSettings = { [weak self] in self?.showSettings() }
         touchControls.openCheat = { [weak self] in self?.showCheatMenu() }
         touchControls.hintsChanged = { [weak self] line in self?.appendLog(line) }
+        touchControls.onVoiceMicChanged = { [weak self] enabled in self?.handleVoiceMicChanged(enabled) }
         let tap3 = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap(_:)))
         tap3.numberOfTouchesRequired = 3
         tap3.cancelsTouchesInView = false
@@ -682,6 +683,86 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             if ProcessInfo.processInfo.arguments.contains("--mute") { audioEngine.mainMixerNode.outputVolume = 0 }
             try audioEngine.start()
         } catch { appendLog("Native audio setup failed: \(error.localizedDescription)") }
+    }
+
+    private func handleVoiceMicChanged(_ enabled: Bool) {
+        if enabled {
+            let session = AVAudioSession.sharedInstance()
+            switch session.recordPermission {
+            case .granted:
+                configureMicRecording(enabled: true)
+            case .denied:
+                appendLog("[Voice] Quyền truy cập Micro bị từ chối trong Cài đặt iOS")
+                MugoatVoiceSetMicEnabled(false)
+                touchControls.updateVisibility()
+            case .undetermined:
+                session.requestRecordPermission { [weak self] granted in
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        if granted {
+                            self.configureMicRecording(enabled: true)
+                        } else {
+                            self.appendLog("[Voice] Quyền truy cập Micro bị từ chối")
+                            MugoatVoiceSetMicEnabled(false)
+                            self.touchControls.updateVisibility()
+                        }
+                    }
+                }
+            @unknown default:
+                break
+            }
+        } else {
+            configureMicRecording(enabled: false)
+        }
+    }
+
+    private func configureMicRecording(enabled: Bool) {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            if enabled {
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+                try session.setActive(true)
+                let inputNode = audioEngine.inputNode
+                let bus = 0
+                inputNode.removeTap(onBus: bus)
+                let inputFormat = inputNode.inputFormat(forBus: bus)
+                guard inputFormat.sampleRate > 0 else { return }
+                inputNode.installTap(onBus: bus, bufferSize: 1024, format: inputFormat) { buffer, _ in
+                    guard let channelData = buffer.floatChannelData?[0] else { return }
+                    let frameCount = Int(buffer.frameLength)
+                    guard frameCount > 0 else { return }
+                    if abs(buffer.format.sampleRate - 48000.0) < 1.0 {
+                        MugoatVoiceSubmitMicAudio(channelData, UInt32(frameCount))
+                    } else {
+                        let ratio = 48000.0 / buffer.format.sampleRate
+                        let targetCount = Int(Double(frameCount) * ratio)
+                        if targetCount > 0 {
+                            var resampled = [Float](repeating: 0, count: targetCount)
+                            for i in 0..<targetCount {
+                                let srcIndex = Double(i) / ratio
+                                let idx0 = Int(srcIndex)
+                                let idx1 = min(idx0 + 1, frameCount - 1)
+                                let frac = Float(srcIndex - Double(idx0))
+                                resampled[i] = channelData[idx0] * (1.0 - frac) + channelData[idx1] * frac
+                            }
+                            resampled.withUnsafeBufferPointer { ptr in
+                                if let base = ptr.baseAddress {
+                                    MugoatVoiceSubmitMicAudio(base, UInt32(targetCount))
+                                }
+                            }
+                        }
+                    }
+                }
+                appendLog("[Voice] Đã bật Micro")
+            } else {
+                audioEngine.inputNode.removeTap(onBus: 0)
+                try session.setCategory(.playback, mode: .default)
+                try session.setActive(true)
+                appendLog("[Voice] Đã tắt Micro")
+            }
+        } catch {
+            appendLog("[Voice] Lỗi cấu hình Micro: \(error.localizedDescription)")
+        }
     }
 
     @objc private func controllerChanged() { pollController() }

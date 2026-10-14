@@ -16,3 +16,17 @@ bool MugoatOnlineConfigure(const char *server, const char *name, const char *roo
 size_t MugoatOnlineStatus(char *output, size_t capacity);
 bool MugoatOnlineEnabled(void);
 void MugoatOnlineShutdown(void);
+
+// Voice Chat (Loa & Mic)
+bool MugoatVoiceIsMicEnabled(void);
+void MugoatVoiceSetMicEnabled(bool enabled);
+bool MugoatVoiceIsSpeakerEnabled(void);
+void MugoatVoiceSetSpeakerEnabled(bool enabled);
+void MugoatVoiceSubmitMicAudio(const float *samples, uint32_t count);
+void MugoatVoiceMixAudio(float *left, float *right, uint32_t count);
+size_t MugoatVoiceActiveSpeakers(char *output, size_t capacity);
+
+// Economy & Anti-Cheat
+int32_t MugoatGetWalletCash(void);
+void MugoatAddWalletCash(int32_t amount);
+void MugoatTriggerAmmuBuy(void);

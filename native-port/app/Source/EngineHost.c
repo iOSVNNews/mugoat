@@ -663,6 +663,7 @@ static void *pg_gamepad_cheat_thread(void *arg) {
 
 void PGApplyCheatConsole(const char *code) {
   if (!code || !*code) return;
+  if (MugoatOnlineEnabled()) return;
   struct PGCheatTask *task = (struct PGCheatTask *)malloc(sizeof(struct PGCheatTask));
   if (!task) return;
   strncpy(task->code, code, sizeof(task->code) - 1);
@@ -677,6 +678,7 @@ void PGApplyCheatConsole(const char *code) {
 
 void PGApplyCheatGamepad(const char *code) {
   if (!code || !*code) return;
+  if (MugoatOnlineEnabled()) return;
   struct PGCheatTask *task = (struct PGCheatTask *)malloc(sizeof(struct PGCheatTask));
   if (!task) return;
   strncpy(task->code, code, sizeof(task->code) - 1);
@@ -1421,20 +1423,24 @@ int32_t PGLastInputDevice(void) {
 void PGFillAudio(float *left, float *right, uint32_t count) {
   memset(left, 0, count * sizeof(float)); memset(right, 0, count * sizeof(float));
   uint64_t ring = atomic_load(&audioRing);
-  if (!ring) return;
-  uint32_t capacity = atomic_load(&audioCapacity);
-  _Atomic uint32_t *header = pg_pointer(&env, ring, 64 + (u64)capacity * 8);
-  float *data = (float *)((uint8_t *)(void *)header + 64);
-  uint32_t read = atomic_load(header + 1), write = atomic_load(header);
-  uint32_t available = write - read;
-  uint32_t take = available < count ? available : count;
-  if (take > capacity) take = capacity;
-  for (uint32_t i = 0; i < take; i++) {
-    uint32_t at = ((read + i) & (capacity - 1)) * 2;
-    left[i] = data[at]; right[i] = data[at + 1];
+  if (ring) {
+    uint32_t capacity = atomic_load(&audioCapacity);
+    _Atomic uint32_t *header = pg_pointer(&env, ring, 64 + (u64)capacity * 8);
+    float *data = (float *)((uint8_t *)(void *)header + 64);
+    uint32_t read = atomic_load(header + 1), write = atomic_load(header);
+    uint32_t available = write - read;
+    uint32_t take = available < count ? available : count;
+    if (take > capacity) take = capacity;
+    for (uint32_t i = 0; i < take; i++) {
+      uint32_t at = ((read + i) & (capacity - 1)) * 2;
+      left[i] = data[at]; right[i] = data[at + 1];
+    }
+    atomic_store(header + 1, read + take);
+    atomic_fetch_add(header + 3, 1);
   }
-  atomic_store(header + 1, read + take);
-  atomic_fetch_add(header + 3, 1);
+  if (MugoatOnlineEnabled()) {
+    MugoatVoiceMixAudio(left, right, count);
+  }
 }
 
 static char *configuredQuality[32];static unsigned configuredQualityCount;

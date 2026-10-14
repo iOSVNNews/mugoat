@@ -46,6 +46,21 @@ mod vehicle_tests {
         wire.extend(77u32.to_le_bytes());   // optional owner-side vehicle handle
         assert_eq!(State::decode(&wire).unwrap().veh_key,77);
     }
+    #[test]
+    fn voice_chunk_codec_roundtrips() {
+        let chunk = VoiceChunk {
+            seq: 42,
+            pos: [150, -220, 35],
+            data: vec![0, 128, 255, 64, 32],
+        };
+        let mut wire = Vec::new();
+        chunk.encode(&mut wire);
+        assert_eq!(wire.len(), VOICE_HEADER_SIZE + 5);
+        let decoded = VoiceChunk::decode(&wire).expect("decode voice");
+        assert_eq!(decoded, chunk);
+        assert!(VoiceChunk::decode(&wire[..VOICE_HEADER_SIZE - 1]).is_none());
+        assert!(relayed(VOICE));
+    }
 }
 
 pub const HELLO: u8 = 1;
@@ -85,6 +100,8 @@ pub const ACK: u8 = 20;
 pub const KILLFEED: u8 = 21;
 
 pub const VCTL: u8 = 22;
+
+pub const VOICE: u8 = 23;
 
 pub const WEATHERS: [&str; 14] = [
     "EXTRASUNNY", "CLEAR", "CLOUDS", "SMOG", "FOGGY", "OVERCAST", "RAIN", "THUNDER",
@@ -374,6 +391,37 @@ pub fn decode_pop(b: &[u8]) -> Vec<PopEntry> {
         }
     }
     out
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VoiceChunk {
+    pub seq: u16,
+    pub pos: [i16; 3], // World position in decimeters (coord * 10)
+    pub data: Vec<u8>, // Audio samples payload
+}
+
+pub const VOICE_HEADER_SIZE: usize = 2 + 6;
+
+impl VoiceChunk {
+    pub fn encode(&self, out: &mut Vec<u8>) {
+        out.extend(self.seq.to_le_bytes());
+        for k in 0..3 {
+            out.extend(self.pos[k].to_le_bytes());
+        }
+        out.extend_from_slice(&self.data);
+    }
+
+    pub fn decode(src: &[u8]) -> Option<Self> {
+        if src.len() < VOICE_HEADER_SIZE { return None; }
+        let seq = u16::from_le_bytes(src[0..2].try_into().ok()?);
+        let pos = [
+            i16::from_le_bytes(src[2..4].try_into().ok()?),
+            i16::from_le_bytes(src[4..6].try_into().ok()?),
+            i16::from_le_bytes(src[6..8].try_into().ok()?),
+        ];
+        let data = src[VOICE_HEADER_SIZE..].to_vec();
+        Some(Self { seq, pos, data })
+    }
 }
 
 pub fn joaat(name: &str) -> u32 {

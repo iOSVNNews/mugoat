@@ -9,7 +9,7 @@ struct ControlsLayout {
     }
     private static let key = "controlsLayout"
     /// Never hidden: the game cannot be played (or left) without them.
-    static let essential: Set<String> = ["fire", "aim", "enter", "gas", "brake", "pause", "settings", "airFire", "cheat"]
+    static let essential: Set<String> = ["fire", "aim", "enter", "gas", "brake", "pause", "settings", "airFire", "cheat", "speaker", "mic", "buyWeapon"]
 
     static var entries: [String: Entry] {
         get {
@@ -84,6 +84,7 @@ final class ControlsLayoutEditorController: UIViewController {
         groupPicker.selectedSegmentIndex = 0
         groupPicker.overrideUserInterfaceStyle = .dark
         groupPicker.addAction(UIAction { [weak self] _ in self?.showGroup() }, for: .valueChanged)
+        groupPicker.addTarget(self, action: #selector(groupChanged), for: .valueChanged)
         sizeSlider.minimumValue = 0.6
         sizeSlider.maximumValue = 1.8
         sizeSlider.accessibilityLabel = "Size of the selected button"
@@ -133,6 +134,10 @@ final class ControlsLayoutEditorController: UIViewController {
         selected = nil
         controls.updateVisibility()
         controls.setNeedsLayout()
+    }
+
+    @objc private func groupChanged() {
+        showGroup()
     }
 
     private func refreshSelection() {
