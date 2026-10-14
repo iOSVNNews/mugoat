@@ -2447,7 +2447,8 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     if !s.dead() && !a.dead {
         let h = c.i("GetEntityHealth", &[i(ped)]);
         if h < AVATAR_HEALTH && h > 0 {
-            let my_weapon = c.i("GetSelectedPedWeapon", &[i(c.i("PlayerPedId", &[]))]) as u32;
+            let my_pid = c.i("PlayerPedId", &[]);
+            let my_weapon = c.i("GetSelectedPedWeapon", &[i(my_pid)]) as u32;
             let cap = if my_weapon == weapon("weapon_unarmed") || my_weapon == 0 {
                 15
             } else if c.i("GetWeaponDamageType", &[i(my_weapon as i32)]) == 2 {
