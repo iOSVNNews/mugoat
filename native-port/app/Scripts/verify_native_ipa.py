@@ -29,6 +29,7 @@ def verify(path, revision=None):
         if info.get('MinimumOSVersion') not in ('15.0', '16.0'): raise ValueError(f"Wrong bundle minimum OS: {info.get('MinimumOSVersion')}")
         if info['CFBundleIdentifier']!='vn.iosvn.mugoat': raise ValueError('Save-preserving bundle ID changed')
         if info['CFBundleShortVersionString']!='1.1.7' or info['CFBundleVersion']!='17': raise ValueError('Old build/version')
+        if prefix+'manifest.json' not in package.namelist(): raise ValueError('Missing manifest.json in app bundle')
         if any(name.startswith(prefix) and name.endswith(('.wasm','.cwasm')) for name in package.namelist()): raise ValueError('Unexpected VM game payload')
         for forbidden in [b'wasmtime_runtime',b'wgpu_core',b'wasmtime::']:
             if forbidden in executable: raise ValueError('Old VM/graphics runtime remains in executable')

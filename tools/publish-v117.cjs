@@ -2,7 +2,7 @@ const cp = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const runId = '38597683269';
+const runId = '38602866289';
 const tag = 'v1.1.7';
 const title = 'Mugoat iOS v1.1.7 — Voice Chat 3D, Chọn Role, Mua Súng Ammu-Nation & Phục Hồi Độ Phân Giải Native Tối Đa';
 const rootDir = path.resolve(__dirname, '..');

@@ -27,6 +27,9 @@ mkdir -p Build/Online
 IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
 cp ../online-bridge/target/aarch64-apple-ios/release/libmugoat_online.a Build/Online/
 test -s Build/Online/libmugoat_online.a
+mkdir -p Resources
+cp "$MIRROR/data/manifest.json" Resources/manifest.json
+test -s Resources/manifest.json
 if [ "${PG_REUSE_PREPARED:-0}" = "1" ] && [ -s Generated/native-prepared-v1.txt ] && [ -s Generated/game_0.c ] && [ -s Generated/MugoatCommands.c ] && [ -s GeneratedResources/shaders-iphoneos.metallib ]; then
   xcodegen generate --spec project.yml
 else
@@ -47,6 +50,8 @@ grep -E 'BUILD SUCCEEDED' Build/xcodebuild.log
 APP=Build/Release/Build/Products/Release-iphoneos/PlayGTA5Native.app
 ROOT_DIR="$(cd .. && pwd)"
 printf '%s\n' "${GITHUB_SHA:-local}" > "$APP/iosvn-build-revision.txt"
+cp Resources/manifest.json "$APP/manifest.json"
+test -s "$APP/manifest.json"
 
 # 1. Build IPA for Free Apple ID (SideStore / AltStore standard)
 STAGE_FREE=Build/IPA-Free

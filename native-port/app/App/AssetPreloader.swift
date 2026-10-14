@@ -7,7 +7,19 @@ extension Notification.Name {
 /// Where the engine keeps its files. The asset cache sits next to this folder
 /// (`AssetCache-<version>`), so the preloader and the engine must agree on it.
 enum EnginePaths {
-    static var manifest: String? { Bundle.main.path(forResource: "manifest", ofType: "json") }
+    static var manifest: String? {
+        if let bundlePath = Bundle.main.path(forResource: "manifest", ofType: "json"),
+           FileManager.default.fileExists(atPath: bundlePath) {
+            return bundlePath
+        }
+        if let folder = GameFolder.open() {
+            let candidate1 = folder.appendingPathComponent("data/manifest.json").path
+            if FileManager.default.fileExists(atPath: candidate1) { return candidate1 }
+            let candidate2 = folder.appendingPathComponent("manifest.json").path
+            if FileManager.default.fileExists(atPath: candidate2) { return candidate2 }
+        }
+        return nil
+    }
 
     /// Returns the engine files root and, on the simulator, an optional note.
     static func filesRoot() -> (path: String, note: String?) {

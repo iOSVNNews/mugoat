@@ -22,7 +22,6 @@ DerivedData/
 /native-port/app/GeneratedResources/
 /native-port/app/Tools/
 /native-port/app/Build/
-/native-port/app/Resources/manifest.json
 /native-port/app/Resources/wgpu_worker.js
 /native-port/app/*.xcodeproj
 /native-port/app/Preview/Build/
