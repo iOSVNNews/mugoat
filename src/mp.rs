@@ -439,12 +439,12 @@ static PURCHASED_WEAPONS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 pub static VOICE_MIC_ENABLED: AtomicBool = AtomicBool::new(false);
 pub static VOICE_SPEAKER_ENABLED: AtomicBool = AtomicBool::new(true);
 
-pub struct IncomingVoiceSample {
-    pub samples: Vec<f32>,
-    pub volume: f32,
+struct SpeakerQueue {
+    samples: VecDeque<f32>,
+    last_heard: Instant,
 }
 
-static VOICE_INCOMING: Mutex<VecDeque<IncomingVoiceSample>> = Mutex::new(VecDeque::new());
+static SPEAKER_QUEUES: Mutex<HashMap<u8, SpeakerQueue>> = Mutex::new(HashMap::new());
 static ACTIVE_SPEAKERS: Mutex<Vec<(u8, String, Instant)>> = Mutex::new(Vec::new());
 static VOICE_SEQ: AtomicU16 = AtomicU16::new(0);
 static LOCAL_POS: Mutex<Option<[f32; 3]>> = Mutex::new(None);
@@ -488,7 +488,7 @@ pub fn submit_mic_audio(samples: &[f32]) {
 
     // Noise gate: skip transmitting only total digital silence
     let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt();
-    if rms < 0.001 { return; }
+    if rms < 0.0005 { return; }
 
     let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
     let pos_dm = [
@@ -513,33 +513,25 @@ pub fn submit_mic_audio(samples: &[f32]) {
 
 pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
     if !VOICE_SPEAKER_ENABLED.load(Ordering::Relaxed) { return; }
-    let mut inc = VOICE_INCOMING.lock().unwrap();
     let count = left.len().min(right.len());
-    if count == 0 || inc.is_empty() { return; }
+    if count == 0 { return; }
 
-    // Drop backlog to maintain real-time playback
-    while inc.len() > 30 {
-        inc.pop_front();
-    }
+    let mut queues = SPEAKER_QUEUES.lock().unwrap();
+    if queues.is_empty() { return; }
 
-    // Parallel multi-speaker audio mixing
-    let mut i = 0;
-    while i < inc.len() {
-        let chunk = &mut inc[i];
-        let available = chunk.samples.len();
-        let take = count.min(available);
-        let vol = chunk.volume;
-        for j in 0..take {
-            let s = chunk.samples[j] * vol * 2.0;
-            left[j] += s;
-            right[j] += s;
+    // Drop stale queues (silent for > 3s)
+    let now = Instant::now();
+    queues.retain(|_, q| now.duration_since(q.last_heard) < Duration::from_secs(3) || !q.samples.is_empty());
+
+    // Mix active speakers into left and right audio channels sequentially
+    for q in queues.values_mut() {
+        let take = count.min(q.samples.len());
+        for i in 0..take {
+            let s = q.samples[i];
+            left[i] += s;
+            right[i] += s;
         }
-        if take == available {
-            inc.remove(i);
-        } else {
-            chunk.samples.drain(..take);
-            i += 1;
-        }
+        q.samples.drain(..take);
     }
 }
 
@@ -1529,11 +1521,24 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
         0.6
     };
 
-    let samples: Vec<f32> = chunk.data.iter().map(|&b| (b as f32 - 128.0) / 128.0).collect();
-    let mut inc = VOICE_INCOMING.lock().unwrap();
-    if inc.len() < 50 {
-        inc.push_back(IncomingVoiceSample { samples, volume });
+    let incoming_samples: Vec<f32> = chunk.data.iter().map(|&b| {
+        let normalized = (b as f32 - 128.0) / 128.0;
+        normalized * volume * 2.0
+    }).collect();
+
+    let mut queues = SPEAKER_QUEUES.lock().unwrap();
+    let q = queues.entry(sender_id).or_insert_with(|| SpeakerQueue {
+        samples: VecDeque::with_capacity(9600),
+        last_heard: now,
+    });
+    q.last_heard = now;
+    q.samples.extend(incoming_samples);
+    // Keep max 150ms buffer (7200 samples @ 48kHz) to prevent latency buildup
+    if q.samples.len() > 7200 {
+        let drop_count = q.samples.len() - 7200;
+        q.samples.drain(..drop_count);
     }
+
     let mut speakers = ACTIVE_SPEAKERS.lock().unwrap();
     if let Some(entry) = speakers.iter_mut().find(|(id, _, _)| *id == sender_id) {
         entry.1 = sender_name;
@@ -1694,12 +1699,15 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         game.my_car = my_car;
     }
 
-    if me_ok && my_id.is_some() {
+    let is_sandbox = std::env::var("MUGUET_MODE").map(|m| m == "sandbox").unwrap_or(false);
+    if me_ok && (my_id.is_some() || is_sandbox) {
         if !WEAPONS_INITIALIZED.swap(true, Ordering::Relaxed) {
             strip_all_unauthorized_weapons(c, ped);
         }
         update_economy_and_shops(c, ped, my_pos);
-        update_voice_speakers_hud(c);
+        if my_id.is_some() {
+            update_voice_speakers_hud(c);
+        }
         if game.last_send.elapsed() >= SEND_EVERY {
             let valid_pos = my_pos[0].abs() > 1.0 || my_pos[1].abs() > 1.0 || my_pos[2].abs() > 1.0;
             if valid_pos {
@@ -3262,9 +3270,10 @@ fn aim_walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3],
     }
     let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
     let err = dist(cur, pos);
-    if err > 0.15 {
-        let k = if err > 1.5 { 0.6 } else { 0.35 };
-        let p = c.vec_arg(1, [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, pos[2]]);
+    if err > 1.2 {
+        let k = if err > 3.0 { 0.45 } else { 0.15 };
+        let z = if (pos[2] - cur[2]).abs() > 0.8 { cur[2] + (pos[2] - cur[2]) * k } else { cur[2] };
+        let p = c.vec_arg(1, [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, z]);
         c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
     }
     let speed = (vel[0].powi(2) + vel[1].powi(2)).sqrt();
@@ -3277,7 +3286,7 @@ fn aim_walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3],
         c.i("TaskAimGunAtCoord", &[i(ped), at, i(1500), b(false), b(true)]);
         w.since = None;
     } else {
-        let to = c.vec_arg(1, [pos[0] + vel[0], pos[1] + vel[1], pos[2] + vel[2]]);
+        let to = c.vec_arg(1, [pos[0] + vel[0] * 1.5, pos[1] + vel[1] * 1.5, pos[2]]);
         let blend = if speed > 2.2 { 2.0 } else { 1.0 };
         c.i("TaskGoToCoordWhileAimingAtCoord", &[i(ped), to, at, f(blend), b(false), f(0.5), f(4.0), b(false), i(0), b(true), i(proto::joaat("FIRING_PATTERN_FULL_AUTO") as i32)]);
         w.since = Some(Instant::now());
@@ -3292,14 +3301,17 @@ fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], hea
     let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
     let speed = (vel[0].powi(2) + vel[1].powi(2)).sqrt();
     let err = dist(cur, pos);
-    if err > 5.0 || (speed < 0.3 && err > 2.0) {
+
+    // Hard teleport only if out of bounds or desynced beyond 5m:
+    if err > 5.0 {
         let p = c.vec_arg(1, pos);
         c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
         w.since = None;
     }
+
     if speed < 0.3 {
-        if err > 0.4 && err <= 2.0 {
-            if w.since.is_none() || dist(pos, w.target) > 0.3 {
+        if err > 0.5 && err <= 5.0 {
+            if w.since.is_none() || dist(pos, w.target) > 0.4 {
                 let tgt = c.vec_arg(1, pos);
                 c.i("TaskGoStraightToCoord", &[i(ped), tgt, f(1.0), i(-1), f(heading), f(0.1)]);
                 w.target = pos;
@@ -3314,20 +3326,24 @@ fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], hea
         return;
     }
 
-    if err > 0.3 {
-        let k = if err > 2.0 { 0.4 } else if err > 0.8 { 0.12 } else { 0.05 };
-        let p = c.vec_arg(2, [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, pos[2]]);
+    // Moving state (speed >= 0.3):
+    // Smooth position correction without breaking ground collision / foot IK:
+    if err > 1.2 {
+        let k = if err > 3.0 { 0.35 } else { 0.1 };
+        let z = if (pos[2] - cur[2]).abs() > 0.8 { cur[2] + (pos[2] - cur[2]) * k } else { cur[2] };
+        let p = c.vec_arg(2, [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, z]);
         c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
     }
 
-    let target = [pos[0] + vel[0], pos[1] + vel[1], pos[2] + vel[2]];
-    let behind = err > 0.8 && ((pos[0] - cur[0]) * vel[0] + (pos[1] - cur[1]) * vel[1]) > 0.0;
+    let target = [pos[0] + vel[0] * 1.5, pos[1] + vel[1] * 1.5, pos[2]];
+    let behind = err > 1.0 && ((pos[0] - cur[0]) * vel[0] + (pos[1] - cur[1]) * vel[1]) > 0.0;
     let blend: f32 = if speed > 5.5 { 3.0 } else if speed > 2.2 { 2.0 } else { 1.0 };
     let blend = if behind { (blend + 1.0).min(3.0) } else { blend };
-    let stale = w.since.map(|t| t.elapsed() > Duration::from_millis(200)).unwrap_or(true);
-    if stale || dist(target, w.target) > 0.7 || w.blend != blend {
+    let stale = w.since.map(|t| t.elapsed() > Duration::from_millis(1000)).unwrap_or(true);
+    if stale || dist(target, w.target) > 1.2 || w.blend != blend {
         let tgt = c.vec_arg(1, target);
-        c.i("TaskGoStraightToCoord", &[i(ped), tgt, f(blend), i(-1), f(40000.0), f(0.0)]);
+        // Correctly pass remote player's heading, NOT 40000.0!
+        c.i("TaskGoStraightToCoord", &[i(ped), tgt, f(blend), i(-1), f(heading), f(0.0)]);
         w.target = target;
         w.blend = blend;
         w.since = Some(Instant::now());

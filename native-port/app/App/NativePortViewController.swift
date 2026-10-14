@@ -668,11 +668,19 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             try session.setPreferredSampleRate(48000)
             try session.overrideOutputAudioPort(.speaker)
             try session.setActive(true)
+
+            // Initialize inputNode upfront so the IO unit is prepared together with output, avoiding graph rebuild later
+            _ = audioEngine.inputNode
+
             let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
             let source = AVAudioSourceNode(format: format) { _, _, count, audioBufferList in
                 let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-                guard buffers.count >= 2, let left = buffers[0].mData, let right = buffers[1].mData else { return noErr }
-                PGFillAudio(left.assumingMemoryBound(to: Float.self), right.assumingMemoryBound(to: Float.self), count)
+                if buffers.count >= 2, let left = buffers[0].mData, let right = buffers[1].mData {
+                    PGFillAudio(left.assumingMemoryBound(to: Float.self), right.assumingMemoryBound(to: Float.self), count)
+                } else if buffers.count == 1, let mono = buffers[0].mData {
+                    var tempRight = [Float](repeating: 0, count: Int(count))
+                    PGFillAudio(mono.assumingMemoryBound(to: Float.self), &tempRight, count)
+                }
                 return noErr
             }
             audioSource = source
@@ -684,6 +692,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             #endif
             // Silent test runs on a phone.
             if ProcessInfo.processInfo.arguments.contains("--mute") { audioEngine.mainMixerNode.outputVolume = 0 }
+            audioEngine.prepare()
             try audioEngine.start()
         } catch { appendLog("Native audio setup failed: \(error.localizedDescription)") }
     }
@@ -726,56 +735,54 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func configureMicRecording(enabled: Bool) {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            if enabled {
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
-                try session.overrideOutputAudioPort(.speaker)
-                try session.setActive(true)
-                let inputNode = audioEngine.inputNode
-                let bus = 0
-                inputNode.removeTap(onBus: bus)
-                inputNode.installTap(onBus: bus, bufferSize: 1024, format: nil) { buffer, _ in
-                    guard let channelData = buffer.floatChannelData?[0] else { return }
-                    let frameCount = Int(buffer.frameLength)
-                    let sampleRate = buffer.format.sampleRate
-                    guard frameCount > 0, sampleRate > 0 else { return }
-                    if abs(sampleRate - 48000.0) < 1.0 {
-                        MugoatVoiceSubmitMicAudio(channelData, UInt32(frameCount))
-                    } else {
-                        let ratio = 48000.0 / buffer.format.sampleRate
-                        let targetCount = Int(Double(frameCount) * ratio)
-                        if targetCount > 0 {
-                            var resampled = [Float](repeating: 0, count: targetCount)
-                            for i in 0..<targetCount {
-                                let srcIndex = Double(i) / ratio
-                                let idx0 = Int(srcIndex)
-                                let idx1 = min(idx0 + 1, frameCount - 1)
-                                let frac = Float(srcIndex - Double(idx0))
-                                resampled[i] = channelData[idx0] * (1.0 - frac) + channelData[idx1] * frac
-                            }
-                            resampled.withUnsafeBufferPointer { ptr in
-                                if let base = ptr.baseAddress {
-                                    MugoatVoiceSubmitMicAudio(base, UInt32(targetCount))
-                                }
+        let inputNode = audioEngine.inputNode
+        let bus = 0
+        inputNode.removeTap(onBus: bus)
+
+        let session = AVAudioSession.sharedInstance()
+        try? session.overrideOutputAudioPort(.speaker)
+
+        if enabled {
+            let inputFormat = inputNode.inputFormat(forBus: bus)
+            let outputFormat = inputNode.outputFormat(forBus: bus)
+            let tapFormat = inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 ? inputFormat : (outputFormat.sampleRate > 0 ? outputFormat : nil)
+
+            inputNode.installTap(onBus: bus, bufferSize: 1024, format: tapFormat) { buffer, _ in
+                guard let channelData = buffer.floatChannelData?[0] else { return }
+                let frameCount = Int(buffer.frameLength)
+                let sampleRate = buffer.format.sampleRate
+                guard frameCount > 0, sampleRate > 0 else { return }
+                if abs(sampleRate - 48000.0) < 1.0 {
+                    MugoatVoiceSubmitMicAudio(channelData, UInt32(frameCount))
+                } else {
+                    let ratio = 48000.0 / sampleRate
+                    let targetCount = Int(Double(frameCount) * ratio)
+                    if targetCount > 0 {
+                        var resampled = [Float](repeating: 0, count: targetCount)
+                        for i in 0..<targetCount {
+                            let srcIndex = Double(i) / ratio
+                            let idx0 = Int(srcIndex)
+                            let idx1 = min(idx0 + 1, frameCount - 1)
+                            let frac = Float(srcIndex - Double(idx0))
+                            resampled[i] = channelData[idx0] * (1.0 - frac) + channelData[idx1] * frac
+                        }
+                        resampled.withUnsafeBufferPointer { ptr in
+                            if let base = ptr.baseAddress {
+                                MugoatVoiceSubmitMicAudio(base, UInt32(targetCount))
                             }
                         }
                     }
                 }
-                if !audioEngine.isRunning {
-                    try audioEngine.start()
-                }
-                appendLog("[Voice] Đã bật Micro")
-            } else {
-                audioEngine.inputNode.removeTap(onBus: 0)
-                try session.overrideOutputAudioPort(.speaker)
-                if !audioEngine.isRunning {
-                    try audioEngine.start()
-                }
-                appendLog("[Voice] Đã tắt Micro")
             }
-        } catch {
-            appendLog("[Voice] Lỗi cấu hình Micro: \(error.localizedDescription)")
+            if !audioEngine.isRunning {
+                try? audioEngine.start()
+            }
+            appendLog("[Voice] Đã bật Micro")
+        } else {
+            if !audioEngine.isRunning {
+                try? audioEngine.start()
+            }
+            appendLog("[Voice] Đã tắt Micro")
         }
     }
 
