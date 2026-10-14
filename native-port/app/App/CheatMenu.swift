@@ -120,7 +120,7 @@ struct CheatMenuView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section(header: Text("Phương thức kích hoạt")) {
                     Picker("Chế độ", selection: $inputMode) {
@@ -138,7 +138,7 @@ struct CheatMenuView: View {
                     HStack {
                         TextField("Nhập mã lệnh (vd: PAINKILLER)", text: $customCode)
                             .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
+                            .disableAutocorrection(true)
                         Button(L10n.text("Áp dụng")) {
                             let c = customCode.trimmingCharacters(in: .whitespaces).uppercased()
                             guard !c.isEmpty else { return }
@@ -200,6 +200,7 @@ struct CheatMenuView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
     }
 
