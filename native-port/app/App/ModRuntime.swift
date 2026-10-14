@@ -8,14 +8,22 @@ enum ModRuntime {
     }
     static func catalog(_ directory: URL) -> Catalog {
         var result = Catalog(), names = Set<String>(), models = Set<String>()
-        let files = ModFiles.scan(directory).filter { $0.isEnabled && $0.url.lastPathComponent.lowercased() == "dlc.rpf" }.sorted { $0.name < $1.name }
+        let files = ModFiles.scan(directory).filter { $0.isEnabled && $0.url.pathExtension.lowercased() == "rpf" }.sorted { $0.name < $1.name }
         for file in files {
             do {
                 let pack = try ModPack(url: file.url)
                 guard names.insert(pack.name).inserted else { throw ModError("Trùng gói DLC \(pack.name). Chỉ bật một phiên bản của gói này.") }
                 guard models.isDisjoint(with: pack.models) else { throw ModError("Trùng tên xe giữa các mod: \(pack.models.joined(separator: ", ")).") }
                 models.formUnion(pack.models); result.packs.append(pack)
-            } catch { result.problems.append(file.name + ": " + error.localizedDescription) }
+            } catch let error as ModError {
+                if file.url.lastPathComponent.lowercased() == "dlc.rpf" || error.message.contains("Enhanced") || error.message.contains("Trùng") {
+                    result.problems.append(file.name + ": " + error.localizedDescription)
+                }
+            } catch {
+                if file.url.lastPathComponent.lowercased() == "dlc.rpf" {
+                    result.problems.append(file.name + ": " + error.localizedDescription)
+                }
+            }
         }
         return result
     }

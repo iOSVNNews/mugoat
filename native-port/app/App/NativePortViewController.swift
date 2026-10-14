@@ -482,13 +482,48 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             PGSetLocalGameFolder(data.path)
             let modsDir = ModManagerViewController.modsDirectory
             let runtimeDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mod_runtime")
-            let dlcListCandidates = [
+            var dlcData: Data? = nil
+            let looseCandidates = [
                 data.appendingPathComponent("common/data/dlcList.xml"),
-                data.appendingPathComponent("common/data/dlclist.xml"),
-                data.appendingPathComponent("update/update.rpf/common/data/dlclist.xml")
+                data.appendingPathComponent("common/data/dlclist.xml")
             ]
-            if let dlcURL = dlcListCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-               let dlcData = try? Data(contentsOf: dlcURL) {
+            for candidate in looseCandidates {
+                if FileManager.default.fileExists(atPath: candidate.path),
+                   let d = try? Data(contentsOf: candidate) {
+                    dlcData = d
+                    break
+                }
+            }
+            if dlcData == nil {
+                // Read dlclist.xml directly from update/update.rpf archive if present
+                let updateRpfURL = data.appendingPathComponent("update/update.rpf")
+                if FileManager.default.fileExists(atPath: updateRpfURL.path),
+                   let updateArchive = try? RPFArchive(url: updateRpfURL) {
+                    if let entry = updateArchive.entries.first(where: {
+                        let p = $0.path.lowercased()
+                        return p.hasSuffix("common/data/dlclist.xml") || p == "dlclist.xml"
+                    }) {
+                        dlcData = try? updateArchive.metadata(entry)
+                    }
+                }
+            }
+            if dlcData == nil {
+                // Baseline dlclist.xml template so Add-on mods can always be registered into paths
+                let baseline = """
+                <?xml version="1.0" encoding="utf-8"?>
+                <Paths>
+                  <Item>platform:\\dlcPacks\\mppatchesng\\</Item>
+                  <Item>platform:\\dlcPacks\\mpchristmas2\\</Item>
+                  <Item>platform:\\dlcPacks\\mpheist\\</Item>
+                  <Item>platform:\\dlcPacks\\patchday1ng\\</Item>
+                  <Item>platform:\\dlcPacks\\patchday2ng\\</Item>
+                  <Item>platform:\\dlcPacks\\patchday3ng\\</Item>
+                </Paths>
+                """
+                dlcData = baseline.data(using: .utf8)
+            }
+
+            if let dlcData {
                 do {
                     let baseManifestURL = URL(fileURLWithPath: path)
                     let (overlayManifestURL, catalog) = try ModRuntime.prepare(
@@ -499,10 +534,13 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                     )
                     effectiveManifest = overlayManifestURL.path
                     if !catalog.packs.isEmpty {
-                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.models.count) model xe).")
+                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.models.count) xe: \(catalog.models.joined(separator: ", "))).")
+                    }
+                    if !catalog.problems.isEmpty {
+                        appendLog("ModRuntime Lưu ý: " + catalog.problems.joined(separator: " | "))
                     }
                 } catch {
-                    appendLog("ModRuntime: \(error.localizedDescription)")
+                    appendLog("ModRuntime Lỗi: \(error.localizedDescription)")
                 }
             }
         } else {

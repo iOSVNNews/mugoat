@@ -227,6 +227,19 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
                 } else {
                     rejected.append(url.lastPathComponent)
                 }
+            } else if ext == "rpf" {
+                do {
+                    _ = try ModRuntime.importPack(url, into: destDir)
+                    copiedCount += 1
+                } catch {
+                    let target = destDir.appendingPathComponent(url.lastPathComponent)
+                    try? fileManager.removeItem(at: target)
+                    if (try? fileManager.copyItem(at: url, to: target)) != nil {
+                        copiedCount += 1
+                    } else {
+                        rejected.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                }
             } else {
                 let target = destDir.appendingPathComponent(url.lastPathComponent)
                 try? fileManager.removeItem(at: target)
