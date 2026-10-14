@@ -687,7 +687,30 @@ final class TouchControlsView: UIView {
         defer { if case .fireLook = roles[id] { dragCamera.begin(id, at: point) } }
         switch button {
         case enter:
-            pulse(.y, for: context != .onFoot ? 0.5 : 0.25)
+            if context == .heli || context == .plane {
+                // In helicopter or plane: Bail out / jump with parachute immediately
+                PGEmergencyExitVehicle(2)
+                pulse(.y, for: 1.5)
+                PGSetKey(0x46, true) // VK_KEY_F
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    PGSetKey(0x46, false)
+                }
+            } else if context != .onFoot {
+                // In car / boat / sub:
+                // Warp-out if jammed against walls/traffic or exploded, otherwise normal exit
+                PGEmergencyExitVehicle(1)
+                pulse(.y, for: 0.6)
+                PGSetKey(0x46, true) // VK_KEY_F
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    PGSetKey(0x46, false)
+                }
+            } else {
+                pulse(.y, for: 0.25)
+                PGSetKey(0x46, true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    PGSetKey(0x46, false)
+                }
+            }
         case weapons:
             roles[id] = .weaponWheel(start: point, current: point)
             updateVisibility()

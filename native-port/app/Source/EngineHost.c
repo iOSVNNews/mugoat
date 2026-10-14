@@ -832,10 +832,16 @@ void w2c_game_f50028(w2c_game*, u64, u32, u32); // entity_commands::CommandGetEn
 f32 w2c_game_f50032(w2c_game*, u32); // entity_commands::CommandGetEntityHeading
 void w2c_game_f50133(w2c_game*, u32, u64, u32, u32, u32); // entity_commands::CommandSetEntityCoordsNoOffset
 void w2c_game_f50136(w2c_game*, u32, u32, u32); // entity_commands::CommandSetEntityHealth
+u32 w2c_game_f57118(w2c_game*, u32, u32); // ped_commands::CommandIsPedInAnyVehicle
 u32 w2c_game_f57128(w2c_game*, u32, u32); // ped_commands::CommandIsPedDeadOrDying
+u32 w2c_game_f57184(w2c_game*, u32, u32); // ped_commands::CommandGetVehiclePedIsIn
 void w2c_game_f57485(w2c_game*, u32); // ped_commands::CommandReviveInjuredPed
 void w2c_game_f57486(w2c_game*, u32); // ped_commands::CommandResurrectPed
+void w2c_game_f60572(w2c_game*, u32, u32, u32); // task_commands::CommandTaskLeaveVehicle
+void w2c_game_f60648(w2c_game*, u32, u32, u32); // task_commands::CommandTaskLeaveAnyVehicle
 void w2c_game_f60722(w2c_game*, u32); // task_commands::CommandClearPedTasksImmediately
+u32 w2c_game_f61608(w2c_game*, u32, u32); // vehicle_commands::CommandIsVehDriveable
+void w2c_game_f62910(w2c_game*, u32, u32, u32, u32, u32); // weapon_commands::CommandGiveWeaponToPed
 void w2c_game_f60322(w2c_game*, u32); // streaming_commands::CommandRequestModel
 u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
 u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
@@ -996,6 +1002,14 @@ static void pg_process_player_respawn(w2c_game *instance) {
       }
     }
 
+    // If player died inside a vehicle (car or plane), detach and force leave
+    if (w2c_game_f57118(instance, ped, 0)) {
+      uint32_t deadVeh = w2c_game_f57184(instance, ped, 0);
+      if (deadVeh) w2c_game_f60572(instance, ped, deadVeh, 16);
+    }
+    w2c_game_f60722(instance, ped); // task_commands::CommandClearPedTasksImmediately
+    w2c_game_f60648(instance, ped, 0, 16); // task_commands::CommandTaskLeaveAnyVehicle warp out
+
     // Revive & resurrect player ped
     w2c_game_f57486(instance, ped); // ped_commands::CommandResurrectPed
     w2c_game_f57485(instance, ped); // ped_commands::CommandReviveInjuredPed
@@ -1033,6 +1047,38 @@ static void pg_process_player_respawn(w2c_game *instance) {
   } else {
     pg_death_frames = 0;
   }
+}
+
+static _Atomic int pg_emergency_exit_mode = 0;
+void PGEmergencyExitVehicle(int mode) {
+  atomic_store(&pg_emergency_exit_mode, mode > 0 ? mode : 1);
+}
+
+static void pg_process_vehicle_exit(w2c_game *instance) {
+  int mode = atomic_exchange(&pg_emergency_exit_mode, 0);
+  if (!mode) return;
+  uint32_t ped = w2c_game_f58715(instance);
+  if (!ped) return;
+  if (!w2c_game_f57118(instance, ped, 0)) return;
+  uint32_t veh = w2c_game_f57184(instance, ped, 0);
+  if (!veh) return;
+
+  uint64_t previous = pg_test_enter_script(instance);
+  if (mode == 2) {
+    // Aircraft Bailout / Parachute Jump
+    // Give parachute weapon (0xFBAB5776 = GADGET_PARACHUTE) so player can safely parachute down
+    w2c_game_f62910(instance, ped, 0xFBAB5776, 1, 0, 1);
+    // TaskLeaveVehicle with flags 4096 (EFLAG_BAIL_OUT) | 256 (EFLAG_JUMP_OUT)
+    w2c_game_f60572(instance, ped, veh, 4096 | 256);
+    pg_log("Aircraft bailout executed (parachute given + bailout task).");
+  } else {
+    // Car / Jammed / Exploded / Overturned vehicle emergency exit
+    // Flag 16 = EFLAG_WARPOUT (teleports immediately outside vehicle, ignoring jammed/crushed doors)
+    w2c_game_f60722(instance, ped);
+    w2c_game_f60572(instance, ped, veh, 16);
+    pg_log("Vehicle emergency warp exit executed.");
+  }
+  pg_test_leave_script(instance, previous);
 }
 
 #if TARGET_OS_SIMULATOR
@@ -1148,6 +1194,7 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
   if (pad == 12840656) {
     pg_apply_targeting_mode(instance);
     pg_process_vehicle_spawn(instance);
+    pg_process_vehicle_exit(instance);
     pg_process_player_respawn(instance);
   }
 #if TARGET_OS_SIMULATOR
