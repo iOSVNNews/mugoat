@@ -769,7 +769,7 @@ fn sample(peer: &Peer, at: Instant) -> Option<State> {
         return Some(snaps[0].1);
     }
     let ((t0, a), (t1, b)) = (snaps[i - 1], snaps[i]);
-    if a.in_vehicle() != b.in_vehicle() || a.veh_model != b.veh_model {
+    if a.in_vehicle() != b.in_vehicle() || a.veh_model != b.veh_model || a.veh_key != b.veh_key {
         return Some(b);
     }
     let k = ((at - t0).as_secs_f32() / (t1 - t0).as_secs_f32().max(1e-3)).clamp(0.0, 1.0);
@@ -782,6 +782,24 @@ fn sample(peer: &Peer, at: Instant) -> Option<State> {
     s.veh_vel = lerp(a.veh_vel, b.veh_vel);
     s.veh_rot = [lerp_angle(a.veh_rot[0], b.veh_rot[0], k), lerp_angle(a.veh_rot[1], b.veh_rot[1], k), lerp_angle(a.veh_rot[2], b.veh_rot[2], k)];
     Some(s)
+}
+
+#[cfg(test)]
+mod interpolation_tests {
+    use super::*;
+
+    #[test]
+    fn switching_identical_vehicle_models_does_not_interpolate_between_cars() {
+        let start = Instant::now();
+        let mut peer = Peer::new("test".into());
+        let a = State { flags: proto::FLAG_IN_VEHICLE, veh_model: 123, veh_key: 77, veh_pos: [0.; 3], ..State::default() };
+        let b = State { veh_key: 78, veh_pos: [100.; 3], ..a };
+        peer.snaps.push_back((start, a));
+        peer.snaps.push_back((start + Duration::from_millis(100), b));
+        let sampled = sample(&peer, start + Duration::from_millis(50)).unwrap();
+        assert_eq!(sampled.veh_key, 78);
+        assert_eq!(sampled.veh_pos, [100.; 3]);
+    }
 }
 
 #[derive(Default, Clone, Copy)]

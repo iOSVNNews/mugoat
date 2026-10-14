@@ -10,6 +10,7 @@
 #include "MRInternal.h"
 #include "MetalRenderer.h"
 #include "MRFrameReports.h"
+#include "MRFallbackTextures.h"
 #include "BCTextureDecoder.h"
 #include "NativeFrameRate.h"
 #import <UIKit/UIKit.h>
@@ -349,16 +350,21 @@ static id<MTLTexture> dummyTexture(ResKind kind, TexDim dim, SampleKind sample) 
 	if (kind == RStorageTex) d.pixelFormat = MTLPixelFormatRGBA32Float;
 	d.width = d.height = 1;
 	d.usage = MTLTextureUsageShaderRead | (kind == RStorageTex ? MTLTextureUsageShaderWrite : 0) | (depth || ms ? MTLTextureUsageRenderTarget : 0);
-	d.storageMode = MTLStorageModePrivate;
+	d.storageMode = depth || ms ? MTLStorageModePrivate : MTLStorageModeShared;
 	switch (dim) {
 	case D1: d.textureType = MTLTextureType1D; break;
-	case D2Array: d.textureType = MTLTextureType2DArray; d.arrayLength = 1; break;
+	case D2Array: d.textureType = ms ? MTLTextureType2DMultisampleArray : MTLTextureType2DArray; d.arrayLength = 1; break;
 	case D3: d.textureType = MTLTextureType3D; break;
 	case DCube: d.textureType = MTLTextureTypeCube; break;
 	case DCubeArray: d.textureType = MTLTextureTypeCubeArray; d.arrayLength = 1; break;
 	default: d.textureType = ms ? MTLTextureType2DMultisample : MTLTextureType2D; if (ms) d.sampleCount = 4;
 	}
+	if (ms) d.sampleCount = 4;
 	id<MTLTexture> t = [R->device newTextureWithDescriptor:d];
+	if (!PGInitializeFallbackTexture(t, R->queue)) {
+		logOnce("dummy-failed" + std::to_string(key), "Metal renderer: could not initialize fallback texture (kind %u dimension %u sample %u)", (unsigned)kind, (unsigned)dim, (unsigned)sample);
+		return nil;
+	}
 	R->dummyTextures[key] = t;
 	return t;
 }

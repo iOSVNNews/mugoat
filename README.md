@@ -6,8 +6,9 @@ The app icon and home logo use the green metallic V on a black background.
 
 - The game engine and renderer run natively. The static Rust library handles
   networking and replicas; it does not include Wasmtime or wgpu.
-- Port's signed 384 MiB streaming reserve, BC1–BC7 decoder, precompiled Metal
-  shaders, native futexes, measured graphics presets and asset hints remain.
+- Full physical device RAM is recognized without an app-imposed percentage or
+  384 MiB streaming reserve. The engine ABI and iOS process allowance still apply.
+  BC1–BC7 decoding, precompiled Metal shaders, native futexes and asset hints remain.
 - Camera/Aim/Fire dragging uses independent fingers without a right floating
   joystick. Gamepad aim assistance, movement, vehicles and Port's menus remain.
 - Actual renderer FPS, Vietnamese/English, save backup/import/export and
