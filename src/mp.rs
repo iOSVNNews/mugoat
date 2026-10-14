@@ -229,6 +229,9 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("HasScriptLoaded", "script_commands::HasScriptLoaded(char const*)"),
     ("StartNewScript", "script_commands::CommandStartNewScript(char const*, int)"),
     ("StartNewScript2", "script_commands::StartNewScript(char const*, int)"),
+    ("GetMissionFlag", "misc_commands::CommandGetMissionFlag()"),
+    ("StopCutsceneImmediately", "cutscene_commands::CommandStopCutsceneImmediately()"),
+    ("DoScreenFadeIn", "cam_commands::CommandDoScreenFadeIn(int)"),
 ];
 
 const ACTIVE_THREAD_TLS: u64 = 3088;

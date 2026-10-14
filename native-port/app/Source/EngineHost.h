@@ -101,3 +101,4 @@ void PGAssetHealth(uint64_t out[6]);
 bool PGSpawnVehicle(const char *modelName);
 int PGSpawnVehicleStatus(void);
 void PGEmergencyExitVehicle(int mode);
+void PGForceSkipScene(void);

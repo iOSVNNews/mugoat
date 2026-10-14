@@ -887,6 +887,12 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             engineRunning: engineStarted,
             onApply: { [weak self] code, mode in
                 self?.applyCheat(code, mode: mode)
+            },
+            onSpawnVehicle: { [weak self] model in
+                self?.spawnVehicle(model)
+            },
+            onOpenMods: { [weak self] in
+                self?.showModManager()
             }
         )
         let host = UIHostingController(rootView: cheatView)
@@ -926,10 +932,32 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
     }
 
+    private func spawnVehicle(_ model: String) {
+        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !clean.isEmpty else { return }
+        guard engineStarted else {
+            showCheatToast(L10n.text("Cần vào game trước khi triệu hồi xe"))
+            return
+        }
+        let started = clean.withCString { PGSpawnVehicle($0) }
+        if started {
+            showCheatToast(String(format: L10n.text("Đang triệu hồi: %@"), clean))
+            appendLog("Vehicle spawn requested: \(clean)")
+        } else {
+            showCheatToast(L10n.text("Hệ thống đang bận triệu hồi xe khác!"))
+        }
+    }
+
     private func applyCheat(_ code: String, mode: CheatInputMode = .auto) {
         guard !MugoatOnlineEnabled() else { return }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return }
+        if trimmed == "UNFREEZE" || trimmed == "SKIPSCENE" {
+            PGForceSkipScene()
+            showCheatToast(L10n.text("Đã gửi lệnh gỡ kẹt cảnh / thoát cutscene"))
+            appendLog("Cheat: PGForceSkipScene triggered")
+            return
+        }
         let modeDesc = mode == .console ? "Console (~)" : mode == .gamepad ? "Gamepad" : "Tự động"
         showCheatToast("Đang kích hoạt cheat: \(trimmed) (\(modeDesc))")
         appendLog("Cheat: applying '\(trimmed)' (\(modeDesc))")

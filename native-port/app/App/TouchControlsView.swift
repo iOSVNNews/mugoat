@@ -425,9 +425,12 @@ final class TouchControlsView: UIView {
         }
     }
 
+    private var lastGameStatus: UInt32 = 0
+
     /// Game state from the engine (PGGameStatus bits: 1 control off, 2 phone out, 4 cutscene,
     /// 8 warning screen, 16 no player).
     func updateGameState(_ status: UInt32, now: CFTimeInterval = CACurrentMediaTime()) {
+        lastGameStatus = status
         let phoneOut = status & 2 != 0
         if phoneOut != gamePhoneOut {
             gamePhoneOut = phoneOut
@@ -436,11 +439,12 @@ final class TouchControlsView: UIView {
             if context != .menu { reset(publish: false) }
             updateVisibility()
         }
-        // Accept/Back prompt: player control off outside cutscenes (Mission failed and similar
-        // screens), or a warning screen. Held for a moment so brief control locks don't flicker.
-        let wanted = status & 16 == 0 && ((status & 1 != 0 && status & 4 == 0) || status & 8 != 0)
+        // Accept/Back prompt: player control off (status & 1), cutscene (status & 4), warning screen (status & 8),
+        // or player dead / mission failed (status & 16 with control off).
+        // Held for a moment (0.35s) so brief control transitions don't flicker.
+        let wanted = ((status & 1 != 0) || (status & 4 != 0) || (status & 8 != 0) || (status & 16 != 0 && status != 0))
         if wanted { if promptSince == nil { promptSince = now } } else { promptSince = nil }
-        let show = wanted && now - (promptSince ?? now) > 0.6
+        let show = wanted && now - (promptSince ?? now) > 0.35
         if show != promptActive {
             promptActive = show
             reset(publish: false)
@@ -650,6 +654,17 @@ final class TouchControlsView: UIView {
             let leftZone = point.x < safe.minX + safe.width * 0.45
             if let button = button(at: point) {
                 press(button, touch: touch, at: point)
+            } else if promptActive || (lastGameStatus & 4 != 0) {
+                // Tapping anywhere on screen during Mission Failed, Cutscenes, or Prompts
+                // triggers the primary action (Continue / Retry Checkpoint / Skip Scene)
+                haptics.impactOccurred(intensity: 0.7)
+                pulse([.a, .x], for: 0.35)
+                PGSetKey(0x0D, true) // VK_RETURN
+                PGSetKey(0x20, true) // VK_SPACE
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    PGSetKey(0x0D, false)
+                    PGSetKey(0x20, false)
+                }
             } else if context == .menu {
                 let existing = currentMapTouches()
                 if existing.isEmpty {
@@ -756,7 +771,25 @@ final class TouchControlsView: UIView {
             DispatchQueue.main.async { self.openSettings?() }
         case cheat:
             DispatchQueue.main.async { self.openCheat?() }
-        case up, down, left, right, accept, back:
+        case accept:
+            lastDockInput = now
+            pulse([.a, .x], for: 0.35)
+            PGSetKey(0x0D, true) // VK_RETURN
+            PGSetKey(0x20, true) // VK_SPACE
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                PGSetKey(0x0D, false)
+                PGSetKey(0x20, false)
+            }
+        case back:
+            lastDockInput = now
+            pulse(.b, for: 0.35)
+            PGSetKey(0x1B, true) // VK_ESCAPE
+            PGSetKey(0x08, true) // VK_BACK
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                PGSetKey(0x1B, false)
+                PGSetKey(0x08, false)
+            }
+        case up, down, left, right:
             lastDockInput = now
         default:
             break
@@ -845,21 +878,12 @@ final class TouchControlsView: UIView {
                 let pt = touch.location(in: self)
                 let travel = hypot(pt.x - start.x, pt.y - start.y)
                 if !dragging && travel <= 14 {
-                    // Tap on map: place GPS waypoint at cursor
+                    // Tap on map: place GPS waypoint at cursor with a single clean click
                     sendMenuPointer(at: pt, buttons: 0)
                     haptics.impactOccurred(intensity: 0.7)
-                    pulse(.a, for: 0.15)
                     sendMenuPointer(at: pt, buttons: 1)
-                    PGSetKey(0x0D, true) // VK_RETURN
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                         self.sendMenuPointer(at: pt, buttons: 0)
-                        PGSetKey(0x0D, false)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
-                            self.sendMenuPointer(at: pt, buttons: 1)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                self.sendMenuPointer(at: pt, buttons: 0)
-                            }
-                        }
                     }
                 } else {
                     sendMenuPointer(at: pt, buttons: 0)

@@ -10,7 +10,8 @@ struct CheatItem: Identifiable {
 }
 
 let CHEAT_LIST: [CheatItem] = [
-    // MARK: - Nhân vật (11)
+    // MARK: - Nhân vật (12)
+    CheatItem(code: "UNFREEZE", name: "Gỡ kẹt cảnh / Thoát Cutscene", desc: "Buộc thoát cutscene, mở khóa điều khiển và gỡ treo màn hình", category: "Nhân vật"),
     CheatItem(code: "PAINKILLER", name: "Bất tử 5 phút", desc: "Không nhận sát thương trong 5 phút", category: "Nhân vật"),
     CheatItem(code: "TURTLE", name: "Đầy Máu & Giáp", desc: "Hồi phục 100% máu, giáp và sửa xe", category: "Nhân vật"),
     CheatItem(code: "TOOLUP", name: "Tất cả Vũ khí", desc: "Nhận full tất cả vũ khí và đạn", category: "Nhân vật"),
@@ -52,10 +53,38 @@ let CHEAT_LIST: [CheatItem] = [
     CheatItem(code: "SNOW", name: "Tuyết rơi", desc: "Kích hoạt hiệu ứng tuyết rơi toàn map", category: "Thế giới")
 ]
 
+struct SpawnerPreset: Identifiable {
+    let id = UUID()
+    let name: String
+    let model: String
+    let icon: String
+    let category: String
+}
+
+let COMMON_VEHICLES: [SpawnerPreset] = [
+    SpawnerPreset(name: "Karin Sultan", model: "sultan", icon: "car.fill", category: "Xe 4 cửa"),
+    SpawnerPreset(name: "Truffade Adder (Bugatti)", model: "adder", icon: "car.side.fill", category: "Siêu xe"),
+    SpawnerPreset(name: "Pegassi Zentorno", model: "zentorno", icon: "car.side.fill", category: "Siêu xe"),
+    SpawnerPreset(name: "Progen T20 (McLaren)", model: "t20", icon: "car.side.fill", category: "Siêu xe"),
+    SpawnerPreset(name: "Armored Kuruma (Chống đạn)", model: "kuruma", icon: "shield.righthalf.filled", category: "Bọc thép"),
+    SpawnerPreset(name: "Duke O'Death", model: "duke2", icon: "shield.fill", category: "Bọc thép"),
+    SpawnerPreset(name: "Oppressor Mk II (Mô tô bay)", model: "oppressor2", icon: "bolt.car.fill", category: "Đặc biệt"),
+    SpawnerPreset(name: "Trực thăng Buzzard Attack", model: "buzzard", icon: "airplane", category: "Máy bay"),
+    SpawnerPreset(name: "Pegassi Bati 801", model: "bati", icon: "bicycle", category: "Mô tô"),
+    SpawnerPreset(name: "Sanchez (Cào cào)", model: "sanchez", icon: "bicycle", category: "Mô tô"),
+    SpawnerPreset(name: "Rhino Tank (Xe tăng)", model: "rhino", icon: "shield.fill", category: "Quân sự")
+]
+
 enum CheatInputMode: String, CaseIterable, Identifiable {
     case auto = "Tự động"
     case console = "Console (`)"
     case gamepad = "Gamepad"
+    var id: String { rawValue }
+}
+
+enum CheatMenuTab: String, CaseIterable, Identifiable {
+    case cheats = "Lệnh Cheat"
+    case spawner = "🚗 Triệu hồi Xe & Mod"
     var id: String { rawValue }
 }
 
@@ -89,11 +118,16 @@ final class CheatManager {
 struct CheatMenuView: View {
     @Environment(\.dismiss) private var dismiss
     var engineRunning: Bool = true
+    @State private var selectedTab: CheatMenuTab = .cheats
     @State private var customCode = ""
+    @State private var customVehicleModel = ""
     @State private var searchText = ""
     @State private var inputMode: CheatInputMode = .console
     @State private var toastMessage: String?
+    @State private var modVehicles: [String] = []
     let onApply: (String, CheatInputMode) -> Void
+    var onSpawnVehicle: ((String) -> Void)? = nil
+    var onOpenMods: (() -> Void)? = nil
 
     private let categories = ["Nhân vật", "Phương tiện", "Chiến đấu", "Thế giới"]
 
@@ -122,56 +156,164 @@ struct CheatMenuView: View {
     var body: some View {
         NavigationView {
             List {
-                Section(header: Text("Phương thức kích hoạt")) {
-                    Picker("Chế độ", selection: $inputMode) {
-                        ForEach(CheatInputMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                Section {
+                    Picker("Danh mục", selection: $selectedTab) {
+                        ForEach(CheatMenuTab.allCases) { tab in
+                            Text(tab.rawValue).tag(tab)
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(inputModeDescription)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
-                Section(header: Text("Nhập lệnh tùy chỉnh")) {
-                    HStack {
-                        TextField("Nhập mã lệnh (vd: PAINKILLER)", text: $customCode)
-                            .textInputAutocapitalization(.characters)
-                            .disableAutocorrection(true)
-                        Button(L10n.text("Áp dụng")) {
-                            let c = customCode.trimmingCharacters(in: .whitespaces).uppercased()
-                            guard !c.isEmpty else { return }
-                            apply(c, forcedMode: .console)
+                if selectedTab == .cheats {
+                    Section(header: Text("Phương thức kích hoạt")) {
+                        Picker("Chế độ", selection: $inputMode) {
+                            ForEach(CheatInputMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color(red: 0.365, green: 0.714, blue: 0.898))
+                        .pickerStyle(.segmented)
+                        Text(inputModeDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("Lệnh tùy chỉnh luôn kích hoạt qua thanh Console (`~) của game.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
 
-                ForEach(categories, id: \.self) { cat in
-                    let items = filteredList.filter { $0.category == cat }
-                    if !items.isEmpty {
-                        Section(header: Text(cat)) {
-                            ForEach(items) { item in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack {
-                                            Text(item.name).fontWeight(.semibold)
-                                            Text("(\(item.code))").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Section(header: Text("Nhập lệnh tùy chỉnh")) {
+                        HStack {
+                            TextField("Nhập mã lệnh (vd: PAINKILLER)", text: $customCode)
+                                .textInputAutocapitalization(.characters)
+                                .disableAutocorrection(true)
+                            Button(L10n.text("Áp dụng")) {
+                                let c = customCode.trimmingCharacters(in: .whitespaces).uppercased()
+                                guard !c.isEmpty else { return }
+                                apply(c, forcedMode: .console)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color(red: 0.365, green: 0.714, blue: 0.898))
+                        }
+                        Text("Lệnh tùy chỉnh luôn kích hoạt qua thanh Console (`~) của game.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(categories, id: \.self) { cat in
+                        let items = filteredList.filter { $0.category == cat }
+                        if !items.isEmpty {
+                            Section(header: Text(cat)) {
+                                ForEach(items) { item in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            HStack {
+                                                Text(item.name).fontWeight(.semibold)
+                                                Text("(\(item.code))").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                            }
+                                            Text(item.desc).font(.caption2).foregroundStyle(.secondary)
                                         }
-                                        Text(item.desc).font(.caption2).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button(action: { apply(item.code) }) {
+                                            Text(L10n.text("Bật")).font(.caption.weight(.bold)).padding(.horizontal, 10).padding(.vertical, 4)
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(.blue)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // MARK: - Vehicle & Mod Spawner
+                    Section(header: Text("Gọi xe theo tên Model (Custom Spawn)")) {
+                        HStack {
+                            TextField("Tên model (vd: mbs1k, sultan, t20)", text: $customVehicleModel)
+                                .textInputAutocapitalization(.never)
+                                .disableAutocorrection(true)
+                            Button("Triệu hồi") {
+                                let m = customVehicleModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !m.isEmpty else { return }
+                                spawnVehicle(m)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                        }
+                        Text("Nhập mã model bất kỳ từ bản mod add-on hoặc GTA V gốc. Xe sẽ xuất hiện ngay trước mặt nhân vật!")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section(header: Text("🌟 Xe Mod Đã Cài (DLC Add-ons)")) {
+                        if modVehicles.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Chưa phát hiện xe mod Add-on nào.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text("Bấm 'Mở Quản lý Mod' bên dưới để nhập tệp .rpf (như mbs1k). Cần khởi động lại game sau khi thêm mod mới để engine nạp DLC.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        } else {
+                            ForEach(modVehicles, id: \.self) { model in
+                                HStack {
+                                    Image(systemName: "star.fill")
+                                        .foregroundColor(.yellow)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Xe Mod: \(model.uppercased())")
+                                            .fontWeight(.bold)
+                                        Text("Gói DLC Add-on · Chạm để gọi ngay")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Button(action: { apply(item.code) }) {
-                                        Text(L10n.text("Bật")).font(.caption.weight(.bold)).padding(.horizontal, 10).padding(.vertical, 4)
+                                    Button("Triệu hồi") {
+                                        spawnVehicle(model)
                                     }
                                     .buttonStyle(.borderedProminent)
-                                    .tint(.blue)
+                                    .tint(.green)
+                                    .font(.caption.weight(.bold))
                                 }
+                            }
+                        }
+                    }
+
+                    Section(header: Text("🏎️ Phương tiện GTA V phổ biến")) {
+                        ForEach(COMMON_VEHICLES) { v in
+                            HStack {
+                                Image(systemName: v.icon)
+                                    .foregroundColor(Color(red: 0.365, green: 0.714, blue: 0.898))
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(v.name).fontWeight(.semibold)
+                                    Text("Model: \(v.model) · \(v.category)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Gọi xe") {
+                                    spawnVehicle(v.model)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.blue)
+                                .font(.caption.weight(.bold))
+                            }
+                        }
+                    }
+
+                    Section(header: Text("Quản lý tệp Mod")) {
+                        Button(action: {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                onOpenMods?()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "folder.fill.badge.gearshape")
+                                    .foregroundColor(.orange)
+                                Text("Mở Quản lý Mod (Thêm / Bật / Tắt Mod)")
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
                         }
                     }
@@ -184,6 +326,9 @@ struct CheatMenuView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.text("Đóng")) { dismiss() }
                 }
+            }
+            .onAppear {
+                modVehicles = ModRuntime.catalog(ModManagerViewController.modsDirectory).models
             }
             .overlay(alignment: .bottom) {
                 if let msg = toastMessage {
@@ -216,6 +361,15 @@ struct CheatMenuView: View {
         dismiss()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             onApply(code, modeToUse)
+        }
+    }
+
+    private func spawnVehicle(_ model: String) {
+        let clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !clean.isEmpty else { return }
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            onSpawnVehicle?(clean)
         }
     }
 }

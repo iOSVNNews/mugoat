@@ -918,14 +918,23 @@ bool PGSpawnVehicle(const char *modelName) {
     pthread_mutex_unlock(&pg_spawn_lock);
     return false;
   }
+  while (*modelName == ' ' || *modelName == '\t') modelName++;
   strncpy(pg_spawn_model_name, modelName, sizeof(pg_spawn_model_name) - 1);
   pg_spawn_model_name[sizeof(pg_spawn_model_name) - 1] = '\0';
-  pg_spawn_model_hash = pg_joaat(pg_spawn_model_name);
+  int len = (int)strlen(pg_spawn_model_name);
+  while (len > 0 && (pg_spawn_model_name[len - 1] == ' ' || pg_spawn_model_name[len - 1] == '\t' || pg_spawn_model_name[len - 1] == '\r' || pg_spawn_model_name[len - 1] == '\n')) {
+    pg_spawn_model_name[--len] = '\0';
+  }
+  if (pg_spawn_model_name[0] == '0' && (pg_spawn_model_name[1] == 'x' || pg_spawn_model_name[1] == 'X')) {
+    pg_spawn_model_hash = (uint32_t)strtoul(pg_spawn_model_name, NULL, 16);
+  } else {
+    pg_spawn_model_hash = pg_joaat(pg_spawn_model_name);
+  }
   pg_spawn_frames = 0;
   atomic_store(&pg_spawn_status, 1);
   pthread_mutex_unlock(&pg_spawn_lock);
   char msg[128];
-  snprintf(msg, sizeof msg, "Spawn vehicle requested: %s (hash %u)", pg_spawn_model_name, pg_spawn_model_hash);
+  snprintf(msg, sizeof msg, "Spawn vehicle requested: %s (hash 0x%08X / %u)", pg_spawn_model_name, pg_spawn_model_hash, pg_spawn_model_hash);
   pg_log(msg);
   return true;
 }
@@ -945,9 +954,10 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   MugoatValue loadedArgs[1] = { mg_u32(model) };
   if (!mg_call_u32(instance, "mp:HasModelLoaded", loadedArgs, 1)) {
     pg_test_leave_script(instance, previous);
-    if (pg_spawn_frames > 300) {
+    // Allow up to 1800 frames (~30s at 60fps) for heavy/high-poly mod vehicles to stream into memory
+    if (pg_spawn_frames > 1800) {
       char msg[128];
-      snprintf(msg, sizeof msg, "Spawn vehicle timed out loading %s (%u)", pg_spawn_model_name, model);
+      snprintf(msg, sizeof msg, "Spawn vehicle timed out loading %s (0x%08X)", pg_spawn_model_name, model);
       pg_log(msg);
       atomic_store(&pg_spawn_status, -1);
     }
@@ -970,24 +980,43 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   MugoatValue headArgs[1] = { mg_u32(ped) };
   float heading = mg_call_f32(instance, "mp:GetEntityHeading", headArgs, 1);
   float rad = heading * 0.0174532925f;
-  float vx = px - sinf(rad) * 3.5f;
-  float vy = py + cosf(rad) * 3.5f;
-  float vz = pz + 0.2f;
+  // Place 4.5m forward and slightly elevated (+0.5m) so vehicle doesn't clip into player or ground
+  float vx = px - sinf(rad) * 4.5f;
+  float vy = py + cosf(rad) * 4.5f;
+  float vz = pz + 0.5f;
   uint64_t vehVector = w2c_game_f100(instance, 32);
   float *vv = pg_pointer(&env, vehVector, 24);
   vv[0] = vx; vv[1] = 0; vv[2] = vy; vv[3] = 0; vv[4] = vz; vv[5] = 0;
   MugoatValue vehArgs[6] = { mg_u32(model), mg_u64(vehVector), mg_f32(heading), mg_u32(0), mg_u32(0), mg_u32(1) };
   uint32_t vehicle = mg_call_u32(instance, "mp:CreateVehicle", vehArgs, 6);
+  if (!vehicle) {
+    // Retry with higher elevation in case of slope/curb collision
+    vv[4] = pz + 1.2f;
+    vehicle = mg_call_u32(instance, "mp:CreateVehicle", vehArgs, 6);
+  }
   if (vehicle) {
+    // If player is already in a vehicle, warp them out first
+    MugoatValue inVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+    if (mg_call_u32(instance, "mp:IsPedInAnyVehicle", inVehArgs, 2)) {
+      MugoatValue getVehArgs[2] = { mg_u32(ped), mg_u32(0) };
+      uint32_t oldVeh = mg_call_u32(instance, "mp:GetVehiclePedIsIn", getVehArgs, 2);
+      if (oldVeh) {
+        MugoatValue leaveArgs[3] = { mg_u32(ped), mg_u32(oldVeh), mg_u32(16) };
+        mg_call_void(instance, "mp:TaskLeaveVehicle", leaveArgs, 3);
+      }
+    }
+    MugoatValue clearArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ClearPedTasksImmediately", clearArgs, 1);
+
     MugoatValue sitArgs[3] = { mg_u32(ped), mg_u32(vehicle), mg_u32((uint32_t)-1) };
     mg_call_void(instance, "mp:SetPedIntoVehicle", sitArgs, 3);
     char msg[128];
-    snprintf(msg, sizeof msg, "Spawned vehicle %s (%u) id %u at %.1f, %.1f, %.1f", pg_spawn_model_name, model, vehicle, vx, vy, vz);
+    snprintf(msg, sizeof msg, "Spawned vehicle %s (0x%08X) id %u at %.1f, %.1f, %.1f", pg_spawn_model_name, model, vehicle, vx, vy, vz);
     pg_log(msg);
     atomic_store(&pg_spawn_status, 2);
   } else {
     char msg[128];
-    snprintf(msg, sizeof msg, "Failed to spawn vehicle %s (%u)", pg_spawn_model_name, model);
+    snprintf(msg, sizeof msg, "Failed to spawn vehicle %s (0x%08X)", pg_spawn_model_name, model);
     pg_log(msg);
     atomic_store(&pg_spawn_status, -1);
   }
@@ -1013,6 +1042,14 @@ static void pg_process_player_respawn(w2c_game *instance) {
   MugoatValue deadArgs[2] = { mg_u32(ped), mg_u32(1) };
   uint32_t isDead = mg_call_u32(instance, "mp:IsPedDeadOrDying", deadArgs, 2);
   if (isDead) {
+    // If a story mission is active, let GTA V's native mission script manage failure & checkpoint restart.
+    // Do not auto-teleport to hospital during missions!
+    uint32_t inMission = mg_call_u32(instance, "mp:GetMissionFlag", NULL, 0);
+    if (inMission) {
+      pg_death_frames = 0;
+      return;
+    }
+
     pg_death_frames++;
     if (pg_death_frames < 180) return; // ~3.0s delay at 60fps for wasted screen
 
@@ -1131,6 +1168,54 @@ static void pg_process_vehicle_exit(w2c_game *instance) {
   pg_test_leave_script(instance, previous);
 }
 
+static _Atomic int pg_force_skip_scene_flag = 0;
+void PGForceSkipScene(void) {
+  atomic_store(&pg_force_skip_scene_flag, 1);
+  if (!atomic_load(&inputBlock)) return;
+  const uint8_t *m = (const uint8_t *)(void *)env.memory.data;
+  uint64_t size = env.memory.size;
+  uint64_t cutscene, info, ped, playerInfo;
+  // 1. Force end cutscene in memory
+  if (pg_context_u64(m, size, 19339168, &cutscene) && cutscene && cutscene < size - 3216) {
+    *(uint8_t *)pg_pointer(&env, cutscene + 3215, 1) = 0;
+  }
+  // 2. Clear control disabled flags
+  if (pg_context_u64(m, size, 20159720, &info) && info &&
+      pg_context_u64(m, size, info + 8, &ped) && ped &&
+      pg_context_u64(m, size, ped + 4328, &playerInfo) && playerInfo && playerInfo + 940 <= size) {
+    *(uint32_t *)pg_pointer(&env, playerInfo + 936, 4) = 0;
+  }
+  // 3. Reset load scene if stuck
+  if (size > 23389300 && m[23389293] == 1) {
+    *(uint8_t *)pg_pointer(&env, 23389293, 1) = 0;
+  }
+  // 4. Send Enter/Space to wake up scaleform/mission failed menu
+  PGSetKey(0x0D, true); // VK_RETURN
+  PGSetKey(0x20, true); // VK_SPACE
+  pg_log("PGForceSkipScene memory unfreeze applied.");
+}
+
+static void pg_process_force_skip_scene(w2c_game *instance) {
+  int flag = atomic_exchange(&pg_force_skip_scene_flag, 0);
+  if (!flag) return;
+  uint64_t previous = pg_test_enter_script(instance);
+  uint32_t ped = mg_call_u32(instance, "mp:PlayerPedId", NULL, 0);
+  if (ped) {
+    MugoatValue clearArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ClearPedTasksImmediately", clearArgs, 1);
+    MugoatValue resurrectArgs[1] = { mg_u32(ped) };
+    mg_call_void(instance, "mp:ResurrectPed", resurrectArgs, 1);
+    mg_call_void(instance, "mp:ReviveInjuredPed", resurrectArgs, 1);
+    MugoatValue healthArgs[3] = { mg_u32(ped), mg_u32(200), mg_u32(0) };
+    mg_call_void(instance, "mp:SetEntityHealth", healthArgs, 3);
+  }
+  mg_call_void(instance, "mp:StopCutsceneImmediately", NULL, 0);
+  MugoatValue fadeArgs[1] = { mg_u32(500) };
+  mg_call_void(instance, "mp:DoScreenFadeIn", fadeArgs, 1);
+  pg_test_leave_script(instance, previous);
+  pg_log("PGForceSkipScene script unfreeze executed on engine thread.");
+}
+
 #if TARGET_OS_SIMULATOR
 u32 w2c_game_f81498(w2c_game*, u64, u64); // CMovieMgr::PreloadMovie
 void w2c_game_f81499(w2c_game*, u32); // CMovieMgr::Play
@@ -1245,6 +1330,7 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
     pg_apply_targeting_mode(instance);
     pg_process_vehicle_spawn(instance);
     pg_process_vehicle_exit(instance);
+    pg_process_force_skip_scene(instance);
     pg_process_player_respawn(instance);
   }
 #if TARGET_OS_SIMULATOR
