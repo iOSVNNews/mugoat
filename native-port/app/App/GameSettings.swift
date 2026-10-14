@@ -164,7 +164,7 @@ final class GameSettings {
         let fallback: GraphicsPreset
         /// The custom resolution that was set back to Auto, if any.
         let resetHeight: Int?
-        let memoryLimitMB: Int
+        let processAllowanceMB: Int
     }
     /// Lowers the settings when the previous launch failed. Returns what changed, or nil.
     func recoverFromFailedBoot() -> BootRecovery? {
@@ -187,7 +187,7 @@ final class GameSettings {
         guard fallback != failed || resetHeight != nil else { return nil }
         graphicsPreset = fallback
         if resetHeight != nil { renderHeight = 0 }
-        return BootRecovery(failed: failed, fallback: fallback, resetHeight: resetHeight, memoryLimitMB: tier.memoryLimitMB)
+        return BootRecovery(failed: failed, fallback: fallback, resetHeight: resetHeight, processAllowanceMB: tier.processAllowanceMB)
     }
     /// "Try again anyway" in the popup: put the settings back as they were.
     func undoRecovery(_ recovery: BootRecovery) {

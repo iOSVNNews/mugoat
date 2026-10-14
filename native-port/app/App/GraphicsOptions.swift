@@ -43,7 +43,8 @@ enum GraphicsPreset: Int, CaseIterable {
 
 /// What this device can afford, measured before the engine starts.
 struct DeviceTier {
-    let memoryLimitMB: Int
+    /// Measured OS process allowance for diagnostics; never an allocation cap.
+    let processAllowanceMB: Int
     let physicalMemoryMB: Int
     let model: String
     let supportsBCTextures: Bool
@@ -55,18 +56,14 @@ struct DeviceTier {
         let supportsBC: Bool
         if #available(iOS 16.4, *) { supportsBC = device?.supportsBCTextureCompression ?? false }
         else { supportsBC = false }
-        return DeviceTier(memoryLimitMB: Self.processMemoryLimitMB(),
+        return DeviceTier(processAllowanceMB: Self.measureProcessAllowanceMB(),
                           physicalMemoryMB: Int(ProcessInfo.processInfo.physicalMemory / 1_048_576),
                           model: model,
                           supportsBCTextures: supportsBC)
     }
 
     /// Jetsam limit = memory still available + what the app already uses.
-    private static func processMemoryLimitMB() -> Int {
-        #if targetEnvironment(simulator)
-        // Model the target phone (iPhone 13 Pro Max) unless told otherwise.
-        return Int(ProcessInfo.processInfo.environment["PG_SIM_MEMORY_LIMIT_MB"] ?? "") ?? 4096
-        #else
+    private static func measureProcessAllowanceMB() -> Int {
         var vm = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &vm) {
@@ -74,19 +71,17 @@ struct DeviceTier {
         }
         let footprint = result == KERN_SUCCESS ? Int(vm.phys_footprint) : 0
         return (Int(os_proc_available_memory()) + footprint) / 1_048_576
-        #endif
     }
 
-    /// The Metal renderer needs about 700 MB less than the old renderer did: a 6 GB phone on a
-    /// free Apple ID (about 3 GB limit) runs Battery with room to spare.
+    /// Recommend from the device's actual RAM; all presets remain selectable.
     var recommended: GraphicsPreset {
-        memoryLimitMB < 3400 ? .battery : memoryLimitMB < 4600 ? .performance : memoryLimitMB < 6000 ? .balanced : memoryLimitMB < 8000 ? .quality : .ultra
+        physicalMemoryMB < 3400 ? .battery : physicalMemoryMB < 4600 ? .performance : physicalMemoryMB < 6000 ? .balanced : physicalMemoryMB < 8000 ? .quality : .ultra
     }
     /// Every preset can be chosen; those above the recommended one show a warning.
     var allowed: [GraphicsPreset] { GraphicsPreset.allCases }
     /// Presets shown with a warning because they may run out of memory or heat up.
     func risky(_ preset: GraphicsPreset) -> Bool { preset.rawValue > recommended.rawValue }
-    var summary: String { "\(model) · \(physicalMemoryMB / 1024) GB · app limit \(memoryLimitMB) MB\(supportsBCTextures ? " · BC textures" : "")" }
+    var summary: String { "\(model) · \(String(format: "%.1f", Double(physicalMemoryMB) / 1024)) GB RAM\(supportsBCTextures ? " · BC textures" : "")" }
 }
 
 enum GraphicsConfiguration {

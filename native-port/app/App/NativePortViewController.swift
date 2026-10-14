@@ -39,7 +39,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private var bootedMode: GameMode?
     private var stableTimer: Timer?
     private var healthTimer: Timer?
-    private var lastHealth: [UInt64] = [0, 0, 0, 0, 0, 0, 0]
+    private var lastHealth: [UInt64] = [0, 0, 0, 0, 0, 0]
     private var padProof: PGPadState?
     private var lastGameStatus: UInt32 = 999
     private var worldReadyAt: CFTimeInterval?
@@ -299,7 +299,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
         if line == "WORLD_READY" { PGSetTargetingMode(Int32(GameSettings.shared.targetingMode)); if worldReadyAt == nil { worldReadyAt = CACurrentMediaTime() } }
         if line == "WORLD_READY", healthTimer == nil {
-            // Every 10 s: memory, how often the memory guard held streaming back, and game-file reads.
+            // Every 10 s: physical RAM, process usage, OS headroom and game-file reads.
             healthTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.logHealth() }
         }
         if line == "WORLD_READY", stableTimer == nil {
@@ -810,7 +810,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let title = lowered ? "Graphics lowered to \(recovery.fallback.title)" : "Resolution set back to Auto"
         var message = "The game closed while starting on \(recovery.failed.title)"
         if let height = recovery.resetHeight { message += " at \(height)p" }
-        message += ". That usually means this setting needs more memory than iOS gives the app on this iPhone (about \(recovery.memoryLimitMB) MB)."
+        message += ". iOS reported an estimated process memory allowance of \(recovery.processAllowanceMB) MB at launch; this is separate from the device's total RAM."
         message += lowered ? "\n\nThe game now starts on \(recovery.fallback.title)" : "\n\nThe game now starts at its usual resolution"
         message += recovery.resetHeight != nil && lowered ? " with Auto resolution." : "."
         message += " You can change this any time in Settings."
@@ -838,16 +838,15 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
         } == KERN_SUCCESS
         let used = ok ? Int(vm.phys_footprint / 1_048_576) : -1
-        let available = Int(os_proc_available_memory() / 1_048_576)
-        let free = available > 0 ? available : max(0, GameSettings.shared.tier.memoryLimitMB - used)
+        let free = Int(os_proc_available_memory() / 1_048_576)
         var reads = [UInt64](repeating: 0, count: 6)
         reads.withUnsafeMutableBufferPointer { PGAssetHealth($0.baseAddress) }
-        let now = [PGMemoryBudgetClamps()] + reads
+        let now = reads
         let d = zip(now, lastHealth).map { $0 &- $1 }
         lastHealth = now
-        let avgMS = d[1] > 0 ? Double(d[6]) / Double(d[1]) / 1000 : 0
-        appendLog(String(format: "Health: memory %d MB used, %d MB free · guard held back streaming %llu× · reads %llu (%.1f MB, avg %.1f ms, slow %llu, errors %llu) · %.0f FPS",
-                         used, free, d[0], d[1], Double(d[2]) / 1_048_576, avgMS, d[5], d[3], PGRenderedFramesPerSecond()))
+        let avgMS = d[0] > 0 ? Double(d[5]) / Double(d[0]) / 1000 : 0
+        appendLog(String(format: "Health: device RAM %d MB · app %d MB used, iOS headroom %d MB · reads %llu (%.1f MB, avg %.1f ms, slow %llu, errors %llu) · %.0f FPS",
+                         GameSettings.shared.tier.physicalMemoryMB, used, free, d[0], Double(d[1]) / 1_048_576, avgMS, d[4], d[2], PGRenderedFramesPerSecond()))
     }
 
     @objc private func leftApp() { if stableTimer?.isValid != false { GameSettings.shared.markBootInterrupted() } }

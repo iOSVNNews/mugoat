@@ -7,7 +7,6 @@
 #include <limits.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <os/proc.h>
 #include "NativePackedAssetCache.h"
 #include "NativeAssetPreload.h"
 
@@ -398,11 +397,6 @@ void pg_assets_prewarm(void){
   }
 }
 static void pumpAssetHints(void){
-  // Demand reads still run; defer background hints while streaming needs its
-  // 384 MiB reserve for eviction and transient Metal uploads.
-#if !TARGET_OS_SIMULATOR
-  if(os_proc_available_memory()<384ull*1024*1024)return;
-#endif
   PGAssetHint hint;
   while(pg_asset_hint_next(&normalHints,&lowHints,(unsigned)atomic_load(&activePrefetch),(unsigned)atomic_load(&activeSpeculative),16,4,&hint)){
     if(hint.id>=assetFiles.count)continue;

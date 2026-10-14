@@ -3,7 +3,7 @@ set -eu
 cd "$(dirname "$0")/.."
 python3 Scripts/generate_imports.py
 python3 Scripts/prepare_heap_diagnostics.py
-python3 Scripts/prepare_memory_pressure.py
+python3 Scripts/restore_engine_memory.py
 python3 Scripts/prepare_virtual_pad.py
 python3 Scripts/prepare_movie_wait.py
 python3 Scripts/prepare_missing_txd.py

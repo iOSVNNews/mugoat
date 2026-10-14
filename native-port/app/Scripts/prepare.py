@@ -68,7 +68,7 @@ if 'pg_record_trap' not in text:
     runtime.write_text(text)
 run('python3', 'Scripts/generate_imports.py')
 run('python3', 'Scripts/prepare_heap_diagnostics.py')
-run('python3', 'Scripts/prepare_memory_pressure.py')
+run('python3', 'Scripts/restore_engine_memory.py')
 shutil.copyfile(options.mirror / 'data/manifest.json', root / 'Resources/manifest.json')
 run('python3', 'Scripts/prepare_virtual_pad.py')
 run('python3', 'Scripts/prepare_movie_wait.py')

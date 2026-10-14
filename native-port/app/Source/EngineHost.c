@@ -13,9 +13,8 @@
 #include <math.h>
 #include <sys/mman.h>
 #include <TargetConditionals.h>
-#include <os/proc.h>
-#include <mach/mach.h>
-#include "NativeMemoryBudget.h"
+#include <sys/sysctl.h>
+#include "NativeEngineMemory.h"
 #include "MugoatOnline.h"
 
 static struct w2c_env env;
@@ -73,41 +72,6 @@ f64 w2c_env_emscripten_get_now(struct w2c_env *host) { return timeMS(CLOCK_MONOT
 f64 w2c_env_wasm_now_ms(struct w2c_env *host) { return timeMS(CLOCK_REALTIME); }
 f64 w2c_env_emscripten_date_now(struct w2c_env *host) { return timeMS(CLOCK_REALTIME); }
 u64 w2c_env_emscripten_get_heap_max(struct w2c_env *host) { wasm_rt_shared_memory_t *memory=w2c_env_memory(host);return memory->max_pages*memory->page_size; }
-static bool nativeMemoryGuard;
-static _Atomic uint64_t memoryBudgetClamps,memoryBudgetQueries;
-uint64_t PGMemoryBudgetQueries(void){return atomic_load(&memoryBudgetQueries);}
-uint64_t PGMemoryBudgetClamps(void){return atomic_load(&memoryBudgetClamps);}
-static uint64_t simulatedProcessLimit;
-static bool nativeProcessHeadroom(uint64_t *headroom){
- if(!nativeMemoryGuard)return false;
- atomic_fetch_add(&memoryBudgetQueries,1);
- uint64_t available;
-#if TARGET_OS_SIMULATOR
- // Simulator has no iOS Jetsam ceiling. Use an explicit simulated process limit.
- if(!simulatedProcessLimit)return false;
- task_vm_info_data_t info={};mach_msg_type_number_t count=TASK_VM_INFO_COUNT;
- if(task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&info,&count)!=KERN_SUCCESS)return false;
- available=simulatedProcessLimit>info.phys_footprint?simulatedProcessLimit-info.phys_footprint:0;
-#else
- available=os_proc_available_memory();
-#endif
- *headroom=available;
- return true;
-}
-uint64_t pg_streaming_available_memory(uint64_t engineAvailable){
- uint64_t available;
- if(!nativeProcessHeadroom(&available))return engineAvailable;
- uint64_t result=pg_streaming_headroom_budget(engineAvailable,available,384ull*1048576);
- if(result<engineAvailable)atomic_fetch_add(&memoryBudgetClamps,1);
- return result;
-}
-uint64_t pg_streaming_resource_memory(uint64_t engineAvailable){
- uint64_t available;
- if(!nativeProcessHeadroom(&available))return engineAvailable;
- int64_t result=pg_streaming_resource_budget((int64_t)engineAvailable,available,384ull*1048576);
- if(result<(int64_t)engineAvailable)atomic_fetch_add(&memoryBudgetClamps,1);
- return (uint64_t)result;
-}
 static u32 nativeEngineCores=2;
 u32 w2c_env_emscripten_num_logical_cores(struct w2c_env *host) { return nativeEngineCores; }
 void w2c_env_emscripten_check_blocking_allowed(struct w2c_env *host) {}
@@ -116,8 +80,6 @@ void w2c_env_wasm_hang_line_js(struct w2c_env *host, u64 address) { pg_log(pg_st
 u32 w2c_env_wasm_has_page_js(struct w2c_env *host) { return 1; }
 u32 w2c_env_wasm_userdata_page_js(struct w2c_env *host) { return 0; }
 u32 w2c_env_wasm_module_int_js(struct w2c_env *host, u64 address, u32 fallback) {
-  const char *key = pg_string(host, address);
-  if (!strcmp(key, "lowMemory")) return 1;
   return fallback;
 }
 void w2c_env_0x5Femscripten_init_main_thread_js(struct w2c_env *host, u64 thread) {
@@ -1497,27 +1459,22 @@ void PGSetBackBufferSize(int width,int height){
   atomic_store((_Atomic int32_t *)(base+436),height&~1);
 }
 static void *boot(void *ignored) {
-  // Real iOS must budget against its Jetsam allowance. Simulator runs opt in
-  // with an explicit modeled ceiling so ordinary performance baselines match.
-  const char *guard=getenv("PG_MEMORY_GUARD");nativeMemoryGuard=guard?atoi(guard)==1:!TARGET_OS_SIMULATOR;
-#if TARGET_OS_SIMULATOR
-  const char *limit=getenv("PG_STREAM_MEMORY_LIMIT_MB");
-  if(limit){char *end;unsigned long mb=strtoul(limit,&end,10);if(end!=limit&&!*end&&mb>=2048&&mb<=8192)simulatedProcessLimit=(uint64_t)mb*1048576;}
-#endif
-  if(nativeMemoryGuard)pg_log("Native streaming memory guard enabled with 384 MB of reserve.");
   pg_assets_prewarm();
   nativeEngineCores=pg_engine_core_configuration(getenv("PG_ENGINE_CORES"));
   char coresOption[32];snprintf(coresOption,sizeof coresOption,"-numCores=%u",nativeEngineCores);
   char coresLog[96];snprintf(coresLog,sizeof coresLog,"Native engine worker configuration: %u logical cores.",nativeEngineCores);pg_log(coresLog);
   wasm_rt_init();
-  pg_log("Reserving 4095 MB virtual engine memory, starting with a 3328 MB shared heap.");
+  uint64_t physicalMemory=0;size_t physicalMemorySize=sizeof physicalMemory;
+  if(sysctlbyname("hw.memsize",&physicalMemory,&physicalMemorySize,NULL,0)!=0)pg_log("Physical RAM query failed; using the engine's declared maximum address space.");
+  PGEngineMemory memoryConfiguration=pg_engine_memory(physicalMemory,wasm2c_game_pagesize_env_memory);
+  char memoryLog[224];snprintf(memoryLog,sizeof memoryLog,"Device RAM: %llu MB; engine virtual capacity: %llu MB; initial logical heap: %llu MB. No app streaming RAM clamp.",physicalMemory/1048576,memoryConfiguration.maximumPages*wasm2c_game_pagesize_env_memory/1048576,memoryConfiguration.initialPages*wasm2c_game_pagesize_env_memory/1048576);pg_log(memoryLog);
 #if defined(PG_HAS_ARM64_SHARED_VECTORS) && !defined(PG_SHARED_SIMD_BYTEWISE)
   pg_log("Shared vector memory uses native ARM64 instructions with bounds checks.");
 #else
   pg_log("Shared vector memory uses bytewise atomic copies with bounds checks.");
 #endif
-  env.memory.pages = 3328ull*1024*1024/wasm2c_game_pagesize_env_memory;
-  env.memory.max_pages = 4095ull*1024*1024/wasm2c_game_pagesize_env_memory;
+  env.memory.pages = memoryConfiguration.initialPages;
+  env.memory.max_pages = memoryConfiguration.maximumPages;
   env.memory.page_size = wasm2c_game_pagesize_env_memory;
   env.memory.size = env.memory.pages * env.memory.page_size;
   env.memory.is64 = true;
@@ -1525,7 +1482,6 @@ static void *boot(void *ignored) {
   // The full maximum is mapped up front, then an inaccessible guard region:
   // unchecked builds (PG_UNCHECKED_MEMORY) rely on it so that an access past
   // the end faults instead of touching unrelated memory.
-  // Small enough for apps without the extended-address-space entitlement.
   const uint64_t guardBytes=64ull<<20;
   void *allocation=mmap(NULL,capacity+guardBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
   if (allocation==MAP_FAILED) { pg_log("iOS could not reserve the engine memory."); return NULL; }
@@ -1577,15 +1533,6 @@ static void *boot(void *ignored) {
     for(unsigned i=0;i<sizeof(extra)/sizeof(*extra);i++){size_t len=strlen(extra[i])+1;arguments[argc++]=text;memcpy(pg_pointer(&env,text,len),extra[i],len);text+=len;}
     const char *pass=getenv("PG_BENCHMARK_PASS");if(pass&&*pass){char option[64];snprintf(option,sizeof option,"-benchmarkPass=%d",atoi(pass));size_t len=strlen(option)+1;arguments[argc++]=text;memcpy(pg_pointer(&env,text,len),option,len);text+=len;}
     pg_log("Starting the engine's built-in graphics benchmark.");
-  }
-  const char *streamerPercentage=getenv("PG_STREAMER_PERCENTAGE");
-  if(streamerPercentage&&*streamerPercentage){
-    char *end;double fraction=strtod(streamerPercentage,&end);
-    if(end!=streamerPercentage&&!*end&&isfinite(fraction)&&fraction>=.1&&fraction<=.95){
-      char option[80];snprintf(option,sizeof option,"-percentageForStreamer=%.3f",fraction);
-      size_t len=strlen(option)+1;arguments[argc++]=text;memcpy(pg_pointer(&env,text,len),option,len);text+=len;
-      snprintf(message,sizeof message,"Native streaming budget experiment: %.3f of engine video-memory budget.",fraction);pg_log(message);
-    }
   }
   arguments[argc]=0;
   uint32_t result=w2c_game_0x5F_main_argc_argv(&env.game,argc,argv);

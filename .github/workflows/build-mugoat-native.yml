@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Build and render actual UIKit home screen
         run: |
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
@@ -47,7 +47,7 @@ jobs:
                       subprocess.run(['xcrun','simctl','terminate',udid,'vn.iosvn.mugoat.preview'],check=True)
               subprocess.run(['xcrun','simctl','shutdown',udid],check=True)
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: Mugoat-UIKit-previews
           path: native-port/app/Preview/*.png
@@ -56,13 +56,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Normalize source and check signing metadata
         run: |
           find native-port -type f \( -name '*.sh' -o -name '*.py' -o -name '*.entitlements' -o -name '*.plist' -o -name '*.yml' -o -name '*.c' -o -name '*.h' -o -name '*.mm' -o -name '*.swift' \) -exec sed -i '' 's/\r$//' {} +
           chmod +x native-port/build_ipa.sh
           plutil -lint native-port/app/App/Free.entitlements native-port/app/App/Full.entitlements
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6.1.0
         id: native-cache
         with:
           path: |
@@ -99,11 +99,12 @@ jobs:
         run: |
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
           xcrun -sdk iphoneos metal --version > /dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
-      - name: Check streaming reserve and actual FPS accounting
+      - name: Check full device RAM and actual FPS accounting
         working-directory: native-port/app
         run: |
           clang -std=c11 -I Source Tests/memory_budget.c -o "$RUNNER_TEMP/mugoat-memory-tests"
           "$RUNNER_TEMP/mugoat-memory-tests"
+          python3 Tests/memory_configuration.py --engine "$RUNNER_TEMP/game-files/b/8b0b5899ed/game.wasm"
           clang++ -std=c++20 -I Source Tests/frame_rate.cpp -o "$RUNNER_TEMP/mugoat-fps-tests"
           "$RUNNER_TEMP/mugoat-fps-tests"
           clang++ -std=c++20 -I Source Tests/frame_metrics.cpp -o "$RUNNER_TEMP/mugoat-frame-tests"
@@ -139,7 +140,7 @@ jobs:
         run: |
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-AppleID-Free.ipa Mugoat-AppleID-Free.enc
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-Cert-Paid.ipa Mugoat-Cert-Paid.enc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: Mugoat-Native-IPAs-encrypted
           path: |
@@ -148,14 +149,14 @@ jobs:
             native-port/SHA256SUMS.txt
             native-port/Native-IPA-*-validation.json
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: Mugoat-compiler-logs
           path: native-port/app/Build/xcodebuild.log
           if-no-files-found: ignore
       - name: Preserve validated native compilation even if packaging fails
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         if: always() && steps.native-cache.outputs.cache-hit != 'true' && hashFiles('native-port/app/Generated/native-prepared-v1.txt') != ''
         with:
           path: |
