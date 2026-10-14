@@ -9,4 +9,6 @@
 
 Kiểm tra tự động bao gồm chiều camera/aim, tùy chọn đảo trục, chuyển động nhỏ, 30/60/120 Hz, giữ ngón tay đứng yên, khung hình chậm và lọc file mod. Độ mượt khi chơi thực tế vẫn cần kiểm tra trên iPhone; bản sửa không bảo đảm hết mọi hiện tượng tụt FPS hoặc giật do tải tài nguyên.
 
+**Phạm vi Quản lý Mod:** nhập/giải nén, lọc danh sách và đổi tên file `.disabled` để quản lý tệp. Việc nạp DLC/xe trong gameplay chưa được xác minh. Các mục Drift, tốc độ, vô hạn đạn, No Recoil và trọng lực hiện là giao diện chưa kết nối engine; thông báo kích hoạt của chúng không chứng minh hiệu ứng trong game. Chưa có bộ nạp Lua/ASI hoặc trình vá RPF hoàn chỉnh.
+
 **Mugoat.ipa**: gói Apple ID Free, iOS 16.0+, cần ký bằng công cụ cài IPA phù hợp. **Mugoat-Cert-Paid.ipa** dùng quyền bộ nhớ mở rộng nếu chứng chỉ/provisioning profile cho phép.
