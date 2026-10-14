@@ -830,6 +830,12 @@ u64 w2c_game_f100(w2c_game*, u64); // operator new
 u32 w2c_game_f58715(w2c_game*); // player_commands::CommandPlayerPedId
 void w2c_game_f50028(w2c_game*, u64, u32, u32); // entity_commands::CommandGetEntityCoords
 f32 w2c_game_f50032(w2c_game*, u32); // entity_commands::CommandGetEntityHeading
+void w2c_game_f50133(w2c_game*, u32, u64, u32, u32, u32); // entity_commands::CommandSetEntityCoordsNoOffset
+void w2c_game_f50136(w2c_game*, u32, u32, u32); // entity_commands::CommandSetEntityHealth
+u32 w2c_game_f57128(w2c_game*, u32, u32); // ped_commands::CommandIsPedDeadOrDying
+void w2c_game_f57485(w2c_game*, u32); // ped_commands::CommandReviveInjuredPed
+void w2c_game_f57486(w2c_game*, u32); // ped_commands::CommandResurrectPed
+void w2c_game_f60722(w2c_game*, u32); // task_commands::CommandClearPedTasksImmediately
 void w2c_game_f60322(w2c_game*, u32); // streaming_commands::CommandRequestModel
 u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
 u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
@@ -950,10 +956,88 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   pthread_mutex_unlock(&pg_spawn_lock);
 }
 
+typedef struct { float x, y, z; const char *name; } PGHospital;
+static const PGHospital pg_hospitals[] = {
+  { 340.5f, -1396.8f, 32.5f, "Pillbox Hill Medical Center" },
+  { -449.6f, -340.8f, 34.5f, "Mount Zonah Medical Center" },
+  { 356.8f, -597.1f, 28.8f, "Central Los Santos Medical Center" },
+  { 1839.2f, 3672.9f, 34.3f, "Sandy Shores Medical Center" },
+  { -247.0f, 6331.0f, 32.4f, "Paleto Bay Care Center" }
+};
+
+static int pg_death_frames = 0;
+static void pg_process_player_respawn(w2c_game *instance) {
+  if (!atomic_load(&inputBlock)) return;
+  uint32_t ped = w2c_game_f58715(instance);
+  if (!ped) { pg_death_frames = 0; return; }
+
+  uint32_t isDead = w2c_game_f57128(instance, ped, 1);
+  if (isDead) {
+    pg_death_frames++;
+    if (pg_death_frames < 180) return; // ~3.0s delay at 60fps for wasted screen
+
+    uint64_t previous = pg_test_enter_script(instance);
+
+    // Get death location to find nearest hospital
+    uint64_t coordsVector = w2c_game_f100(instance, 32);
+    w2c_game_f50028(instance, coordsVector, ped, 1);
+    float *coords = pg_pointer(&env, coordsVector, 24);
+    float px = coords[0], py = coords[2], pz = coords[4];
+
+    int bestIndex = 0;
+    float bestDistSq = 1e30f;
+    for (int i = 0; i < (int)(sizeof(pg_hospitals) / sizeof(pg_hospitals[0])); i++) {
+      float dx = px - pg_hospitals[i].x;
+      float dy = py - pg_hospitals[i].y;
+      float dsq = dx * dx + dy * dy;
+      if (dsq < bestDistSq) {
+        bestDistSq = dsq;
+        bestIndex = i;
+      }
+    }
+
+    // Revive & resurrect player ped
+    w2c_game_f57486(instance, ped); // ped_commands::CommandResurrectPed
+    w2c_game_f57485(instance, ped); // ped_commands::CommandReviveInjuredPed
+    w2c_game_f50136(instance, ped, 200, 0); // entity_commands::CommandSetEntityHealth(ped, 200, 0)
+    w2c_game_f60722(instance, ped); // task_commands::CommandClearPedTasksImmediately
+
+    // Teleport to nearest hospital
+    uint64_t hospVector = w2c_game_f100(instance, 32);
+    float *hv = pg_pointer(&env, hospVector, 24);
+    hv[0] = pg_hospitals[bestIndex].x;
+    hv[1] = 0;
+    hv[2] = pg_hospitals[bestIndex].y;
+    hv[3] = 0;
+    hv[4] = pg_hospitals[bestIndex].z;
+    hv[5] = 0;
+    w2c_game_f50133(instance, ped, hospVector, 0, 0, 0);
+
+    // Reset control disable flags if stuck in playerInfo
+    const uint8_t *m = (const uint8_t *)(void *)env.memory.data;
+    uint64_t size = env.memory.size;
+    uint64_t info, playerPed, playerInfo;
+    if (pg_context_u64(m, size, 20159720, &info) && info &&
+        pg_context_u64(m, size, info + 8, &playerPed) && playerPed &&
+        pg_context_u64(m, size, playerPed + 4328, &playerInfo) && playerInfo && playerInfo + 940 <= size) {
+      *(uint32_t *)pg_pointer(&env, playerInfo + 936, 4) = 0;
+    }
+
+    pg_test_leave_script(instance, previous);
+
+    char msg[128];
+    snprintf(msg, sizeof msg, "Player respawned at %s (%.1f, %.1f, %.1f)",
+             pg_hospitals[bestIndex].name, pg_hospitals[bestIndex].x, pg_hospitals[bestIndex].y, pg_hospitals[bestIndex].z);
+    pg_log(msg);
+    pg_death_frames = 0;
+  } else {
+    pg_death_frames = 0;
+  }
+}
+
 #if TARGET_OS_SIMULATOR
 u32 w2c_game_f81498(w2c_game*, u64, u64); // CMovieMgr::PreloadMovie
 void w2c_game_f81499(w2c_game*, u32); // CMovieMgr::Play
-void w2c_game_f50133(w2c_game*, u32, u64, u32, u32, u32); // entity_commands::CommandSetEntityCoordsNoOffset
 // Test (PG_TEST_TELEPORT="x,y,z"): about 30 s in, moves the player there (a script vector is 3
 // floats 8 bytes apart).
 static void pg_test_teleport(w2c_game *instance) {
@@ -1064,6 +1148,7 @@ void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
   if (pad == 12840656) {
     pg_apply_targeting_mode(instance);
     pg_process_vehicle_spawn(instance);
+    pg_process_player_respawn(instance);
   }
 #if TARGET_OS_SIMULATOR
   if (pad == 12840656) { pg_test_teleport(instance); pg_test_tv(instance); pg_test_video(instance); pg_test_car(instance); pg_test_loadscene(instance); pg_test_loadscene_monitor(instance); }

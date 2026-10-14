@@ -10,16 +10,16 @@ enum GraphicsPreset: Int, CaseIterable {
 
     var title: String { [L10n.text("Tiết kiệm pin"), L10n.text("Ưu tiên mượt"), L10n.text("Cân bằng"), L10n.text("Rõ nét"), L10n.text("Cao"), L10n.text("Tối đa")][rawValue] }
     /// Render height in pixels; width follows the screen's shape.
-    var height: Int { [432, 540, 720, 900, 1080, 1290][rawValue] }
+    var height: Int { [432, 540, 720, 900, 1080, 1080][rawValue] }
     var detail: String {
         [L10n.text("432p · ít tốn RAM và pin"), L10n.text("540p · giảm hiệu ứng nặng"), L10n.text("720p · cân bằng hình ảnh và tốc độ"),
          L10n.text("900p · tăng chi tiết và khoảng nhìn"), L10n.text("1080p · bóng và phản chiếu cao"),
-         L10n.text("1290p · nhiều chi tiết, cần nhiều RAM hơn")][rawValue]
+         L10n.text("1080p · chi tiết đồ họa tối đa")][rawValue]
     }
 
     /// Engine command-line options. Shader quality never goes below 1 (the
-    /// low shader set is mostly missing), and tessellation, MSAA and depth of
-    /// field stay off because their shaders do not run on Metal here.
+    /// low shader set is mostly missing), and must not exceed 1 (Quality 2 shaders
+    /// are not compiled for Metal). Tessellation, MSAA and depth of field stay off.
     var engineOptions: [String] {
         switch self {
         case .battery, .performance:
@@ -32,11 +32,11 @@ enum GraphicsPreset: Int, CaseIterable {
             return ["-shaderQuality=1", "-textureQuality=1", "-shadowQuality=0", "-reflectionQuality=1", "-particleQuality=1",
                     "-grassQuality=1", "-cityDensity=0.4", "-lodScale=0.4", "-pedLodBias=0.2", "-vehicleLodBias=0.2", "-pedVariety=0.4", "-vehicleVariety=0.4"]
         case .ultra:
-            return ["-shaderQuality=2", "-textureQuality=1", "-shadowQuality=1", "-reflectionQuality=2", "-particleQuality=1",
+            return ["-shaderQuality=1", "-textureQuality=1", "-shadowQuality=1", "-reflectionQuality=1", "-particleQuality=1",
                     "-grassQuality=1", "-cityDensity=0.6", "-lodScale=0.6", "-pedLodBias=0.4", "-vehicleLodBias=0.4", "-pedVariety=0.6", "-vehicleVariety=0.6"]
         case .max:
-            return ["-shaderQuality=2", "-textureQuality=2", "-shadowQuality=2", "-reflectionQuality=2", "-particleQuality=2",
-                    "-grassQuality=2", "-cityDensity=1", "-lodScale=1", "-pedLodBias=0.6", "-vehicleLodBias=0.6", "-pedVariety=0.8", "-vehicleVariety=0.8"]
+            return ["-shaderQuality=1", "-textureQuality=1", "-shadowQuality=1", "-reflectionQuality=2", "-particleQuality=1",
+                    "-grassQuality=1", "-cityDensity=0.8", "-lodScale=0.8", "-pedLodBias=0.5", "-vehicleLodBias=0.5", "-pedVariety=0.8", "-vehicleVariety=0.8"]
         }
     }
 }
@@ -90,22 +90,34 @@ struct DeviceTier {
 }
 
 enum GraphicsConfiguration {
-    /// The screen's height in pixels (the "Native" resolution).
+    /// The screen's height in pixels, clamped to safe 1080p maximum on iOS.
     static var nativeHeight: Int {
         let screen = UIScreen.main
-        return Int(min(screen.nativeBounds.width, screen.nativeBounds.height))
+        let raw = Int(min(screen.nativeBounds.width, screen.nativeBounds.height))
+        return min(raw > 0 ? raw : 720, 1080)
     }
     /// Resolutions offered in Settings, besides "Auto" (the detail preset's own).
-    static var resolutionChoices: [Int] { [540, 720, 900, 1080].filter { $0 < nativeHeight } + [nativeHeight] }
+    static var resolutionChoices: [Int] {
+        let standard = [540, 720, 900, 1080]
+        var list = standard.filter { $0 <= nativeHeight }
+        if !list.contains(nativeHeight) && nativeHeight >= 540 {
+            list.append(nativeHeight)
+            list.sort()
+        }
+        return list.isEmpty ? [720] : list
+    }
     /// Width/height to render at: the chosen height (or the preset's), shaped like the screen so the
-    /// picture is not stretched.
+    /// picture is not stretched, clamped to 2560x1080 safe ceiling (matching Muguet parity).
     static func size(for preset: GraphicsPreset, renderHeight: Int, screen: CGSize, matchScreenShape: Bool) -> (Int, Int) {
         let aspect = matchScreenShape && screen.height > 0 ? max(screen.width, screen.height) / min(screen.width, screen.height) : 16.0 / 9.0
-        var height = Double(renderHeight > 0 ? renderHeight : preset.height)
-        height = min(max(height, 360), Double(max(nativeHeight, 720)))
-        let width = min(height * aspect, 3840)
+        var height = Double(renderHeight > 0 ? min(renderHeight, 1080) : preset.height)
+        height = min(max(height, 360), Double(nativeHeight))
+        var width = height * aspect
+        let k = min(2560.0 / max(width, 1.0), min(1080.0 / max(height, 1.0), 1.0))
+        width *= k
+        height *= k
         func even(_ value: Double) -> Int { Int(value.rounded()) & ~1 }
-        return (even(width), even(height))
+        return (max(even(width), 320), max(even(height), 240))
     }
 
     /// Pass the chosen settings to the engine. Call before PGStartEngine.

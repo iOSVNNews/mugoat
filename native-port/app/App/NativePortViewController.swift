@@ -412,12 +412,70 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         startAudio()
         let (root, rootNote) = EnginePaths.filesRoot()
         if let rootNote { appendLog(rootNote) }
-        // The game's own settings.xml only holds graphics and display options, which the app sets on
-        // every launch. Some choices in the game's pause menu (MSAA, DirectX version, resolution)
-        // stopped it from starting at all, so the file is reset before each launch.
+        // The game's own settings.xml only holds graphics and display options. Some choices in the
+        // game's pause menu or auto-detection (MSAA, TXAA, tessellation, shader quality 2) crash Metal
+        // or trigger out-of-memory. Overwrite with a sanitized safe baseline before each launch.
+        let safeSettingsXml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Settings>
+          <version value="27" />
+          <configSource>SMC_AUTO</configSource>
+          <graphics>
+            <TextureQuality value="0" />
+            <ShaderQuality value="1" />
+            <ShadowQuality value="1" />
+            <ReflectionQuality value="1" />
+            <ReflectionMSAA value="0" />
+            <SSAO value="0" />
+            <AnisotropicFiltering value="0" />
+            <MSAA value="0" />
+            <MSAAFragments value="0" />
+            <MSAAPostProcess value="0" />
+            <WaterQuality value="0" />
+            <ParticleQuality value="0" />
+            <GrassQuality value="0" />
+            <DeepSurfaceQuality value="0" />
+            <PedLodBias value="0.200000" />
+            <VehicleLodBias value="0.000000" />
+            <Shadow_Distance value="1.000000" />
+            <Shadow_SoftShadows value="0" />
+            <Shadow_ParticleShadows value="false" />
+            <Shadow_SplitZStart value="0.930000" />
+            <Shadow_SplitZEnd value="0.890000" />
+            <Shadow_aircraftExpBloom value="0.300000" />
+            <Shadow_DisableScreenSizeCheck value="false" />
+            <Reflection_MipBlur value="true" />
+            <FXAA value="true" />
+            <TXAA value="false" />
+            <Lighting_FogVolumes value="false" />
+            <Shader_SSA value="false" />
+            <DX_Version value="2" />
+            <CityDensity value="0.000000" />
+            <PedVarietyMultiplier value="0.000000" />
+            <VehicleVarietyMultiplier value="0.000000" />
+            <PostFX value="0" />
+            <DoF value="false" />
+            <HdStreamingInFlight value="false" />
+            <MaxLodScale value="0.000000" />
+            <MotionBlurStrength value="0.000000" />
+          </graphics>
+          <system>
+            <Windowed value="2" />
+          </system>
+          <video>
+            <Windowed value="2" />
+            <VSync value="1" />
+          </video>
+        </Settings>
+        """
         for mode in ["userdata", "sandbox"] {
-            let settings = "\(root)/\(mode)/Documents/Rockstar Games/GTA V/settings.xml"
-            if (try? FileManager.default.removeItem(atPath: settings)) != nil { appendLog("Reset the game's own graphics settings (\(mode)); use the app's Settings for graphics.") }
+            let dir = "\(root)/\(mode)/Documents/Rockstar Games/GTA V"
+            let settingsPath = "\(dir)/settings.xml"
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            if let data = safeSettingsXml.data(using: .utf8) {
+                try? data.write(to: URL(fileURLWithPath: settingsPath))
+                appendLog("Sanitized GTA V graphics settings to safe baseline (\(mode)).")
+            }
         }
         var effectiveManifest = path
         if let data = localData {
