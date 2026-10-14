@@ -2,14 +2,22 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Dedicated Mod Manager screen: manage installed mods, import mod archives/files (.zip, .rpf, .meta, .asi),
-/// toggle in-game engine tweaks (speed boost, drift handling, infinite ammo, no recoil, gravity, visual filters),
-/// and provide step-by-step modding guides.
+/// and spawn installed add-on/DLC vehicles and iconic GTA V vehicles directly into the game.
 final class ModManagerViewController: UITableViewController, UIDocumentPickerDelegate {
     private let engineRunning: Bool
     private let fileManager = FileManager.default
     private var modFiles: [ModFile] = []
+    private var dlcCatalog: ModRuntime.Catalog = ModRuntime.Catalog()
 
     typealias ModFile = ModFiles.Entry
+
+    private let defaultVehicles: [(name: String, model: String, icon: String)] = [
+        ("Karin Sultan (4 cửa)", "sultan", "car.fill"),
+        ("Trực thăng Buzzard Attack", "buzzard", "airplane"),
+        ("Mô tô bay Oppressor Mk II", "oppressor2", "bolt.car.fill"),
+        ("Siêu xe Truffade Adder", "adder", "car.side.fill"),
+        ("Mô tô Pegassi Bati 801", "bati", "bicycle")
+    ]
 
     /// The dedicated mods directory: Files › On My iPhone › Mugoat › mods
     static var modsDirectory: URL {
@@ -44,20 +52,20 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
 
     private func scanMods() {
         modFiles = ModFiles.scan(Self.modsDirectory)
+        dlcCatalog = ModRuntime.catalog(Self.modsDirectory)
         tableView.reloadData()
         refreshControl?.endRefreshing()
     }
 
     // MARK: - Table view data source
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 4 }
+    override func numberOfSections(in tableView: UITableView) -> Int { 3 }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch section {
         case 0: return 3 // Quản lý & Cài đặt
         case 1: return max(1, modFiles.count) // Tệp mod đã cài
-        case 2: return 5 // Game Tweaks / Modding Hacks
-        case 3: return 3 // Hướng dẫn tự tạo mod
+        case 2: return 1 + dlcCatalog.models.count + defaultVehicles.count // Gọi xe (Custom + Add-ons + Mặc định)
         default: return 0
         }
     }
@@ -66,8 +74,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         switch section {
         case 0: return L10n.text("Cài đặt & Tệp Mod")
         case 1: return L10n.text("Danh sách Mod đã cài") + " · \(modFiles.count)"
-        case 2: return L10n.text("Tinh chỉnh & Can thiệp Game (Tweaks)")
-        case 3: return L10n.text("Hướng dẫn tự làm Mod cho iOS")
+        case 2: return L10n.text("Gọi phương tiện & Xe Mod (DLC Spawner)")
         default: return nil
         }
     }
@@ -77,9 +84,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         case 0:
             return L10n.text("Chép tệp mod (.rpf, .meta, .yft, .ytd) vào Tệp › Trên iPhone › Mugoat › mods. Với tệp nén, bấm Nhập Mod để giải nén. Tệp hướng dẫn .txt không được tính là mod.")
         case 2:
-            return L10n.text("Các tinh chỉnh can thiệp trực tiếp vào cơ chế vật lý của game (handling xe, trọng lực, vũ khí) mà không làm crash game.")
-        case 3:
-            return L10n.text("Mod GTA V trên iOS ưu tiên mod xe Low/Mid poly để tránh tràn RAM (OOM). Luôn sao lưu file gốc trước khi chép đè.")
+            return L10n.text("Bấm vào phương tiện để triệu hồi ngay trước mặt nhân vật. Có thể nhập tên model bất kỳ từ bản mod hoặc GTA V gốc.")
         default: return nil
         }
     }
@@ -129,32 +134,30 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
             }
 
         case 2:
-            let tweaks = [
-                (L10n.text("Độ bám đường & Drift (Handling Mod)"), L10n.text("Tùy biến độ bám bánh xe: Mặc định, Siêu bám hoặc Drift"), "car.fill"),
-                (L10n.text("Tăng tốc độ xe cộ (Speed Multiplier)"), L10n.text("Nhân đôi tốc độ tối đa của mọi phương tiện"), "bolt.car.fill"),
-                (L10n.text("Vô hạn đạn & Không cần nạp đạn"), L10n.text("Bắn liên tục không bao giờ hết đạn"), "flame.fill"),
-                (L10n.text("Không giật khi bắn (No Recoil)"), L10n.text("Tâm súng đứng yên 100% khi sấy liên thanh"), "scope"),
-                (L10n.text("Trọng lực tùy chỉnh (Gravity Mod)"), L10n.text("Chuyển đổi giữa trọng lực Trái đất và Mặt trăng"), "globe.americas.fill")
-            ]
-            let item = tweaks[indexPath.row]
-            cell.textLabel?.text = item.0
-            cell.detailTextLabel?.text = item.1
-            cell.imageView?.image = UIImage(systemName: item.2)
-            cell.imageView?.tintColor = Theme.accent
-            cell.accessoryType = .disclosureIndicator
-
-        case 3:
-            let guides = [
-                (L10n.text("Cách mod xe cộ & đồ họa bằng OpenIV (PC)"), L10n.text("Mở file .rpf trên PC, thay model .yft/.ytd rồi chép vào iPhone"), "laptopcomputer"),
-                (L10n.text("Cách chỉnh tốc độ xe trong handling.meta"), L10n.text("Sửa thông số gia tốc và tốc độ tối đa của từng loại xe"), "slider.horizontal.3"),
-                (L10n.text("Kinh nghiệm chống văng game khi cài Mod"), L10n.text("Ưu tiên mod Low/Mid poly dưới 20MB để không bị lỗi tràn RAM"), "shield.lefthalf.filled")
-            ]
-            let guide = guides[indexPath.row]
-            cell.textLabel?.text = guide.0
-            cell.detailTextLabel?.text = guide.1
-            cell.imageView?.image = UIImage(systemName: guide.2)
-            cell.imageView?.tintColor = .systemCyan
-            cell.accessoryType = .disclosureIndicator
+            if indexPath.row == 0 {
+                cell.textLabel?.text = L10n.text("Gọi xe theo tên Model (Custom Spawn…)")
+                cell.detailTextLabel?.text = L10n.text("Nhập tên model bất kỳ (ví dụ: mbs1k, sultan, buzzard…)")
+                cell.imageView?.image = UIImage(systemName: "magnifyingglass.circle.fill")
+                cell.imageView?.tintColor = Theme.accent
+                cell.accessoryType = .disclosureIndicator
+            } else if indexPath.row <= dlcCatalog.models.count {
+                let model = dlcCatalog.models[indexPath.row - 1]
+                cell.textLabel?.text = "Xe Mod: \(model.uppercased())"
+                cell.detailTextLabel?.text = L10n.text("Phương tiện từ gói DLC Add-on đã cài. Bấm để triệu hồi ngay.")
+                cell.imageView?.image = UIImage(systemName: "star.fill")
+                cell.imageView?.tintColor = .systemYellow
+                cell.accessoryType = .disclosureIndicator
+            } else {
+                let index = indexPath.row - 1 - dlcCatalog.models.count
+                if index < defaultVehicles.count {
+                    let v = defaultVehicles[index]
+                    cell.textLabel?.text = v.name
+                    cell.detailTextLabel?.text = "Model: \(v.model) · " + L10n.text("Bấm để triệu hồi")
+                    cell.imageView?.image = UIImage(systemName: v.icon)
+                    cell.imageView?.tintColor = Theme.accent
+                    cell.accessoryType = .disclosureIndicator
+                }
+            }
 
         default: break
         }
@@ -176,10 +179,17 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
             toggleMod(at: indexPath.row)
 
         case 2:
-            handleTweakAction(indexPath.row)
-
-        case 3:
-            showGuideAlert(indexPath.row)
+            if indexPath.row == 0 {
+                promptCustomVehicleSpawn()
+            } else if indexPath.row <= dlcCatalog.models.count {
+                let model = dlcCatalog.models[indexPath.row - 1]
+                spawnVehicle(named: model)
+            } else {
+                let index = indexPath.row - 1 - dlcCatalog.models.count
+                if index < defaultVehicles.count {
+                    spawnVehicle(named: defaultVehicles[index].model)
+                }
+            }
 
         default: break
         }
@@ -283,61 +293,40 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         present(alert, animated: true)
     }
 
-    // MARK: - Tweaks
+    // MARK: - Vehicle Spawner
 
-    private func handleTweakAction(_ row: Int) {
-        switch row {
-        case 0:
-            let alert = UIAlertController(title: L10n.text("Độ bám đường & Drift"), message: L10n.text("Chọn phong cách lái xe:"), preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: L10n.text("Mặc định (Nguyên bản GTA V)"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Siêu bám đường (Grip Max)"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Chế độ Drift trơn trượt"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
-            present(alert, animated: true)
-        case 1:
-            let alert = UIAlertController(title: L10n.text("Tăng tốc độ xe cộ"), message: L10n.text("Chọn hệ số nhân tốc độ:"), preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: "1.0x (Mặc định)", style: .default))
-            alert.addAction(UIAlertAction(title: "1.5x (Nhanh)", style: .default))
-            alert.addAction(UIAlertAction(title: "2.0x (Siêu tốc)", style: .default))
-            alert.addAction(UIAlertAction(title: "Nitro Boost (Tối đa)", style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
-            present(alert, animated: true)
-        case 2:
-            showAlert(L10n.text("Vô hạn đạn"), L10n.text("Đã kích hoạt chế độ bắn không giới hạn đạn và không cần nạp đạn."))
-        case 3:
-            showAlert(L10n.text("Không giật (No Recoil)"), L10n.text("Đã khóa độ giật súng về 0. Tâm ngắm sẽ cố định khi sấy đạn."))
-        case 4:
-            let alert = UIAlertController(title: L10n.text("Trọng lực thế giới"), message: L10n.text("Chọn mức trọng lực mong muốn:"), preferredStyle: .actionSheet)
-            alert.addAction(UIAlertAction(title: L10n.text("Trái đất (1.0G - Mặc định)"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Mặt trăng (0.2G - Bay lơ lửng)"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Siêu trọng lực (2.0G)"), style: .default))
-            alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
-            present(alert, animated: true)
-        default: break
+    private func spawnVehicle(named model: String) {
+        guard engineRunning else {
+            showAlert(L10n.text("Chưa vào game"), L10n.text("Vui lòng khởi động và vào game trước khi gọi phương tiện."))
+            return
+        }
+        let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanModel.isEmpty else { return }
+        let started = cleanModel.withCString { PGSpawnVehicle($0) }
+        if started {
+            showAlert(L10n.text("Đã gọi xe"), String(format: L10n.text("Đang nạp model '%@'. Xe sẽ xuất hiện ngay trước mặt nhân vật!"), cleanModel))
+        } else {
+            showAlert(L10n.text("Hệ thống bận"), L10n.text("Đang trong quá trình triệu hồi phương tiện khác. Vui lòng thử lại sau giây lát."))
         }
     }
 
-    // MARK: - Guides
-
-    private func showGuideAlert(_ row: Int) {
-        switch row {
-        case 0:
-            showAlert(
-                L10n.text("Mod xe & Đồ họa (OpenIV)"),
-                L10n.text("1. Mở OpenIV trên máy tính trỏ vào dữ liệu game GTA V.\n2. Bật Edit Mode.\n3. Kéo thả file mod xe (.yft/.ytd) vào x64e.rpf hoặc dlcpacks.\n4. Copy file .rpf đã sửa vào thư mục Mugoat trên iPhone bằng 3uTools hoặc app Tệp.")
-            )
-        case 1:
-            showAlert(
-                L10n.text("Chỉnh thông số handling.meta"),
-                L10n.text("1. Mở file update/update.rpf/common/data/handling.meta trong OpenIV.\n2. Tìm tên xe muốn sửa, chỉnh fInitialDriveMaxFlatVel để tăng tốc độ tối đa.\n3. Lưu file và chép đè vào iPhone.")
-            )
-        case 2:
-            showAlert(
-                L10n.text("Chống tràn RAM (OOM Jetsam)"),
-                L10n.text("iOS quản lý bộ nhớ rất khắt khe. Khi chọn mod xe hoặc mod cảnh vật:\n- Chỉ dùng mod có texture dung lượng dưới 20MB.\n- Tránh mod xe 4K/8K polygon quá cao.\n- Nếu vào game bị văng, xóa tệp mod đó khỏi thư mục mods.")
-            )
-        default: break
+    private func promptCustomVehicleSpawn() {
+        let alert = UIAlertController(
+            title: L10n.text("Gọi xe theo tên Model"),
+            message: L10n.text("Nhập tên model xe từ bản mod (ví dụ: mbs1k) hoặc GTA V gốc (ví dụ: sultan, adder, buzzard):"),
+            preferredStyle: .alert
+        )
+        alert.addTextField { tf in
+            tf.placeholder = "mbs1k, sultan, buzzard..."
+            tf.autocapitalizationType = .none
+            tf.autocorrectionType = .no
         }
+        alert.addAction(UIAlertAction(title: L10n.text("Gọi xe ngay"), style: .default) { [weak self, weak alert] _ in
+            guard let text = alert?.textFields?.first?.text else { return }
+            self?.spawnVehicle(named: text)
+        })
+        alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
+        present(alert, animated: true)
     }
 
     private func showAlert(_ title: String, _ message: String) {

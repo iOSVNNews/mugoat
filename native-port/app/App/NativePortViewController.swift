@@ -419,70 +419,40 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             let settings = "\(root)/\(mode)/Documents/Rockstar Games/GTA V/settings.xml"
             if (try? FileManager.default.removeItem(atPath: settings)) != nil { appendLog("Reset the game's own graphics settings (\(mode)); use the app's Settings for graphics.") }
         }
+        var effectiveManifest = path
         if let data = localData {
             PGSetLocalGameFolder(data.path)
-            syncMods(to: data)
-        } else {
-            PGSetAssetServer(GameSettings.shared.assetServer)
-        }
-        AssetPreloader.shared.engineRunning = true
-        path.withCString { manifest in
-            root.withCString { PGStartEngine(manifest, $0, engineLog, Unmanaged.passUnretained(self).toOpaque()) }
-        }
-    }
-
-    private func syncMods(to data: URL) {
-        let modsDir = ModManagerViewController.modsDirectory
-        let fm = FileManager.default
-        var foundDLCs: [String: URL] = [:]
-        for mod in ModFiles.scan(modsDir) where mod.isEnabled {
-            let fileURL = mod.url
-            guard fileURL.lastPathComponent.lowercased() == "dlc.rpf" else { continue }
-            let packName = fileURL.deletingLastPathComponent().lastPathComponent.lowercased()
-            if !packName.isEmpty && packName != "mods" {
-                foundDLCs[packName] = fileURL
-            }
-        }
-
-        guard !foundDLCs.isEmpty else { return }
-
-        let dlcDestDirs = [
-            data.appendingPathComponent("update/x64/dlcpacks"),
-            data.appendingPathComponent("dlcpacks")
-        ]
-
-        for (packName, dlcURL) in foundDLCs {
-            for destBase in dlcDestDirs {
-                if fm.fileExists(atPath: destBase.path) {
-                    let targetPack = destBase.appendingPathComponent(packName)
-                    let targetDLC = targetPack.appendingPathComponent("dlc.rpf")
-                    if !fm.fileExists(atPath: targetPack.path) {
-                        try? fm.createDirectory(at: targetPack, withIntermediateDirectories: true)
-                    }
-                    if !fm.fileExists(atPath: targetDLC.path) {
-                        try? fm.copyItem(at: dlcURL, to: targetDLC)
-                        appendLog("Mod: Mounted DLC pack '\(packName)' into \(destBase.lastPathComponent)")
-                    }
-                }
-            }
-
-            let dlcListPaths = [
+            let modsDir = ModManagerViewController.modsDirectory
+            let runtimeDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mod_runtime")
+            let dlcListCandidates = [
                 data.appendingPathComponent("common/data/dlcList.xml"),
                 data.appendingPathComponent("common/data/dlclist.xml"),
                 data.appendingPathComponent("update/update.rpf/common/data/dlclist.xml")
             ]
-
-            for dlcListURL in dlcListPaths {
-                guard fm.fileExists(atPath: dlcListURL.path),
-                      var xml = try? String(contentsOf: dlcListURL, encoding: .utf8) else { continue }
-                if !xml.contains("dlcpacks:/\(packName)/") {
-                    if let range = xml.range(of: "</Paths>") {
-                        xml.insert(contentsOf: "\t<Item>dlcpacks:/\(packName)/</Item>\n", at: range.lowerBound)
-                        try? xml.write(to: dlcListURL, atomically: true, encoding: .utf8)
-                        appendLog("Mod: Auto-registered '\(packName)' into \(dlcListURL.lastPathComponent)")
+            if let dlcURL = dlcListCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+               let dlcData = try? Data(contentsOf: dlcURL) {
+                do {
+                    let baseManifestURL = URL(fileURLWithPath: path)
+                    let (overlayManifestURL, catalog) = try ModRuntime.prepare(
+                        baseManifest: baseManifestURL,
+                        mods: modsDir,
+                        runtime: runtimeDir,
+                        dlcList: dlcData
+                    )
+                    effectiveManifest = overlayManifestURL.path
+                    if !catalog.packs.isEmpty {
+                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.models.count) model xe).")
                     }
+                } catch {
+                    appendLog("ModRuntime: \(error.localizedDescription)")
                 }
             }
+        } else {
+            PGSetAssetServer(GameSettings.shared.assetServer)
+        }
+        AssetPreloader.shared.engineRunning = true
+        effectiveManifest.withCString { manifest in
+            root.withCString { PGStartEngine(manifest, $0, engineLog, Unmanaged.passUnretained(self).toOpaque()) }
         }
     }
 

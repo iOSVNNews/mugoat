@@ -64,7 +64,7 @@ final class CheatManager {
     static var isApplying: Bool { PGIsCheatInProgress() }
 
     /// Applies a cheat code via Gamepad combo, Console typing, or Auto selection.
-    static func apply(code: String, mode: CheatInputMode = .auto, completion: ((Bool) -> Void)? = nil) {
+    static func apply(code: String, mode: CheatInputMode = .console, completion: ((Bool) -> Void)? = nil) {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
             completion?(false)
@@ -73,9 +73,7 @@ final class CheatManager {
 
         trimmed.withCString { cStr in
             switch mode {
-            case .auto:
-                PGApplyCheat(cStr)
-            case .console:
+            case .auto, .console:
                 PGApplyCheatConsole(cStr)
             case .gamepad:
                 PGApplyCheatGamepad(cStr)
@@ -93,7 +91,7 @@ struct CheatMenuView: View {
     var engineRunning: Bool = true
     @State private var customCode = ""
     @State private var searchText = ""
-    @State private var inputMode: CheatInputMode = .auto
+    @State private var inputMode: CheatInputMode = .console
     @State private var toastMessage: String?
     let onApply: (String, CheatInputMode) -> Void
 

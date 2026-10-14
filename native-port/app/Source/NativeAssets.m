@@ -39,6 +39,7 @@ bool PGUsingLocalGameFolder(void){return localDataRoot!=nil;}
 
 static NSArray *assetFiles;
 static NSString *assetVersion;
+static NSDictionary<NSString *, NSString *> *assetOverrides;
 static NSArray<PGAssetCondition *> *assetLocks;
 static NSString *cacheRoot;
 static NSURLSession *assetSession;
@@ -84,6 +85,7 @@ void pg_assets_configure(const char *manifest,const char *root) {
     NSDictionary *parsed=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     assetFiles=parsed[@"files"];
     assetVersion=parsed[@"version"];
+    assetOverrides=parsed[@"_mugoatOverrides"];
     NSMutableArray *locks=[NSMutableArray arrayWithCapacity:assetFiles.count];
     for(NSUInteger i=0;i<assetFiles.count;i++)[locks addObject:[PGAssetCondition new]];
     assetLocks=locks;
@@ -263,7 +265,8 @@ static int64_t readLocalAsset(uint32_t id,uint64_t offset,uint8_t *destination,u
   NSArray *entry=assetFiles[id];uint64_t size=[entry[1] unsignedLongLongValue];
   if(!length||offset>=size)return 0;
   length=(uint32_t)MIN((uint64_t)length,size-offset);
-  NSString *file=[localDataRoot stringByAppendingPathComponent:entry[0]];
+  NSString *overridePath=assetOverrides[entry[0]];
+  NSString *file=overridePath?:[localDataRoot stringByAppendingPathComponent:entry[0]];
   int descriptor=open(file.fileSystemRepresentation,O_RDONLY);
   if(descriptor<0){NSString *message=[@"Game file missing from your folder: " stringByAppendingString:entry[0]];pg_log(message.UTF8String);return -1;}
   uint64_t done=0;
@@ -273,6 +276,18 @@ static int64_t readLocalAsset(uint32_t id,uint64_t offset,uint8_t *destination,u
 }
 static int64_t readAssetImpl(uint32_t id,uint64_t offset,uint8_t *destination,uint32_t length) {
   if(id>=assetFiles.count)return -1;
+  NSString *overridePath=assetOverrides[assetFiles[id][0]];
+  if(overridePath){
+    uint64_t size=[assetFiles[id][1] unsignedLongLongValue];
+    if(!length||offset>=size)return 0;
+    length=(uint32_t)MIN((uint64_t)length,size-offset);
+    int descriptor=open(overridePath.fileSystemRepresentation,O_RDONLY);
+    if(descriptor<0){NSString *message=[@"Mod file missing: " stringByAppendingString:overridePath];pg_log(message.UTF8String);return -1;}
+    uint64_t done=0;
+    while(done<length){ssize_t n=pread(descriptor,destination+done,length-done,(off_t)(offset+done));if(n<=0)break;done+=(uint64_t)n;}
+    close(descriptor);assetReadSource=4;
+    return (int64_t)done;
+  }
   if(localDataRoot)return readLocalAsset(id,offset,destination,length);
   if(assetTraceFD>=0&&length){char record[96];int n=snprintf(record,sizeof record,"%u,%llu,%u\n",id,offset,length);if(n>0&&n<sizeof record)write(assetTraceFD,record,(size_t)n);}
 #if TARGET_OS_SIMULATOR

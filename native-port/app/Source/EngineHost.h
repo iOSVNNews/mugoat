@@ -98,3 +98,5 @@ void PGFillAudio(float *left, float *right, uint32_t count);
 uint64_t PGMemoryBudgetQueries(void);
 uint64_t PGMemoryBudgetClamps(void);
 void PGAssetHealth(uint64_t out[6]);
+bool PGSpawnVehicle(const char *modelName);
+int PGSpawnVehicleStatus(void);

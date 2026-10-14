@@ -576,6 +576,7 @@ static void *pg_cheat_console_thread(void *arg) {
 
   atomic_store(&pg_cheat_in_progress, true);
   atomic_store(&virtualPadActive, false);
+  PGUpdateVirtualPad((PGPadState){0});
 
   // Clear keyboard keys array
   for (int i = 0; i < 256; i++) atomic_store(keys + i, 0);
@@ -634,6 +635,11 @@ static void *pg_cheat_console_thread(void *arg) {
   // Wait 400ms for GTA V to process the cheat
   usleep(400000);
 
+  // Restore input device to Gamepad (0) so controls resume cleanly
+  if (env.memory.data && env.memory.size >= 24627140) {
+    atomic_store_explicit((_Atomic int32_t *)((uint8_t *)(void *)env.memory.data + 24627136), 0, memory_order_seq_cst);
+  }
+  atomic_store(&virtualPadActive, true);
   atomic_store(&pg_cheat_in_progress, false);
 
   snprintf(logMsg, sizeof(logMsg), "Cheat Console: finished '%s'", task->code);
@@ -722,11 +728,7 @@ void PGApplyCheatGamepad(const char *code) {
 
 void PGApplyCheat(const char *code) {
   if (!code || !*code) return;
-  if (pg_find_gamepad_cheat(code)) {
-    PGApplyCheatGamepad(code);
-  } else {
-    PGApplyCheatConsole(code);
-  }
+  PGApplyCheatConsole(code);
 }
 // Debug: copies [address, address+length) of engine memory (for finding state flags).
 bool PGDebugReadMemory(uint64_t address,void *out,uint64_t length){
@@ -823,11 +825,134 @@ static void pg_apply_targeting_mode(w2c_game *instance) {
   if (listeners) w2c_game_f36175(instance, listeners, 0, (u32)mode);
   char line[96]; snprintf(line, sizeof line, "Targeting mode set to %d.", mode); pg_log(line);
 }
-#if TARGET_OS_SIMULATOR
+
 u64 w2c_game_f100(w2c_game*, u64); // operator new
+u32 w2c_game_f58715(w2c_game*); // player_commands::CommandPlayerPedId
+void w2c_game_f50028(w2c_game*, u64, u32, u32); // entity_commands::CommandGetEntityCoords
+f32 w2c_game_f50032(w2c_game*, u32); // entity_commands::CommandGetEntityHeading
+void w2c_game_f60322(w2c_game*, u32); // streaming_commands::CommandRequestModel
+u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
+u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
+void w2c_game_f57201(w2c_game*, u32, u32, u32); // ped_commands::CommandSetPedIntoVehicle
+
+// Script commands that create entities need a running script: lends them the "main" script's
+// thread (the active thread is per engine thread, at g1 + 3088). Returns the previous one.
+static uint64_t pg_test_enter_script(w2c_game *instance) {
+  uint64_t *active = pg_pointer(&env, instance->w2c_g1 + 3088, 8), previous = *active;
+  uint64_t threads = *(uint64_t *)pg_pointer(&env, 15409704, 8);
+  uint16_t count = *(uint16_t *)pg_pointer(&env, 15409712, 2);
+  for (uint16_t i = 0; i < count; i++) {
+    uint64_t thread = *(uint64_t *)pg_pointer(&env, threads + 8ull * i, 8);
+    if (thread && !strcmp(pg_string(&env, thread + 428), "main")) { *active = thread; break; }
+  }
+  return previous;
+}
+static void pg_test_leave_script(w2c_game *instance, uint64_t previous) {
+  *(uint64_t *)pg_pointer(&env, instance->w2c_g1 + 3088, 8) = previous;
+}
+
+static inline uint32_t pg_joaat(const char *key) {
+  uint32_t hash = 0;
+  while (*key) {
+    char c = *key++;
+    if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
+    hash += (uint8_t)c;
+    hash += (hash << 10);
+    hash ^= (hash >> 6);
+  }
+  hash += (hash << 3);
+  hash ^= (hash >> 11);
+  hash += (hash << 15);
+  return hash;
+}
+
+static _Atomic int pg_spawn_status = 0; // 0 idle, 1 loading/spawning, 2 success, -1 error
+static char pg_spawn_model_name[64];
+static uint32_t pg_spawn_model_hash = 0;
+static int pg_spawn_frames = 0;
+static pthread_mutex_t pg_spawn_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool PGSpawnVehicle(const char *modelName) {
+  if (!modelName || !*modelName) return false;
+  pthread_mutex_lock(&pg_spawn_lock);
+  if (atomic_load(&pg_spawn_status) == 1) {
+    pthread_mutex_unlock(&pg_spawn_lock);
+    return false;
+  }
+  strncpy(pg_spawn_model_name, modelName, sizeof(pg_spawn_model_name) - 1);
+  pg_spawn_model_name[sizeof(pg_spawn_model_name) - 1] = '\0';
+  pg_spawn_model_hash = pg_joaat(pg_spawn_model_name);
+  pg_spawn_frames = 0;
+  atomic_store(&pg_spawn_status, 1);
+  pthread_mutex_unlock(&pg_spawn_lock);
+  char msg[128];
+  snprintf(msg, sizeof msg, "Spawn vehicle requested: %s (hash %u)", pg_spawn_model_name, pg_spawn_model_hash);
+  pg_log(msg);
+  return true;
+}
+
+int PGSpawnVehicleStatus(void) {
+  return atomic_load(&pg_spawn_status);
+}
+
+static void pg_process_vehicle_spawn(w2c_game *instance) {
+  if (atomic_load(&pg_spawn_status) != 1) return;
+  pthread_mutex_lock(&pg_spawn_lock);
+  uint32_t model = pg_spawn_model_hash;
+  pg_spawn_frames++;
+  uint64_t previous = pg_test_enter_script(instance);
+  w2c_game_f60322(instance, model);
+  if (!w2c_game_f60324(instance, model)) {
+    pg_test_leave_script(instance, previous);
+    if (pg_spawn_frames > 300) {
+      char msg[128];
+      snprintf(msg, sizeof msg, "Spawn vehicle timed out loading %s (%u)", pg_spawn_model_name, model);
+      pg_log(msg);
+      atomic_store(&pg_spawn_status, -1);
+    }
+    pthread_mutex_unlock(&pg_spawn_lock);
+    return;
+  }
+  uint32_t ped = w2c_game_f58715(instance);
+  if (!ped) {
+    pg_test_leave_script(instance, previous);
+    pg_log("Spawn vehicle: player ped not found");
+    atomic_store(&pg_spawn_status, -1);
+    pthread_mutex_unlock(&pg_spawn_lock);
+    return;
+  }
+  uint64_t coordsVector = w2c_game_f100(instance, 32);
+  w2c_game_f50028(instance, coordsVector, ped, 1);
+  float *coords = pg_pointer(&env, coordsVector, 24);
+  float px = coords[0], py = coords[2], pz = coords[4];
+  float heading = w2c_game_f50032(instance, ped);
+  float rad = heading * 0.0174532925f;
+  float vx = px - sinf(rad) * 3.5f;
+  float vy = py + cosf(rad) * 3.5f;
+  float vz = pz + 0.2f;
+  uint64_t vehVector = w2c_game_f100(instance, 32);
+  float *vv = pg_pointer(&env, vehVector, 24);
+  vv[0] = vx; vv[1] = 0; vv[2] = vy; vv[3] = 0; vv[4] = vz; vv[5] = 0;
+  uint32_t vehicle = w2c_game_f61266(instance, model, vehVector, heading, 0, 0, 1);
+  if (vehicle) {
+    w2c_game_f57201(instance, ped, vehicle, (uint32_t)-1);
+    char msg[128];
+    snprintf(msg, sizeof msg, "Spawned vehicle %s (%u) id %u at %.1f, %.1f, %.1f", pg_spawn_model_name, model, vehicle, vx, vy, vz);
+    pg_log(msg);
+    atomic_store(&pg_spawn_status, 2);
+  } else {
+    char msg[128];
+    snprintf(msg, sizeof msg, "Failed to spawn vehicle %s (%u)", pg_spawn_model_name, model);
+    pg_log(msg);
+    atomic_store(&pg_spawn_status, -1);
+  }
+  pg_test_leave_script(instance, previous);
+  pthread_mutex_unlock(&pg_spawn_lock);
+}
+
+#if TARGET_OS_SIMULATOR
 u32 w2c_game_f81498(w2c_game*, u64, u64); // CMovieMgr::PreloadMovie
 void w2c_game_f81499(w2c_game*, u32); // CMovieMgr::Play
-u32 w2c_game_f58715(w2c_game*); // player_commands::CommandPlayerPedId
 void w2c_game_f50133(w2c_game*, u32, u64, u32, u32, u32); // entity_commands::CommandSetEntityCoordsNoOffset
 // Test (PG_TEST_TELEPORT="x,y,z"): about 30 s in, moves the player there (a script vector is 3
 // floats 8 bytes apart).
@@ -865,25 +990,6 @@ static void pg_test_video(w2c_game *instance) {
   uint32_t handle = w2c_game_f81498(instance, 28366608, name);
   w2c_game_f81499(instance, handle);
   char line[120]; snprintf(line, sizeof line, "TEST: video handle %u, the engine was held up %.0f ms.", handle, timeMS(CLOCK_MONOTONIC) - start); pg_log(line);
-}
-void w2c_game_f60322(w2c_game*, u32); // streaming_commands::CommandRequestModel
-u32 w2c_game_f60324(w2c_game*, u32); // streaming_commands::HasModelLoaded
-u32 w2c_game_f61266(w2c_game*, u32, u64, f32, u32, u32, u32); // vehicle_commands::CommandCreateVehicle
-void w2c_game_f57201(w2c_game*, u32, u32, u32); // ped_commands::CommandSetPedIntoVehicle
-// Script commands that create entities need a running script: lends them the "main" script's
-// thread (the active thread is per engine thread, at g1 + 3088). Returns the previous one.
-static uint64_t pg_test_enter_script(w2c_game *instance) {
-  uint64_t *active = pg_pointer(&env, instance->w2c_g1 + 3088, 8), previous = *active;
-  uint64_t threads = *(uint64_t *)pg_pointer(&env, 15409704, 8);
-  uint16_t count = *(uint16_t *)pg_pointer(&env, 15409712, 2);
-  for (uint16_t i = 0; i < count; i++) {
-    uint64_t thread = *(uint64_t *)pg_pointer(&env, threads + 8ull * i, 8);
-    if (thread && !strcmp(pg_string(&env, thread + 428), "main")) { *active = thread; break; }
-  }
-  return previous;
-}
-static void pg_test_leave_script(w2c_game *instance, uint64_t previous) {
-  *(uint64_t *)pg_pointer(&env, instance->w2c_g1 + 3088, 8) = previous;
 }
 // Test (PG_TEST_CAR="x,y,z,heading"): from about 35 s in, puts the player in a car (a Sultan) there.
 static void pg_test_car(w2c_game *instance) {
@@ -955,7 +1061,10 @@ static void pg_test_loadscene_monitor(w2c_game *instance) {
 }
 #endif
 void pg_virtual_pad_apply(w2c_game *instance, uint64_t pad) {
-  if (pad == 12840656) pg_apply_targeting_mode(instance);
+  if (pad == 12840656) {
+    pg_apply_targeting_mode(instance);
+    pg_process_vehicle_spawn(instance);
+  }
 #if TARGET_OS_SIMULATOR
   if (pad == 12840656) { pg_test_teleport(instance); pg_test_tv(instance); pg_test_video(instance); pg_test_car(instance); pg_test_loadscene(instance); pg_test_loadscene_monitor(instance); }
 #endif
