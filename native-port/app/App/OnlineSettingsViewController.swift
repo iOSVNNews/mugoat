@@ -24,14 +24,21 @@ enum OnlineSettings {
         get { UserDefaults.standard.string(forKey: "MugoatOnlineRoom") ?? legacy["room"] as? String ?? "story" }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineRoom") }
     }
+    static let roles = ["Dân thường", "Cảnh sát", "Bác sĩ", "Băng đảng", "Tài xế"]
+    static var role: String {
+        get { UserDefaults.standard.string(forKey: "MugoatOnlineRole") ?? "Dân thường" }
+        set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlineRole") }
+    }
     static var pvp: Bool {
         get { UserDefaults.standard.object(forKey: "MugoatOnlinePVP") as? Bool ?? legacy["pvp"] as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "MugoatOnlinePVP") }
     }
     static func configure(mode: GameMode) -> Bool {
         setenv("MUGUET_PVP", pvp ? "1" : "0", 1)
+        let currentRole = role
+        let displayName = (currentRole != "Dân thường" && !name.hasPrefix("[")) ? "[\(currentRole)] \(name)" : name
         return (enabled ? server : "").withCString { server in
-            name.withCString { name in room.withCString { room in
+            displayName.withCString { name in room.withCString { room in
                 MugoatOnlineConfigure(server, name, room, Int32(mode.rawValue))
             } }
         }
@@ -46,6 +53,7 @@ enum OnlineSettings {
 final class OnlineSettingsViewController: UIViewController {
     private let running: Bool
     private let enabled = UISwitch()
+    private let rolePicker = UISegmentedControl(items: OnlineSettings.roles)
     private let pvp = UISwitch()
     private let server = UITextField()
     private let name = UITextField()
@@ -62,6 +70,11 @@ final class OnlineSettingsViewController: UIViewController {
         enabled.isOn = OnlineSettings.enabled; enabled.isEnabled = !running
         let label = UILabel(); label.text = L10n.text("Chơi online"); label.textColor = Theme.text
         let toggle = UIStackView(arrangedSubviews: [label, enabled]); toggle.alignment = .center
+        let roleLabel = UILabel(); roleLabel.text = L10n.text("Vai trò nhân vật (Role)"); roleLabel.textColor = Theme.text
+        roleLabel.font = Theme.body(14)
+        rolePicker.selectedSegmentIndex = OnlineSettings.roles.firstIndex(of: OnlineSettings.role) ?? 0
+        rolePicker.isEnabled = !running
+        rolePicker.overrideUserInterfaceStyle = .dark
         pvp.isOn = OnlineSettings.pvp; pvp.isEnabled = !running
         let pvpLabel = UILabel(); pvpLabel.text = L10n.text("PvP: bắn người chơi khác"); pvpLabel.textColor = Theme.text
         let pvpRow = UIStackView(arrangedSubviews: [pvpLabel, pvp]); pvpRow.alignment = .center
@@ -80,7 +93,7 @@ final class OnlineSettingsViewController: UIViewController {
         let save = Theme.primaryButton(L10n.text("Lưu"), symbol: "checkmark")
         save.isEnabled = !running
         save.addAction(UIAction { [weak self] _ in self?.save() }, for: .touchUpInside)
-        let column = UIStackView(arrangedSubviews: [toggle, server, name, room, pvpRow, explanation, status, save]); column.axis = .vertical; column.spacing = 16
+        let column = UIStackView(arrangedSubviews: [toggle, roleLabel, rolePicker, server, name, room, pvpRow, explanation, status, save]); column.axis = .vertical; column.spacing = 16
         let scroll = UIScrollView(); scroll.keyboardDismissMode = .interactive
         scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
         column.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(column)
@@ -111,6 +124,10 @@ final class OnlineSettingsViewController: UIViewController {
         }
         OnlineSettings.server = host; OnlineSettings.name = player; OnlineSettings.room = channel; OnlineSettings.enabled = enabled.isOn
         OnlineSettings.pvp = pvp.isOn
+        let roleIdx = rolePicker.selectedSegmentIndex
+        if OnlineSettings.roles.indices.contains(roleIdx) {
+            OnlineSettings.role = OnlineSettings.roles[roleIdx]
+        }
         changed?(); dismiss(animated: true)
     }
 }
