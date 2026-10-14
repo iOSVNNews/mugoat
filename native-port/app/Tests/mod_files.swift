@@ -20,7 +20,7 @@ import Foundation
         precondition(Set(entries.map(\.name)) == Set([
             "car/dlc.rpf", "car/model.YFT", "handling.meta.disabled", "car/texture.ytd",
             "name.disabled-copy/dlc.rpf", "script.lua"
-        ]))
+        ]), "Unexpected mod entries: \(entries.map(\.name))")
         precondition(entries.first(where: { $0.name == "handling.meta.disabled" })?.isEnabled == false)
         precondition(entries.filter(\.isEnabled).count == 5)
         precondition(entries.allSatisfy { $0.size == 3 })

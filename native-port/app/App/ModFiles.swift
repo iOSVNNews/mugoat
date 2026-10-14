@@ -18,9 +18,10 @@ enum ModFiles {
     }
 
     static func scan(_ directory: URL) -> [Entry] {
+        let directory = directory.resolvingSymlinksInPath().standardizedFileURL
         let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
         guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]) else { return [] }
-        let base = directory.path.hasSuffix("/") ? directory.path : directory.path + "/"
+        let baseComponents = directory.pathComponents.count
         var entries: [Entry] = []
         for case let url as URL in enumerator {
             guard let values = try? url.resourceValues(forKeys: keys) else { continue }
@@ -32,7 +33,8 @@ enum ModFiles {
             let enabled = url.pathExtension.lowercased() != "disabled"
             let original = enabled ? url : url.deletingPathExtension()
             guard modExtensions.contains(original.pathExtension.lowercased()) else { continue }
-            entries.append(Entry(name: String(url.path.dropFirst(base.count)), url: url,
+            let name = url.standardizedFileURL.pathComponents.dropFirst(baseComponents).joined(separator: "/")
+            entries.append(Entry(name: name, url: url,
                                  size: Int64(values.fileSize ?? 0), modified: values.contentModificationDate ?? .distantPast,
                                  isEnabled: enabled))
         }
