@@ -889,10 +889,17 @@ static uint64_t pg_test_enter_script(w2c_game *instance) {
   uint64_t *active = pg_pointer(&env, *base + 3088, 8), previous = *active;
   uint64_t threads = *(uint64_t *)pg_pointer(&env, 15409704, 8);
   uint16_t count = *(uint16_t *)pg_pointer(&env, 15409712, 2);
+  // Free roam does not always run "main": then lend the first running script, otherwise
+  // RequestModel has no owner and HasModelLoaded never turns true (spawns time out).
+  uint64_t fallback = 0;
   for (uint16_t i = 0; i < count; i++) {
     uint64_t thread = *(uint64_t *)pg_pointer(&env, threads + 8ull * i, 8);
-    if (thread && !strcmp(pg_string(&env, thread + 428), "main")) { *active = thread; break; }
+    if (!thread) continue;
+    const char *name = pg_string(&env, thread + 428);
+    if (!strcmp(name, "main")) { fallback = thread; break; }
+    if (!fallback && name[0]) fallback = thread;
   }
+  if (fallback) *active = fallback;
   return previous;
 }
 static void pg_test_leave_script(w2c_game *instance, uint64_t previous) {
@@ -921,6 +928,8 @@ static char pg_spawn_model_name[64];
 static uint32_t pg_spawn_model_hash = 0;
 static int pg_spawn_frames = 0;
 static pthread_mutex_t pg_spawn_lock = PTHREAD_MUTEX_INITIALIZER;
+// Two scrVectors for the spawn, allocated once in engine memory (each spawn used to leak 64 bytes).
+static uint64_t pg_spawn_vectors = 0;
 
 bool PGSpawnVehicle(const char *modelName) {
   if (!modelName || !*modelName) return false;
@@ -986,7 +995,8 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
     pthread_mutex_unlock(&pg_spawn_lock);
     return;
   }
-  uint64_t coordsVector = w2c_game_f100(instance, 32);
+  if (!pg_spawn_vectors) pg_spawn_vectors = w2c_game_f100(instance, 64);
+  uint64_t coordsVector = pg_spawn_vectors;
   MugoatValue coordArgs[3] = { mg_u64(coordsVector), mg_u32(ped), mg_u32(1) };
   mg_call_void(instance, "mp:GetEntityCoords", coordArgs, 3);
   float *coords = pg_pointer(&env, coordsVector, 24);
@@ -998,7 +1008,7 @@ static void pg_process_vehicle_spawn(w2c_game *instance) {
   float vx = px - sinf(rad) * 4.5f;
   float vy = py + cosf(rad) * 4.5f;
   float vz = pz + 0.5f;
-  uint64_t vehVector = w2c_game_f100(instance, 32);
+  uint64_t vehVector = pg_spawn_vectors + 32;
   float *vv = pg_pointer(&env, vehVector, 24);
   vv[0] = vx; vv[1] = 0; vv[2] = vy; vv[3] = 0; vv[4] = vz; vv[5] = 0;
   MugoatValue vehArgs[6] = { mg_u32(model), mg_u64(vehVector), mg_f32(heading), mg_u32(0), mg_u32(0), mg_u32(0) };

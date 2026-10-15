@@ -118,7 +118,10 @@ final class ModXML: NSObject, XMLParserDelegate {
 struct ModPack {
     let name: String
     let url: URL
+    /// Every name the pack defines (vehicles, peds, texture and model files): used to detect clashes.
     let models: [String]
+    /// Only the <modelName> entries of its vehicles.meta: the names that can be spawned as vehicles.
+    let vehicleModels: [String]
     let archive: RPFArchive
     static func validName(_ name: String) -> Bool {
         !name.isEmpty && name.utf8.count <= 63 && name.utf8.allSatisfy { (97...122).contains($0) || (48...57).contains($0) || $0 == 95 }
@@ -136,6 +139,9 @@ struct ModPack {
                 let model = model.lowercased(); guard Self.validName(model) else { throw ModError("Tên model không hợp lệ: \(model)") }; models.insert(model)
             }
         }
+        // Texture dictionaries (…_mods, vehshare…) and ped names are not vehicles: listing them in the
+        // spawner made most "Xe Mod" rows fail while NPCs drove the real model.
+        self.vehicleModels = models.sorted()
         for entry in archive.entries where entry.path.hasSuffix("peds.meta") {
             let meta = try? ModXML.read(archive.metadata(entry))
             for model in (meta?.values["ModelName"] ?? []) + (meta?.values["Name"] ?? []) {

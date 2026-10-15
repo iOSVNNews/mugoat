@@ -38,7 +38,7 @@ async function main() {
   let lastHash = getDiffHash();
   let lastHead = getHeadCommit();
   let stableCount = 0;
-  const REQUIRED_STABLE_SECONDS = 45;
+  const REQUIRED_STABLE_SECONDS = 180; // 3 phút yên lặng không sửa file mới kích hoạt update
   const CHECK_INTERVAL_MS = 5000;
   const REQUIRED_STABLE_CHECKS = Math.ceil((REQUIRED_STABLE_SECONDS * 1000) / CHECK_INTERVAL_MS);
 

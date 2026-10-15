@@ -8,6 +8,8 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     private let fileManager = FileManager.default
     private var modFiles: [ModFile] = []
     private var dlcCatalog: ModRuntime.Catalog = ModRuntime.Catalog()
+    /// Set by the game screen: spawns through it (with progress and failure messages on the game view).
+    var spawnHandler: ((String) -> Void)?
 
     typealias ModFile = ModFiles.Entry
 
@@ -65,7 +67,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         switch section {
         case 0: return 3 // Quản lý & Cài đặt
         case 1: return max(1, modFiles.count) // Tệp mod đã cài
-        case 2: return 1 + dlcCatalog.models.count + defaultVehicles.count // Gọi xe (Custom + Add-ons + Mặc định)
+        case 2: return 1 + dlcCatalog.vehicleModels.count + defaultVehicles.count // Gọi xe (Custom + Add-ons + Mặc định)
         default: return 0
         }
     }
@@ -140,15 +142,15 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
                 cell.imageView?.image = UIImage(systemName: "magnifyingglass.circle.fill")
                 cell.imageView?.tintColor = Theme.accent
                 cell.accessoryType = .disclosureIndicator
-            } else if indexPath.row <= dlcCatalog.models.count {
-                let model = dlcCatalog.models[indexPath.row - 1]
+            } else if indexPath.row <= dlcCatalog.vehicleModels.count {
+                let model = dlcCatalog.vehicleModels[indexPath.row - 1]
                 cell.textLabel?.text = "Xe Mod: \(model.uppercased())"
                 cell.detailTextLabel?.text = L10n.text("Phương tiện từ gói DLC Add-on đã cài. Bấm để triệu hồi ngay.")
                 cell.imageView?.image = UIImage(systemName: "star.fill")
                 cell.imageView?.tintColor = .systemYellow
                 cell.accessoryType = .disclosureIndicator
             } else {
-                let index = indexPath.row - 1 - dlcCatalog.models.count
+                let index = indexPath.row - 1 - dlcCatalog.vehicleModels.count
                 if index < defaultVehicles.count {
                     let v = defaultVehicles[index]
                     cell.textLabel?.text = v.name
@@ -181,11 +183,11 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         case 2:
             if indexPath.row == 0 {
                 promptCustomVehicleSpawn()
-            } else if indexPath.row <= dlcCatalog.models.count {
-                let model = dlcCatalog.models[indexPath.row - 1]
+            } else if indexPath.row <= dlcCatalog.vehicleModels.count {
+                let model = dlcCatalog.vehicleModels[indexPath.row - 1]
                 spawnVehicle(named: model)
             } else {
-                let index = indexPath.row - 1 - dlcCatalog.models.count
+                let index = indexPath.row - 1 - dlcCatalog.vehicleModels.count
                 if index < defaultVehicles.count {
                     spawnVehicle(named: defaultVehicles[index].model)
                 }
@@ -311,6 +313,16 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
     private func spawnVehicle(named model: String) {
         guard engineRunning else {
             showAlert(L10n.text("Chưa vào game"), L10n.text("Vui lòng khởi động và vào game trước khi gọi phương tiện."))
+            return
+        }
+        guard !MugoatOnlineEnabled() else {
+            showAlert(L10n.text("Không khả dụng"), L10n.text("Không thể triệu hồi xe trong Online."))
+            return
+        }
+        if let spawnHandler {
+            let name = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !name.isEmpty else { return }
+            dismiss(animated: true) { spawnHandler(name) }
             return
         }
         var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

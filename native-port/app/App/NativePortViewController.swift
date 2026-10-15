@@ -556,7 +556,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                     )
                     effectiveManifest = overlayManifestURL.path
                     if !catalog.packs.isEmpty {
-                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.models.count) xe: \(catalog.models.joined(separator: ", "))).")
+                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.vehicleModels.count) xe: \(catalog.vehicleModels.joined(separator: ", "))).")
                     }
                     if !catalog.problems.isEmpty {
                         appendLog("ModRuntime Lưu ý: " + catalog.problems.joined(separator: " | "))
@@ -1063,6 +1063,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         controller.openMods = { [weak controller, weak self] in
             guard let self, let controller else { return }
             let mods = ModManagerViewController(engineRunning: self.engineStarted)
+            mods.spawnHandler = { [weak self] model in self?.spawnVehicle(model) }
             controller.navigationController?.pushViewController(mods, animated: true)
         }
         controller.openSaves = { [weak controller, weak self] in
@@ -1079,6 +1080,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         guard presentedViewController == nil else { return }
         touchControls.reset()
         let vc = ModManagerViewController(engineRunning: engineStarted)
+        vc.spawnHandler = { [weak self] model in self?.spawnVehicle(model) }
         let navigation = UINavigationController(rootViewController: vc)
         Theme.styleNavigation(navigation)
         present(navigation, animated: true)
@@ -1105,8 +1107,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     func showCheatMenu() {
-        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else {
-            showCheatToast(L10n.text("Tiện ích cheat bị vô hiệu hóa trong chế độ Sandbox & Online.")); return
+        // Offline free roam opens the menu for its vehicle/mod spawner; cheat codes stay blocked there.
+        guard !MugoatOnlineEnabled() else {
+            showCheatToast(L10n.text("Tiện ích cheat bị vô hiệu hóa trong Online.")); return
         }
         touchControls.reset()
         let cheatView = CheatMenuView(
@@ -1159,8 +1162,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func spawnVehicle(_ model: String) {
-        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else {
-            showCheatToast(L10n.text("Triệu hồi xe bị vô hiệu hóa trong Sandbox & Online"))
+        // Offline free roam is for trying things out (mod cars included); only Online blocks spawning.
+        guard !MugoatOnlineEnabled() else {
+            showCheatToast(L10n.text("Triệu hồi xe bị vô hiệu hóa trong Online"))
             return
         }
         var clean = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1174,13 +1178,35 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         if started {
             showCheatToast(String(format: L10n.text("Đang triệu hồi: %@"), clean))
             appendLog("Vehicle spawn requested: \(clean)")
+            watchVehicleSpawn(clean)
         } else {
             showCheatToast(L10n.text("Hệ thống đang bận triệu hồi xe khác!"))
         }
     }
 
+    /// Reports how a spawn ended: the engine needs a few frames to stream the model (mods take longer).
+    private func watchVehicleSpawn(_ model: String, attempt: Int = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            switch PGSpawnVehicleStatus() {
+            case 2:
+                self.showCheatToast(String(format: L10n.text("Đã triệu hồi: %@"), model))
+            case -1:
+                self.showCheatToast(String(format: L10n.text("Không gọi được '%@': sai tên model hoặc mod chưa được nạp (khởi động lại game sau khi cài mod)"), model))
+                self.appendLog("Vehicle spawn failed: \(model)")
+            case 1 where attempt < 140:
+                self.watchVehicleSpawn(model, attempt: attempt + 1)
+            default:
+                break
+            }
+        }
+    }
+
     private func applyCheat(_ code: String, mode: CheatInputMode = .auto) {
-        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else { return }
+        guard !MugoatOnlineEnabled() && (bootedMode ?? GameSettings.shared.gameMode) != .sandbox else {
+            showCheatToast(L10n.text("Mã cheat không dùng được trong Tự do & Online (gọi xe vẫn dùng được khi offline)"))
+            return
+        }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else { return }
         if trimmed == "UNFREEZE" || trimmed == "SKIPSCENE" {

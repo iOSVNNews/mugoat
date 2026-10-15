@@ -344,7 +344,7 @@ struct CheatMenuView: View {
                 }
             }
             .onAppear {
-                modVehicles = ModRuntime.catalog(ModManagerViewController.modsDirectory).models
+                modVehicles = ModRuntime.catalog(ModManagerViewController.modsDirectory).vehicleModels
             }
             .overlay(alignment: .bottom) {
                 if let msg = toastMessage {

@@ -5,6 +5,8 @@ enum ModRuntime {
         var packs: [ModPack] = []
         var problems: [String] = []
         var models: [String] { packs.flatMap(\.models).sorted() }
+        /// Spawnable vehicle model names (vehicles.meta), for the spawner lists.
+        var vehicleModels: [String] { packs.flatMap(\.vehicleModels).sorted() }
     }
     static func catalog(_ directory: URL) -> Catalog {
         var result = Catalog(), names = Set<String>(), models = Set<String>()
