@@ -27,6 +27,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private var diagnosticsOverlay: UIView? { home }
     private let audioEngine = AVAudioEngine()
     private var audioSource: AVAudioSourceNode?
+    private var isMicTapInstalled = false
     private var displayLink: CADisplayLink?
     private var lastControllerPoll: CFTimeInterval?
     private var lines: [String] = []
@@ -309,15 +310,28 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             // Three minutes in the world counts as a launch that fits in memory.
             stableTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { _ in GameSettings.shared.markBootStable() }
         }
-        if line == "WORLD_READY" || line.contains("\"label\":\"First frame\"") {
+        if line == "WORLD_READY" || line.contains("\"label\":\"First frame\"") || line.contains("\"world\":true") {
             diagnosticsOverlay?.isHidden = true
+            UIView.animate(withDuration: 0.35) {
+                self.home.alpha = 0
+            } completion: { _ in
+                self.home.isHidden = true
+            }
             touchControlsAvailable = true
             fpsLabel.isHidden = false
         }
-        if line.hasPrefix("Native boot stopped:") || line == "iOS could not reserve the engine memory." {
+        if line.hasPrefix("Native boot stopped:") || line == "iOS could not reserve the engine memory." || line.hasPrefix("Native trap") {
             audioEngine.stop()
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             metalView.isPaused = true
+            engineStarted = false
+            launchButton.isEnabled = true
+            home.isHidden = false
+            home.alpha = 1.0
+            home.settingsButton.isHidden = false
+            home.layoutButton.isHidden = false
+            refreshModeChoice()
+            showWhenFree(title: L10n.text("Không thể vào game"), message: line)
         }
         if let logFile, let data = (line + "\n").data(using: .utf8),
            let handle = try? FileHandle(forWritingTo: logFile) {
@@ -664,11 +678,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private func startAudio() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setCategory(.playback, mode: .default, options: [])
             try session.setPreferredSampleRate(48000)
-            try session.overrideOutputAudioPort(.speaker)
             try session.setActive(true)
-
 
             let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
             let source = AVAudioSourceNode(format: format) { _, _, count, audioBufferList in
@@ -733,17 +745,23 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
 
     private func configureMicRecording(enabled: Bool) {
-        let inputNode = audioEngine.inputNode
-        let bus = 0
-        inputNode.removeTap(onBus: bus)
-
         let session = AVAudioSession.sharedInstance()
         if enabled {
-            try? session.setMode(.voiceChat)
-        }
-        try? session.overrideOutputAudioPort(.speaker)
+            do {
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                try session.overrideOutputAudioPort(.speaker)
+                try session.setActive(true)
+            } catch {
+                appendLog("[Voice] Lỗi thiết lập AVAudioSession: \(error.localizedDescription)")
+            }
 
-        if enabled {
+            let inputNode = audioEngine.inputNode
+            let bus = 0
+            if isMicTapInstalled {
+                inputNode.removeTap(onBus: bus)
+                isMicTapInstalled = false
+            }
+
             let inputFormat = inputNode.inputFormat(forBus: bus)
             let outputFormat = inputNode.outputFormat(forBus: bus)
             let tapFormat = inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 ? inputFormat : (outputFormat.sampleRate > 0 ? outputFormat : nil)
@@ -775,15 +793,26 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                     }
                 }
             }
+            isMicTapInstalled = true
             if !audioEngine.isRunning {
                 try? audioEngine.start()
             }
-            appendLog("[Voice] Đã bật Micro")
+            appendLog("[Voice] Đã bật Micro - chuyển sang chế độ loa thoại")
         } else {
+            if isMicTapInstalled {
+                audioEngine.inputNode.removeTap(onBus: 0)
+                isMicTapInstalled = false
+            }
+            do {
+                try session.setCategory(.playback, mode: .default, options: [])
+                try session.setActive(true)
+            } catch {
+                appendLog("[Voice] Lỗi chuyển về loa thường: \(error.localizedDescription)")
+            }
             if !audioEngine.isRunning {
                 try? audioEngine.start()
             }
-            appendLog("[Voice] Đã tắt Micro")
+            appendLog("[Voice] Đã tắt Micro - chuyển về loa thường")
         }
     }
 
@@ -791,8 +820,13 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         appendLog("[Audio] Cấu hình audio engine thay đổi, tự động khởi động lại...")
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
-            try session.overrideOutputAudioPort(.speaker)
+            let micActive = MugoatVoiceIsMicEnabled()
+            if micActive {
+                try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                try session.overrideOutputAudioPort(.speaker)
+            } else {
+                try session.setCategory(.playback, mode: .default, options: [])
+            }
             try session.setActive(true)
             if !audioEngine.isRunning {
                 try audioEngine.start()
@@ -804,7 +838,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
 
     @objc private func handleAudioRouteChange(_ notification: Notification) {
         let session = AVAudioSession.sharedInstance()
-        try? session.overrideOutputAudioPort(.speaker)
+        if session.category == .playAndRecord {
+            try? session.overrideOutputAudioPort(.speaker)
+        }
     }
 
     @objc private func controllerChanged() { pollController() }
