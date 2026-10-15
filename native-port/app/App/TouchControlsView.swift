@@ -325,7 +325,7 @@ final class TouchControlsView: UIView {
     private let cheat = ControlButton("cheat", icon: "cheat", label: L10n.text("Lệnh cheat"))
     private let speaker = ControlButton("speaker", icon: "speaker", label: "Loa Voice Chat")
     private let mic = ControlButton("mic", icon: "mic", label: "Micro Voice Chat")
-    private let buyWeapon = ControlButton("buyWeapon", icon: "buy_weapon", label: "Mua súng Ammu-Nation")
+    private let buyWeapon = ControlButton("buyWeapon", icon: "buy_weapon", label: "Tương tác: mua súng · cảnh sát bắt · bác sĩ chữa")
     private let lights = ControlButton("lights", icon: "lights", label: "Headlights")
     private let radio = ControlButton("radio", icon: "radio", label: "Radio")
     // Menu and phone dock

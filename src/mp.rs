@@ -143,6 +143,9 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("AddExplosion", "fire_commands::CommandAddExplosion(rage::scrVector const&, int, float, bool, bool, float, bool)"),
     ("SetEntityProofs", "entity_commands::CommandSetEntityProofs(int, bool, bool, bool, bool, bool, bool, bool, bool)"),
     ("SetPedArmour", "ped_commands::CommandSetPedArmour(int, int)"),
+    ("SetEnableHandCuffs", "ped_commands::CommandSetEnableHandCuffs(int, bool)"),
+    ("TaskHandsUp", "task_commands::CommandTaskHandsUp(int, int, int, int, int)"),
+    ("DisablePlayerFiring", "player_commands::CommandDisablePlayerFiring(int, bool)"),
     ("SetTimeScale", "misc_commands::CommandSetTimeScale(float)"),
     ("IsControlPressed", "pad_commands::CommandIsControlPressed(int, int)"),
     ("DisableControlAction", "pad_commands::CommandDisableControlAction(int, int, bool)"),
@@ -804,6 +807,25 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
                     }
                 }
             }
+            proto::ROLE if p.len() >= 3 => {
+                let status = PeerRole { wanted: p[1].min(5), jailed: p[2] & 1 != 0, cuffed: p[2] & 2 != 0 };
+                let mut roles = ROLE_PEERS.lock().unwrap();
+                roles.retain(|(_, _, at)| at.elapsed() < Duration::from_secs(30));
+                match roles.iter_mut().find(|(id, ..)| *id == p[0]) {
+                    Some(entry) => { entry.1 = status; entry.2 = now; }
+                    None => roles.push((p[0], status, now)),
+                }
+            }
+            proto::ARREST if p.len() >= 2 => {
+                if Some(p[1]) == *net.my_id.lock().unwrap() {
+                    ROLE_EVENTS.lock().unwrap().push(RoleEvent::Arrested { by: p[0] });
+                }
+            }
+            proto::HEAL if p.len() >= 2 => {
+                if Some(p[1]) == *net.my_id.lock().unwrap() {
+                    ROLE_EVENTS.lock().unwrap().push(RoleEvent::Healed { by: p[0] });
+                }
+            }
             proto::KILLFEED if p.len() >= 6 => {
                 let mut d = net.deaths.lock().unwrap();
                 if d.len() < 16 {
@@ -1413,7 +1435,11 @@ impl Cmd<'_, '_> {
     }
 
     fn c_str(&self, off: u64, s: &str) {
-        let mut b: Vec<u8> = s.bytes().take(60).collect();
+        // S_TEXT has 20 bytes before S_NAME; S_NAME is the last slot of the scratch block.
+        let limit = match off { S_TEXT => 19, S_NAME => 200, _ => 60 };
+        let mut end = s.len().min(limit);
+        while !s.is_char_boundary(end) { end -= 1; }
+        let mut b = s.as_bytes()[..end].to_vec();
         b.push(0);
         crate::write_bytes(self.mem(), self.scratch + off, &b);
     }
@@ -1435,16 +1461,25 @@ impl Cmd<'_, '_> {
 
     fn feed(&mut self, text: &str) {
         self.c_str(S_TEXT, "STRING");
-        self.c_str(S_NAME, text);
         let _ = self.i("BeginTheFeedPost", &[self.ptr(S_TEXT)]);
-        let _ = self.i("AddTextComponentSubStringPlayerName", &[self.ptr(S_NAME)]);
+        // Vietnamese lines are long in bytes: send them as several components (each ≤ 96 bytes,
+        // whole characters) instead of cutting the text at 60 bytes, mid-character.
+        let mut rest = text;
+        while !rest.is_empty() {
+            let mut end = rest.len().min(96);
+            while !rest.is_char_boundary(end) { end -= 1; }
+            self.c_str(S_NAME, &rest[..end]);
+            let _ = self.i("AddTextComponentSubStringPlayerName", &[self.ptr(S_NAME)]);
+            rest = &rest[end..];
+        }
         let _ = self.i("EndTheFeedPostTicker", &[b(false), b(true)]);
     }
 
     fn play_frontend(&mut self, sound: &str, sound_set: &str) {
-        self.c_str(S_NAME, sound);
-        self.c_str(S_TEXT, sound_set);
-        let _ = self.i("PlaySoundFrontend", &[i(-1), self.ptr(S_NAME), self.ptr(S_TEXT), b(true)]);
+        // Separate 70-byte slots: a sound set name written to S_TEXT ran into S_NAME and broke the sound.
+        self.c_str(S_DICT, sound);
+        self.c_str(S_CLIP, sound_set);
+        let _ = self.i("PlaySoundFrontend", &[i(-1), self.ptr(S_DICT), self.ptr(S_CLIP), b(true)]);
     }
 }
 
@@ -1582,6 +1617,274 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
     }
 }
 
+
+// ---- Roleplay: police arrest wanted players, medics heal, kills make you wanted ------------------
+// The role is the "[Cảnh sát] " / "[Bác sĩ] " ... prefix the Online settings add to the player name,
+// so every client knows everyone's role without a protocol change. Wanted stars, arrests and heals
+// travel as ROLE / ARREST / HEAL packets that the existing server already relays.
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Role { Civilian, Police, Medic, Gang, Driver }
+
+fn role_of(name: &str) -> Role {
+    let name = name.trim_start();
+    if name.starts_with("[Cảnh sát]") { Role::Police }
+    else if name.starts_with("[Bác sĩ]") { Role::Medic }
+    else if name.starts_with("[Băng đảng]") { Role::Gang }
+    else if name.starts_with("[Tài xế]") { Role::Driver }
+    else { Role::Civilian }
+}
+
+fn my_role() -> Role {
+    match NET.get() { Some(Some(net)) => role_of(&net.name), _ => Role::Civilian }
+}
+
+/// Police equipment, kept by the anti-cheat and given back after death.
+const POLICE_WEAPONS: &[(&str, i32)] = &[("weapon_stungun", 100), ("weapon_nightstick", 1), ("weapon_combatpistol", 120), ("weapon_flashlight", 1)];
+
+fn role_weapon_allowed(hash: u32) -> bool {
+    my_role() == Role::Police && POLICE_WEAPONS.iter().any(|(name, _)| weapon(name) == hash)
+}
+
+fn grant_role_loadout(c: &mut Cmd, ped: i32) {
+    if my_role() != Role::Police { return; }
+    for &(name, ammo) in POLICE_WEAPONS {
+        let _ = c.i("GiveWeaponToPed", &[i(ped), i(weapon(name) as i32), i(ammo), b(false), b(false)]);
+    }
+    let _ = c.i("SetPedArmour", &[i(ped), i(100)]);
+}
+
+#[derive(Clone, Copy, Default)]
+struct PeerRole { wanted: u8, jailed: bool, cuffed: bool }
+
+static ROLE_PEERS: Mutex<Vec<(u8, PeerRole, Instant)>> = Mutex::new(Vec::new());
+
+fn peer_role(id: u8) -> PeerRole {
+    ROLE_PEERS.lock().unwrap().iter()
+        .find(|(peer, _, at)| *peer == id && at.elapsed() < Duration::from_secs(5))
+        .map(|(_, role, _)| *role).unwrap_or_default()
+}
+
+enum RoleEvent { Arrested { by: u8 }, Healed { by: u8 } }
+static ROLE_EVENTS: Mutex<Vec<RoleEvent>> = Mutex::new(Vec::new());
+
+#[derive(Default)]
+struct MyRole {
+    wanted: u8,
+    last_crime: Option<Instant>,
+    cuffed_until: Option<Instant>,
+    jail_until: Option<Instant>,
+    jail_secs: u64,
+    last_broadcast: Option<Instant>,
+    last_jail_note: Option<Instant>,
+    last_blips: Option<Instant>,
+    loadout_given: bool,
+    intro_shown: bool,
+}
+static MY_ROLE: Mutex<Option<MyRole>> = Mutex::new(None);
+static ROLE_COOLDOWN: Mutex<Vec<(u8, Instant)>> = Mutex::new(Vec::new());
+
+/// Bolingbroke Penitentiary: inside the yard, the area a prisoner must stay in, and the front gate.
+const JAIL_CELL: [f32; 3] = [1641.6, 2570.5, 45.6];
+const JAIL_CENTER: [f32; 3] = [1690.0, 2590.0, 45.6];
+const JAIL_RADIUS: f32 = 150.0;
+const JAIL_EXIT: [f32; 3] = [1847.9, 2586.1, 45.7];
+const WANTED_DECAY: Duration = Duration::from_secs(120);
+
+fn stars(n: u8) -> String { "*".repeat(n.min(5) as usize) }
+
+fn role_teleport(c: &mut Cmd, ped: i32, to: [f32; 3], heading: f32) {
+    let pos = c.vec_arg(1, to);
+    let zero = c.vec_arg(2, [0.0; 3]);
+    c.i("ClearPedTasksImmediately", &[i(ped)]);
+    c.i("SetEntityCoordsNoOffset", &[i(ped), pos, b(false), b(false), b(false)]);
+    c.i("SetEntityVelocity", &[i(ped), zero]);
+    c.i("SetEntityHeading", &[i(ped), f(heading)]);
+}
+
+/// Called for every kill this client is credited with (from the victim's KILLFEED).
+fn role_on_kill(c: &mut Cmd, victim: u8) {
+    let victim_role = NET.get().and_then(|n| n.as_ref()).and_then(|n| n.peers.lock().unwrap().get(&victim).map(|p| role_of(&p.name))).unwrap_or(Role::Civilian);
+    let victim_wanted = peer_role(victim).wanted;
+    let mut guard = MY_ROLE.lock().unwrap();
+    let me = guard.get_or_insert_with(MyRole::default);
+    // An officer stopping a wanted suspect commits no crime.
+    if my_role() == Role::Police && victim_wanted > 0 {
+        let bonus = 250 * victim_wanted as i32;
+        let balance = WALLET_CASH.fetch_add(bonus, Ordering::Relaxed) + bonus;
+        c.feed(&format!("~b~[Cảnh sát]~s~ Hạ gục nghi phạm truy nã: ~g~+${bonus}~s~ | Ví: ~g~${balance}~s~"));
+        return;
+    }
+    let add = if victim_role == Role::Police { 3 } else { 2 };
+    me.wanted = (me.wanted + add).min(5);
+    me.last_crime = Some(Instant::now());
+    c.feed(&format!("~r~Bạn đang bị TRUY NÃ {}~s~ ({} sao). Cảnh sát có thể bắt bạn!", stars(me.wanted), me.wanted));
+}
+
+/// The interact button (the Ammu-Nation one) away from a shop: police arrest, medics heal.
+/// Returns false when this role has no action, so the caller shows its usual hint.
+fn role_interact(c: &mut Cmd, ped: i32, my_pos: [f32; 3]) -> bool {
+    let Some(Some(net)) = NET.get() else { return false; };
+    let role = role_of(&net.name);
+    if role != Role::Police && role != Role::Medic { return false; }
+    if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 {
+        c.feed("~y~Hãy xuống xe để thực hiện hành động của vai trò.~s~");
+        return true;
+    }
+    let candidates: Vec<(u8, String, f32, u16, bool)> = net.peers.lock().unwrap().iter().filter_map(|(id, p)| {
+        let (at, s) = p.snaps.back()?;
+        if at.elapsed() > Duration::from_secs(2) { return None; }
+        let pos = if s.in_vehicle() { s.veh_pos } else { s.pos };
+        Some((*id, p.name.clone(), dist(pos, my_pos), s.health, s.dead()))
+    }).collect();
+    let mut nearby: Vec<_> = candidates.into_iter().filter(|(_, _, d, _, _)| *d < 3.5).collect();
+    nearby.sort_by(|a, b| a.2.total_cmp(&b.2));
+    let ready = |id: u8, secs: u64| {
+        let mut list = ROLE_COOLDOWN.lock().unwrap();
+        list.retain(|(_, t)| t.elapsed() < Duration::from_secs(30));
+        if list.iter().any(|(peer, t)| *peer == id && t.elapsed() < Duration::from_secs(secs)) { return false; }
+        list.push((id, Instant::now()));
+        true
+    };
+    match role {
+        Role::Police => {
+            let target = nearby.iter().find(|(id, _, _, _, dead)| { let r = peer_role(*id); !dead && r.wanted > 0 && !r.jailed && !r.cuffed });
+            let Some((id, name, ..)) = target else {
+                c.feed("~b~[Cảnh sát]~s~ Không có nghi phạm bị truy nã (*) nào trong phạm vi 3m.");
+                return true;
+            };
+            if !ready(*id, 5) { return true; }
+            let wanted = peer_role(*id).wanted;
+            send_reliable(net, proto::ARREST, &[*id, wanted], Some(*id));
+            let bounty = 400 * wanted as i32;
+            let balance = WALLET_CASH.fetch_add(bounty, Ordering::Relaxed) + bounty;
+            c.play_frontend("CHECKPOINT_NORMAL", "HUD_MINI_GAME_SOUNDSET");
+            c.feed(&format!("~b~[Cảnh sát]~s~ Đã còng tay {name} {}. Thưởng ~g~${bounty}~s~ | Ví: ~g~${balance}~s~", stars(wanted)));
+        }
+        Role::Medic => {
+            let target = nearby.iter().find(|(_, _, _, health, dead)| !dead && *health > 100 && *health < 195);
+            let Some((id, name, ..)) = target else {
+                c.feed("~g~[Bác sĩ]~s~ Không có ai bị thương trong phạm vi 3m.");
+                return true;
+            };
+            if !ready(*id, 15) { c.feed("~g~[Bác sĩ]~s~ Vừa chữa cho người này, chờ một chút."); return true; }
+            send_reliable(net, proto::HEAL, &[*id], Some(*id));
+            let balance = WALLET_CASH.fetch_add(150, Ordering::Relaxed) + 150;
+            c.feed(&format!("~g~[Bác sĩ]~s~ Đã chữa trị cho {name}. ~g~+$150~s~ | Ví: ~g~${balance}~s~"));
+        }
+        _ => {}
+    }
+    true
+}
+
+/// Once per frame online: arrests and heals received, cuffs, jail time, wanted decay, status broadcast,
+/// police equipment and blip colours (wanted players red, police dark blue, medics green).
+fn role_tick(c: &mut Cmd, game: &mut Game, net: &Net, ped: i32, my_pos: [f32; 3]) {
+    let role = role_of(&net.name);
+    let now = Instant::now();
+    let dead = c.i("IsPedDeadOrDying", &[i(ped), b(true)]) != 0;
+    let events = std::mem::take(&mut *ROLE_EVENTS.lock().unwrap());
+    let mut guard = MY_ROLE.lock().unwrap();
+    let me = guard.get_or_insert_with(MyRole::default);
+
+    if !me.intro_shown {
+        me.intro_shown = true;
+        let text = match role {
+            Role::Police => "~b~[Cảnh sát]~s~ Đến gần người bị truy nã (*) và bấm nút tương tác để còng tay, bắt vào tù.",
+            Role::Medic => "~g~[Bác sĩ]~s~ Đến gần người bị thương và bấm nút tương tác để chữa trị.",
+            Role::Gang => "~r~[Băng đảng]~s~ Giết người sẽ bị truy nã. Tránh xa cảnh sát!",
+            _ => "~s~Giết người sẽ bị truy nã (*); cảnh sát có thể bắt bạn vào tù.",
+        };
+        c.feed(text);
+    }
+
+    for event in events {
+        let by_name = |id: u8| net.peers.lock().unwrap().get(&id).map(|p| p.name.clone()).unwrap_or_else(|| format!("Player {id}"));
+        match event {
+            RoleEvent::Arrested { by } if me.wanted > 0 && me.cuffed_until.is_none() && me.jail_until.is_none() && !dead => {
+                me.jail_secs = (30 * me.wanted as u64).min(150);
+                me.cuffed_until = Some(now + Duration::from_secs(3));
+                let fine = (150 * me.wanted as i32).min(WALLET_CASH.load(Ordering::Relaxed).max(0));
+                WALLET_CASH.fetch_sub(fine, Ordering::Relaxed);
+                c.i("SetEnableHandCuffs", &[i(ped), b(true)]);
+                c.i("TaskHandsUp", &[i(ped), i(3000), i(0), i(-1), i(0)]);
+                c.i("FreezeEntityPosition", &[i(ped), b(true)]);
+                c.feed(&format!("~r~Bạn đã bị {} còng tay!~s~ Phạt ~r~${fine}~s~, ngồi tù {} giây.", by_name(by), me.jail_secs));
+            }
+            RoleEvent::Healed { by } if !dead => {
+                c.i("SetEntityHealth", &[i(ped), i(200), i(0)]);
+                c.feed(&format!("~g~[Bác sĩ] {} đã chữa trị cho bạn.~s~", by_name(by)));
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(until) = me.cuffed_until {
+        if now >= until {
+            me.cuffed_until = None;
+            c.i("FreezeEntityPosition", &[i(ped), b(false)]);
+            c.i("SetEnableHandCuffs", &[i(ped), b(false)]);
+            role_teleport(c, ped, JAIL_CELL, 90.0);
+            game.spawn_shield = Some(now + Duration::from_secs(8));
+            me.wanted = 0;
+            me.last_crime = None;
+            me.jail_until = Some(now + Duration::from_secs(me.jail_secs));
+            me.last_jail_note = Some(now);
+            c.feed(&format!("~r~[Nhà tù Bolingbroke]~s~ Bạn bị giam {} giây.", me.jail_secs));
+        }
+    }
+    if let Some(until) = me.jail_until {
+        if now >= until {
+            me.jail_until = None;
+            role_teleport(c, ped, JAIL_EXIT, 270.0);
+            c.feed("~g~Bạn đã mãn hạn tù. Hãy sống lương thiện!~s~");
+        } else if !dead {
+            let player = c.i("PlayerId", &[]);
+            c.i("DisablePlayerFiring", &[i(player), b(true)]);
+            if dist(my_pos, JAIL_CENTER) > JAIL_RADIUS {
+                role_teleport(c, ped, JAIL_CELL, 90.0);
+                c.feed("~r~Không thể vượt ngục!~s~");
+            }
+            if me.last_jail_note.map(|t| t.elapsed() >= Duration::from_secs(15)).unwrap_or(true) {
+                me.last_jail_note = Some(now);
+                c.feed(&format!("~r~[Nhà tù]~s~ Còn {} giây.", until.duration_since(now).as_secs()));
+            }
+        }
+    }
+
+    if me.wanted > 0 && me.jail_until.is_none() && me.last_crime.map(|t| t.elapsed() >= WANTED_DECAY).unwrap_or(true) {
+        me.wanted -= 1;
+        me.last_crime = Some(now);
+        c.feed(&if me.wanted == 0 { "~g~Bạn đã hết bị truy nã.~s~".to_string() } else { format!("~y~Mức truy nã giảm còn {} ({} sao).~s~", stars(me.wanted), me.wanted) });
+    }
+
+    if me.last_broadcast.map(|t| t.elapsed() >= Duration::from_secs(1)).unwrap_or(true) {
+        me.last_broadcast = Some(now);
+        let flags = u8::from(me.jail_until.is_some()) | (u8::from(me.cuffed_until.is_some()) << 1);
+        let _ = net.sock.send(&proto::packet(proto::ROLE, &[me.wanted, flags]));
+    }
+
+    if dead {
+        me.loadout_given = false;
+    } else if !me.loadout_given && role == Role::Police {
+        me.loadout_given = true;
+        grant_role_loadout(c, ped);
+    }
+
+    if me.last_blips.map(|t| t.elapsed() >= Duration::from_secs(1)).unwrap_or(true) {
+        me.last_blips = Some(now);
+        let roles: HashMap<u8, Role> = net.peers.lock().unwrap().iter().map(|(id, p)| (*id, role_of(&p.name))).collect();
+        for (id, a) in &game.avatars {
+            if a.blip == 0 { continue; }
+            let colour = if peer_role(*id).wanted > 0 { 1 } else {
+                match roles.get(id) { Some(Role::Police) => 38, Some(Role::Medic) => 2, _ => 3 }
+            };
+            c.i("SetBlipColour", &[i(a.blip), i(colour)]);
+            c.i("SetBlipColour2", &[i(a.blip), i(colour)]);
+        }
+    }
+}
+
 fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     if ped == 0 || !c.exists(ped) { return; }
     let _ = c.i("RemoveAllPedWeapons", &[i(ped), b(true)]);
@@ -1609,6 +1912,8 @@ fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     for &wh in purchased.iter() {
         let _ = c.i("GiveWeaponToPed", &[i(ped), i(wh as i32), i(120), b(false), b(false)]);
     }
+    drop(purchased);
+    grant_role_loadout(c, ped);
     eprintln!("[economy] stripped cheat weapons; granted starting pistol + knife, wallet: ${}", WALLET_CASH.load(Ordering::Relaxed));
 }
 
@@ -1618,7 +1923,7 @@ fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
     let knife_h = weapon("weapon_knife");
     let pistol_h = weapon("weapon_pistol");
     let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
-    let allowed = |wh: u32| wh == knife_h || wh == pistol_h || purchased.contains(&wh);
+    let allowed = |wh: u32| wh == knife_h || wh == pistol_h || purchased.contains(&wh) || role_weapon_allowed(wh);
 
     let full_scan = {
         let mut last = LAST_WEAPON_SCAN.lock().unwrap();
@@ -1871,7 +2176,7 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
                 c.play_frontend("ERROR", "HUD_AMMO_SHOP_SOUNDSET");
             }
         }
-    } else if AMMU_BUY_REQUESTED.swap(false, Ordering::Relaxed) {
+    } else if AMMU_BUY_REQUESTED.swap(false, Ordering::Relaxed) && !role_interact(c, ped, my_pos) {
         let cash = WALLET_CASH.load(Ordering::Relaxed);
         c.feed(&format!("~y~Ví: ~g~${cash}~y~. Hãy đến Ammu-Nation (~r~icon súng trên bản đồ~y~) để mua vũ khí!~s~"));
     }
@@ -1917,6 +2222,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         update_economy_and_shops(c, ped, my_pos);
         if my_id.is_some() {
             update_voice_speakers_hud(c);
+            role_tick(c, game, net, ped, my_pos);
         }
         if game.last_send.elapsed() >= SEND_EVERY {
             let valid_pos = my_pos[0].abs() > 1.0 || my_pos[1].abs() > 1.0 || my_pos[2].abs() > 1.0;
@@ -2172,6 +2478,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             let balance = WALLET_CASH.fetch_add(500, Ordering::Relaxed) + 500;
             eprintln!("[economy] kill bounty: +$500 (balance: ${balance})");
             c.feed(&format!("~g~+$500~s~ [Tiền thưởng hạ gục] | Ví: ~g~${balance}~s~"));
+            role_on_kill(c, victim);
         }
         c.c_str(S_TEXT, "STRING");
         c.c_str(S_NAME, &text);
@@ -2441,6 +2748,8 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             Some((_, s)) => format!("{} - {}%", p.name, ((s.health as i32 - 100).clamp(0, 100))),
             None => p.name.clone(),
         };
+        let role = peer_role(*id);
+        let tag = if role.jailed { format!("{tag} [Tù]") } else if role.wanted > 0 { format!("{tag} [Truy nã {}]", stars(role.wanted)) } else { tag };
         (*id, tag)
     }).collect();
     for (id, a) in &game.avatars {
@@ -2600,7 +2909,9 @@ fn weather_state(c: &mut Cmd) -> (i32, i32, f32) {
 fn name_tag(c: &mut Cmd, at: [f32; 3], name: &str) {
     let m = c.mem();
     crate::write_bytes(m, c.scratch + S_TEXT, b"STRING\0");
-    let mut bytes: Vec<u8> = name.bytes().take(60).collect();
+    let mut end = name.len().min(96);
+    while !name.is_char_boundary(end) { end -= 1; }
+    let mut bytes = name.as_bytes()[..end].to_vec();
     bytes.push(0);
     crate::write_bytes(m, c.scratch + S_NAME, &bytes);
     let origin = c.vec_arg(1, [at[0], at[1], at[2] + 1.15]);

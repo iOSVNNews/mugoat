@@ -103,6 +103,13 @@ pub const VCTL: u8 = 22;
 
 pub const VOICE: u8 = 23;
 
+/// Roleplay status, about once a second: [wanted stars 0-5, flags (1 jailed, 2 cuffed)].
+pub const ROLE: u8 = 24;
+/// Reliable: a police officer arrests [target id, stars].
+pub const ARREST: u8 = 25;
+/// Reliable: a medic treats [target id].
+pub const HEAL: u8 = 26;
+
 pub const WEATHERS: [&str; 14] = [
     "EXTRASUNNY", "CLEAR", "CLOUDS", "SMOG", "FOGGY", "OVERCAST", "RAIN", "THUNDER",
     "CLEARING", "NEUTRAL", "SNOW", "BLIZZARD", "SNOWLIGHT", "XMAS",
