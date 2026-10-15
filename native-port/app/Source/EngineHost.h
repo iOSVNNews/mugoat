@@ -19,6 +19,13 @@ typedef struct {
 // Before PGStartEngine: engine quality options (e.g. "-shadowQuality=0"),
 // back-buffer size and frame limit (0 none, 1 = 60, 2 = 30 FPS).
 void PGConfigureEngine(const char *const *quality, unsigned count, int width, int height, int frameLimit);
+// Changes the frame limit while the game runs (0 off, 1 60 FPS, 2 30 FPS).
+void PGSetFrameLimit(int frameLimit);
+// Settings › Memory cap in MB (0 automatic); call before the engine starts.
+void PGSetMemoryCap(int mb);
+// RAM the game may reserve, in MB (Settings › Graphics › RAM for the game). 0: the device's full RAM.
+// Clamped to the engine's 3072..16384 MB. Call before PGStartEngine.
+void PGSetEngineMemoryMB(int mb);
 // Before PGStartEngine: 1 Story Mode (the release startup: continues the
 // newest save in /userdata/Documents, else a new game from the Prologue),
 // 2 Sandbox Mode (free roam on the GTA V map; its files go to
@@ -48,8 +55,13 @@ typedef struct {
   bool helpShown;      // a help message is on screen
   bool helpContext;    // ...and it asks for the context input (D-pad right)
   bool radioWheelOpen; // the radio wheel is up
+  uint32_t vehicleModel; // model name hash (joaat) of the vehicle the player is in, 0 on foot
+  bool passenger;        // in a vehicle, not in the driver's seat (taxi rides)
+  bool taxiMenu;         // the taxi ride script (taxiservice) is running
 } PGControlHints;
 PGControlHints PGReadControlHints(uint32_t touchContext);
+// The next weapon of the aircraft the player flies (applied on the game thread).
+void PGNextAircraftWeapon(void);
 // Keyboard and mouse, through the game's own PC input (the block the browser build wrote): key
 // state bytes indexed by Windows virtual-key code, and mouse words after them.
 void PGSetKey(uint8_t virtualKey, bool down);
@@ -84,6 +96,9 @@ void PGUpdateVirtualPad(PGPadState state);
 // Relative touch motion, queued until the engine consumes its pad input.
 void PGTouchCameraDrag(double x, double y);
 void PGTouchCameraEnabled(bool enabled);
+// Existing controller-swipe impulse bridge, consumed on engine input sampling.
+void PGQueueCameraSwipe(float x, float y);
+void PGClearCameraSwipe(void);
 // The engine's last input device for the player: -4 keyboard/mouse,
 // 0...3 pads, -3 unknown. Assisted aim needs a pad.
 int32_t PGLastInputDevice(void);
@@ -97,6 +112,7 @@ void PGFillAudio(float *left, float *right, uint32_t count);
 // Health counters for the periodic log line.
 uint64_t PGMemoryBudgetQueries(void);
 uint64_t PGMemoryBudgetClamps(void);
+uint64_t PGMemoryBudgetEvictions(void);
 void PGAssetHealth(uint64_t out[6]);
 bool PGSpawnVehicle(const char *modelName);
 int PGSpawnVehicleStatus(void);

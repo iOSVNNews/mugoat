@@ -133,6 +133,17 @@ final class GameSettings {
         set { defaults.set(newValue, forKey: "keyboardMouse") }
     }
     /// Hide the touch controls while a game controller is connected (on by default).
+    /// RAM the game may reserve, in MB; 0 (default) uses the device's full RAM.
+    /// The engine needs at least 3072 MB. Applies the next time the game starts.
+    var engineMemoryMB: Int {
+        get { defaults.integer(forKey: "engineMemoryMB") }
+        set { defaults.set(newValue <= 0 ? 0 : min(max(newValue, 3072), 16384), forKey: "engineMemoryMB") }
+    }
+    /// Left/right buttons instead of the steering stick in vehicles. Off by default.
+    var steeringButtons: Bool {
+        get { defaults.bool(forKey: "steeringButtons") }
+        set { defaults.set(newValue, forKey: "steeringButtons") }
+    }
     var hideTouchWithController: Bool {
         get { defaults.object(forKey: "hideTouchWithController") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "hideTouchWithController") }

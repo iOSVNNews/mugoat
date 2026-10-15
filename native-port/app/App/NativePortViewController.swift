@@ -8,9 +8,43 @@ import os
 
 private func engineLog(_ message: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {
     guard let message, let context else { return }
-    let line = String(cString: message)
     let controller = Unmanaged<NativePortViewController>.fromOpaque(context).takeUnretainedValue()
-    DispatchQueue.main.async { controller.appendLog(line) }
+    LogWriter.shared.engine(String(cString: message), to: controller)
+}
+
+/// The log file and the engine's lines (from GTA V Port 1.3.3). The engine can print thousands of
+/// lines a second; one main-thread hop per line, each opening the file and calling NSLog, starved the
+/// UI: the app lagged, frames dropped and touch releases arrived late (buttons acted held). Each line
+/// is written at once through one open file handle on the thread that logs it (a crash's last lines
+/// must reach the file), and the UI gets the lines in batches at most every 50 ms.
+final class LogWriter {
+    static let shared = LogWriter()
+    private let queue = DispatchQueue(label: "log-writer", qos: .utility)
+    private var handle: FileHandle?
+    private let lock = NSLock()
+    private var pending: [String] = []
+    private var flushScheduled = false
+
+    func open(_ file: URL) {
+        lock.lock(); try? handle?.close(); handle = try? FileHandle(forWritingTo: file); _ = try? handle?.seekToEnd(); lock.unlock()
+    }
+    /// One line from the app itself, written in order with the engine's.
+    func write(_ line: String) {
+        guard let data = (line + "\n").data(using: .utf8) else { return }
+        lock.lock(); try? handle?.write(contentsOf: data); lock.unlock()
+    }
+    func engine(_ line: String, to controller: NativePortViewController) {
+        let data = (line + "\n").data(using: .utf8)
+        lock.lock()
+        if let data { try? handle?.write(contentsOf: data) }
+        pending.append(line); let schedule = !flushScheduled; flushScheduled = true
+        lock.unlock()
+        guard schedule else { return }
+        queue.asyncAfter(deadline: .now() + 0.05) {
+            self.lock.lock(); let batch = self.pending; self.pending.removeAll(keepingCapacity: true); self.flushScheduled = false; self.lock.unlock()
+            DispatchQueue.main.async { controller.engineLines(batch) }
+        }
+    }
 }
 
 final class NativePortViewController: UIViewController, MTKViewDelegate {
@@ -220,6 +254,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             try? FileManager.default.moveItem(at: logFile!, to: previous)
         }
         try? Data().write(to: logFile!)
+        LogWriter.shared.open(logFile!)
         appendLog("Mugoat \(Theme.appVersion) on iOS \(UIDevice.current.systemVersion)")
         appendLog("Native UIKit + Metal host. Engine compiled into the app; no WebView or JIT.")
         appendLog("Metal device: \(device?.name ?? "unavailable")")
@@ -281,10 +316,23 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         preloadLabel.isHidden = summary == nil
     }
 
+    /// A batch of engine lines (LogWriter has written them to the file already).
+    func engineLines(_ batch: [String]) {
+        // Only the last 500 lines can show; older ones in a big batch only need their checks.
+        for line in batch { handleLine(line, written: true, show: false) }
+        lines.append(contentsOf: batch.suffix(500))
+        if lines.count > 500 { lines.removeFirst(lines.count - 500) }
+        refreshLogView()
+    }
+
     func appendLog(_ line: String) {
         // Lines also come from background work (checking the game files); the log view is UI.
         guard Thread.isMainThread else { DispatchQueue.main.async { self.appendLog(line) }; return }
         NSLog("[native-port] %@", line)
+        handleLine(line, written: false, show: true)
+    }
+
+    private func handleLine(_ line: String, written: Bool, show: Bool) {
         if line.hasPrefix("ASSET_WARM_PROGRESS ") {
             let parts = line.split(separator: " ")
             if parts.count >= 3 {
@@ -338,21 +386,24 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             home.alpha = 1.0
             home.settingsButton.isHidden = false
             home.layoutButton.isHidden = false
-            showWhenFree(title: L10n.text("Không thể vào game"), message: line + "\n\n" + L10n.text("Hãy tắt hẳn ứng dụng (vuốt lên khỏi đa nhiệm) rồi mở lại. Nếu lỗi lặp lại, gửi file native-port-previous.log trong thư mục Mugoat."))
+            let memoryHint = line == "iOS could not reserve the engine memory."
+                ? L10n.text("iOS không cho game giữ nhiều RAM như vậy. Vào Cài đặt › Đồ hoạ › RAM cho game, chọn mức thấp hơn (ví dụ 4 GB).\n\n") : ""
+            showWhenFree(title: L10n.text("Không thể vào game"), message: line + "\n\n" + memoryHint + L10n.text("Hãy tắt hẳn ứng dụng (vuốt lên khỏi đa nhiệm) rồi mở lại. Nếu lỗi lặp lại, gửi file native-port-previous.log trong thư mục Mugoat."))
         }
-        if let logFile, let data = (line + "\n").data(using: .utf8),
-           let handle = try? FileHandle(forWritingTo: logFile) {
-            defer { try? handle.close() }
-            do { try handle.seekToEnd(); try handle.write(contentsOf: data) } catch {}
-        }
+        if !written { LogWriter.shared.write(line) }
         for key in ["[wgpu] fps:", "[wgpu] draw costs", "Native frame costs:", "Phone memory:", "WORLD_READY"] where line.hasPrefix(key) {
             metrics[key] = line
             if let data = try? JSONSerialization.data(withJSONObject: metrics, options: [.prettyPrinted, .sortedKeys]), let logFile {
                 try? data.write(to: logFile.deletingLastPathComponent().appendingPathComponent("native-metrics.json"), options: .atomic)
             }
         }
+        guard show else { return }
         lines.append(line)
         if lines.count > 500 { lines.removeFirst(lines.count - 500) }
+        refreshLogView()
+    }
+
+    private func refreshLogView() {
         guard diagnosticsOverlay?.isHidden != true else { return }
         output.text = lines.joined(separator: "\n")
         if !output.text.isEmpty { output.scrollRangeToVisible(NSRange(location: output.text.utf16.count - 1, length: 1)) }

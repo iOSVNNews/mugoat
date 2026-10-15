@@ -26,7 +26,19 @@
 
 namespace mr {
 
-Texture::~Texture() { delete depthProxy; }
+// Texture memory, for the periodic report: what the GPU holds, what the game thinks BC textures
+// cost (their compressed size, which its streaming budget counts), and CPU copies of BC blocks.
+static struct TextureStats {
+	std::atomic<int64_t> gpuBytes{0}, bcGameBytes{0}, bcGpuBytes{0}, shadowBytes{0};
+	std::atomic<int64_t> kindBytes[8][2];		// [BC kind][sRGB]: GPU bytes, to see where decoded memory goes
+	std::atomic<uint64_t> createFailures{0}, decodeFailures{0}, bcReadbacks{0}, bcCopies{0};
+} gTextureStats;
+Texture::~Texture() {
+	gTextureStats.gpuBytes -= (int64_t)gpuBytes;
+	if (bcKind) { gTextureStats.bcGameBytes -= (int64_t)bcGameBytes; gTextureStats.bcGpuBytes -= (int64_t)gpuBytes; gTextureStats.kindBytes[bcKind][bcSrgb] -= (int64_t)gpuBytes; }
+	for (auto &it : compressedShadow) gTextureStats.shadowBytes -= (int64_t)it.second.size();
+	delete depthProxy;
+}
 
 static const uint32_t RING_DATA = 64;
 enum Op : uint32_t {
@@ -204,7 +216,10 @@ struct Renderer {
 	uint64_t commitReasons[4] = {}, skipReasons[8] = {};
 	uint64_t draws = 0, skipped = 0, pendingSkips = 0, clamped = 0, presents = 0, commits = 0;
 	uint64_t waterDraws = 0, waterSkipped = 0, waterPending = 0, waterMissingTextures = 0;
+	double pipeWaitMs = 0;		// time spent this frame waiting for pipelines to finish compiling
 	double statT = 0, busyMs = 0, lastCommitMs = 0, lastPresentMs = 0;
+	// stutter: presents more than 50 ms apart since the last report, and the longest gap
+	double statPresentAt = 0, worstFrameMs = 0; uint64_t longFrames = 0;
 	FrameWork work;
 	uint64_t statDraws = 0, statPresents = 0, statSkips = 0, statPending = 0, statCommits = 0;
 	PGFrameRateWindow fpsWindow;
@@ -282,11 +297,8 @@ static void commit(CommitReason reason, id<CAMetalDrawable> drawable = nil) {
 		if (R->visNext > OCCLUSION_SLOTS - 1024 && !R->activeOcclusion) R->visNext = 0;
 	}
 	id<MTLCommandBuffer> cb = commandBuffer();
-	if (drawable) {
-		double pacing = presentInterval.load(std::memory_order_relaxed);
-		if (pacing > 0) [cb presentDrawable:drawable afterMinimumDuration:pacing];
-		else [cb presentDrawable:drawable];
-	}
+	// Paced presents (afterMinimumDuration) are disabled until tested on devices: plain present as in 1.1.7.
+	if (drawable) [cb presentDrawable:drawable];
 	uint64_t serial = R->serial++;
 	auto *callbacks = new std::vector<std::function<void()>>();
 	callbacks->swap(R->onComplete);
@@ -424,7 +436,7 @@ static void createTexture(const uint32_t *p) {
 	t->format = m.format; t->dxgi = dxgi; t->bind = bind; t->dim = dim; t->width = w; t->height = dim == 1 ? 1 : h;
 	t->depthOrLayers = dim == 3 ? d : arraySize; t->mips = mips; t->samples = samples;
 	t->isDepth = isDepthFormat(m.format); t->hasStencil = hasStencil(m.format);
-	t->bcKind = m.bc; t->bcSrgb = m.srgb;
+	t->bcKind = m.bc; t->bcSrgb = m.srgb; t->bcNative = m.bcNative;
 	t->floatNoFilter = isFloat32(m.format) && !R->float32Filtering;
 	MTLTextureDescriptor *desc = [MTLTextureDescriptor new];
 	desc.pixelFormat = m.format;
@@ -451,7 +463,25 @@ static void createTexture(const uint32_t *p) {
 #if MR_TRACE
 	if (m.a8 && (bind & (BIND_RT | BIND_UAV))) logOnce("a8rt" + std::to_string(w) + "x" + std::to_string(h), "Metal renderer [trace]: A8 render target %u %ux%u bind %#x", id, w, h, bind);
 #endif
-	if (!t->tex) logOnce("tex" + std::to_string(dxgi) + "x" + std::to_string(bind), "Metal renderer: texture %ux%u dxgi %u bind %#x could not be created", w, h, dxgi, bind);
+	if (!t->tex) { gTextureStats.createFailures++; logOnce("tex" + std::to_string(dxgi) + "x" + std::to_string(bind), "Metal renderer: texture %ux%u dxgi %u bind %#x could not be created", w, h, dxgi, bind); }
+	else {
+		t->gpuBytes = t->tex.allocatedSize;
+		if (t->bcKind) {
+			uint32_t bb = m.bc == 1 || m.bc == 4 ? 8 : 16;
+			for (uint32_t mip = 0; mip < mips; mip++) {
+				uint64_t mw = std::max(1u, w >> mip), mh = std::max(1u, t->height >> mip), md = dim == 3 ? std::max(1u, d >> mip) : arraySize;
+				t->bcGameBytes += (mw + 3) / 4 * ((mh + 3) / 4) * bb * md;
+			}
+		}
+		if (!t->gpuBytes) {		// the simulator reports no allocation sizes: estimate
+			if (t->bcNative) t->gpuBytes = t->bcGameBytes;
+			else for (uint32_t mip = 0; mip < mips; mip++)
+				t->gpuBytes += (uint64_t)std::max(1u, w >> mip) * std::max(1u, t->height >> mip) * (dim == 3 ? std::max(1u, d >> mip) : arraySize) * samples * bytesPerTexel(m.format);
+		}
+		gTextureStats.gpuBytes += (int64_t)t->gpuBytes;
+		if (t->bcKind && getenv("PG_TRACE_BC_FORMATS")) logOnce("bcdxgi" + std::to_string(dxgi), "Metal renderer [trace]: BC texture format DXGI %u (first %ux%u)", dxgi, w, h);
+		if (t->bcKind) { gTextureStats.bcGameBytes += (int64_t)t->bcGameBytes; gTextureStats.bcGpuBytes += (int64_t)t->gpuBytes; gTextureStats.kindBytes[t->bcKind][t->bcSrgb] += (int64_t)t->gpuBytes; }
+	}
 	R->objs.set(id, t);
 }
 
@@ -460,10 +490,14 @@ static void mipExtent(Texture *t, uint32_t mip, uint32_t &w, uint32_t &h, uint32
 	d = t->dim == 3 ? std::max(1u, t->depthOrLayers >> mip) : 1;
 }
 static uint32_t bcBlockBytes(int kind) { return kind == 1 || kind == 4 ? 8 : 16; }
-static uint32_t decodedBytes(int kind) { return kind == 4 ? 1 : kind == 5 ? 2 : kind == 6 ? 8 : 4; }
 
+// The game reads a few BC textures back to the CPU, all small ones in testing (16x128, 64x64), and
+// a CPU copy of every BC texture cost as much RAM as the game's whole BC budget. Only textures up
+// to 128x128 keep their original blocks.
+static const uint64_t kMaxShadowTexels = 128 * 128;
 static void storeCompressed(Texture *t, uint32_t mip, uint32_t slice, uint32_t x, uint32_t y, uint32_t z, uint32_t w, uint32_t h, uint32_t d,
                             uint32_t bpr, uint32_t rpi, const uint8_t *data, size_t size) {
+	if ((uint64_t)t->width * t->height > kMaxShadowTexels) return;
 	uint32_t mw, mh, md; mipExtent(t, mip, mw, mh, md);
 	uint32_t bb = bcBlockBytes(t->bcKind), pitch = (mw + 3) / 4 * bb, rows = (mh + 3) / 4, count = (w + 3) / 4 * bb, uploadRows = (h + 3) / 4;
 	size_t sourceSlice = (size_t)bpr * (rpi ? rpi : uploadRows);
@@ -471,7 +505,7 @@ static void storeCompressed(Texture *t, uint32_t mip, uint32_t slice, uint32_t x
 	for (uint32_t layer = 0; layer < d; layer++) {
 		uint64_t key = ((uint64_t)mip << 32) | (three ? z + layer : slice + layer);
 		auto &shadow = t->compressedShadow[key];
-		if (shadow.empty()) shadow.resize((size_t)pitch * rows);
+		if (shadow.empty()) { shadow.resize((size_t)pitch * rows); gTextureStats.shadowBytes += (int64_t)shadow.size(); }
 		for (uint32_t row = 0; row < uploadRows; row++) {
 			size_t from = layer * sourceSlice + (size_t)row * bpr, to = (size_t)(y / 4 + row) * pitch + (x / 4) * bb;
 			if (from + count > size || to + count > shadow.size()) break;
@@ -495,6 +529,32 @@ static void uploadTextureInner(const uint32_t *p) {
 	const uint8_t *data = (const uint8_t *)(p + 12);
 	if (mip >= t->mips) return;
 	void *decoded = nullptr;
+	if (t->bcNative) {		// blocks go to the GPU as they are; rows and images count block rows
+		uint32_t mw, mh, md; mipExtent(t, mip, mw, mh, md);
+		w = std::min(w, mw - std::min(mw, x)); h = std::min(h, mh - std::min(mh, y));
+		if (!w || !h) return;
+		uint32_t blockRows = (h + 3) / 4, imageBytes = bpr * (rpi ? rpi : blockRows);
+		if (getenv("PG_TRACE_BC_FORMATS") && (x || y || w < mw || h < mh || bpr != (w + 3) / 4 * bcBlockBytes(t->bcKind)))
+			logOnce("bcpart" + std::to_string(t->dxgi) + "-" + std::to_string(mw) + "-" + std::to_string(w) + "-" + std::to_string(bpr), "Metal renderer [trace]: partial BC upload tex %u dxgi %u mip %u (%ux%u) region %u,%u %ux%u bpr %u rpi %u d %u size %u",
+			        p[0], t->dxgi, mip, mw, mh, x, y, w, h, bpr, rpi, d, size);
+		bool three = t->dim == 3;
+		size_t total = (size_t)imageBytes * (d - 1) + (size_t)bpr * blockRows;
+		if (total > size) { logOnce("bcnshort", "Metal renderer: compressed upload smaller than its region"); return; }
+		MTLRegion region = MTLRegionMake3D(x, y, three ? z : 0, w, h, three ? d : 1);
+		if (t->shared && !inFlight(t->lastUse)) {
+			if (three || d == 1) [t->tex replaceRegion:region mipmapLevel:mip slice:three ? 0 : slice withBytes:data bytesPerRow:bpr bytesPerImage:three ? imageBytes : 0];
+			else for (uint32_t l = 0; l < d; l++) [t->tex replaceRegion:MTLRegionMake2D(x, y, w, h) mipmapLevel:mip slice:slice + l withBytes:data + (size_t)l * imageBytes bytesPerRow:bpr bytesPerImage:0];
+		} else {
+			Alloc a = frameAlloc((size_t)imageBytes * d, 16);
+			memcpy(a.ptr, data, std::min<size_t>((size_t)imageBytes * d, size));
+			id<MTLBlitCommandEncoder> b = blitEncoder();
+			if (three) [b copyFromBuffer:a.buf sourceOffset:a.off sourceBytesPerRow:bpr sourceBytesPerImage:imageBytes sourceSize:MTLSizeMake(w, h, d) toTexture:t->tex destinationSlice:0 destinationLevel:mip destinationOrigin:MTLOriginMake(x, y, z)];
+			else for (uint32_t l = 0; l < d; l++) [b copyFromBuffer:a.buf sourceOffset:a.off + (NSUInteger)l * imageBytes sourceBytesPerRow:bpr sourceBytesPerImage:imageBytes sourceSize:MTLSizeMake(w, h, 1) toTexture:t->tex destinationSlice:slice + l destinationLevel:mip destinationOrigin:MTLOriginMake(x, y, 0)];
+			t->lastUse = R->serial;
+		}
+		t->proxyDirty = true;
+		return;
+	}
 	if (t->bcKind) {
 		uint32_t mw, mh, md; mipExtent(t, mip, mw, mh, md);
 		w = std::min(w, mw - std::min(mw, x)); h = std::min(h, mh - std::min(mh, y));
@@ -502,8 +562,14 @@ static void uploadTextureInner(const uint32_t *p) {
 		storeCompressed(t, mip, slice, x, y, z, w, h, d, bpr, rpi, data, size);
 		size_t outSize = 0;
 		decoded = PGDecodeBC(t->bcKind, w, h, d, bpr, rpi, data, size, &outSize);
-		if (!decoded) { logOnce("bcfail", "Metal renderer: BC decode failed"); return; }
-		data = (const uint8_t *)decoded; bpr = w * decodedBytes(t->bcKind); rpi = h; size = (uint32_t)outSize;
+		if (!decoded) { gTextureStats.decodeFailures++; logOnce("bcfail", "Metal renderer: BC decode failed"); return; }
+		if (t->format == MTLPixelFormatA1BGR5Unorm) {		// RGBA8 to A1BGR5 in place: Metal names components from the lowest bit (A bit 0, B 1-5, G 6-10, R 11-15)
+			const uint8_t *in = (const uint8_t *)decoded; uint16_t *out = (uint16_t *)decoded;
+			for (size_t i = 0, n = outSize / 4; i < n; i++, in += 4)
+				out[i] = (uint16_t)((in[0] >> 3) << 11 | (in[1] >> 3) << 6 | (in[2] >> 3) << 1 | (in[3] >= 128));
+			outSize /= 2;
+		}
+		data = (const uint8_t *)decoded; bpr = w * bytesPerTexel(t->format); rpi = h; size = (uint32_t)outSize;
 	}
 	uint32_t imageBytes = bpr * (rpi ? rpi : h);
 	bool three = t->dim == 3;
@@ -597,6 +663,7 @@ static id<MTLTexture> srvTexture(View *v, Texture *t, const ResBinding &b) {
 	MTLPixelFormat fmt = t->format;
 	if (t->isDepth && b.sample == SUint) fmt = MTLPixelFormatX32_Stencil8;
 	else if (!t->isDepth) fmt = viewFormat(v->fmt, t->format);
+	if (t->bcKind && v->fmt && v->fmt != t->dxgi && getenv("PG_TRACE_BC_FORMATS")) logOnce("bcview" + std::to_string(t->dxgi) + "-" + std::to_string(v->fmt), "Metal renderer [trace]: BC texture DXGI %u viewed as DXGI %u", t->dxgi, v->fmt);
 	uint32_t mips = t->samples > 1 ? 1 : t->mips;
 	uint32_t base = std::min(v->a, mips - 1);
 	uint32_t count = (v->b == 0xffffffff || v->b == 0) ? mips - base : std::min(v->b, mips - base);
@@ -1362,6 +1429,13 @@ static void drawInner(const uint32_t *p) {
 		R->lastPipe = pipe;
 		R->pipeDirty = false;
 	}
+	// A pipeline still compiling: wait for it up to 8 ms per frame in all, so a prop isn't missing
+	// for a few frames the first time it's seen; past the budget the draw is skipped as before.
+	if (!pipe->ready.load(std::memory_order_acquire) && R->pipeWaitMs < 8) {
+		double start = nowMs();
+		while (!pipe->ready.load(std::memory_order_acquire) && R->pipeWaitMs + (nowMs() - start) < 8) usleep(250);
+		R->pipeWaitMs += nowMs() - start;
+	}
 	if (!pipe->ready.load(std::memory_order_acquire)) { drawOutcome = "SKIP-pending"; R->pendingSkips++; R->skipped++; R->pipeDirty = true; return; }
 	if (!pipe->state) { drawOutcome = "SKIP-pipefail"; R->skipped++; R->skipReasons[3]++; return; }
 	if (pipe->state != R->appliedPipe) { [R->pass setRenderPipelineState:pipe->state]; R->appliedPipe = pipe->state; }
@@ -1483,13 +1557,14 @@ static void copyRegion(const uint32_t *p) {
 	uint32_t w = hasBox ? r - l : mw, h = hasBox ? b - t : mh, dep = hasBox ? bk - f : md;
 	uint32_t sx = hasBox ? l : 0, sy = hasBox ? t : 0, sz = hasBox ? f : 0;
 	if (s->bcKind && d->bcKind && !s->compressedShadow.empty()) {
+		gTextureStats.bcCopies++;
 		uint32_t dw, dh, dd; mipExtent(d, dMip, dw, dh, dd);
 		uint32_t bb = bcBlockBytes(s->bcKind), sp = (mw + 3) / 4 * bb, dp = (dw + 3) / 4 * bb, rows = (h + 3) / 4, bytes = (w + 3) / 4 * bb;
 		for (uint32_t zz = 0; zz < (s->dim == 3 ? dep : 1); zz++) {
 			auto src = s->compressedShadow.find(((uint64_t)sMip << 32) | (s->dim == 3 ? sz + zz : sLayer));
 			if (src == s->compressedShadow.end()) continue;
 			auto &dst = d->compressedShadow[((uint64_t)dMip << 32) | (d->dim == 3 ? dz + zz : dLayer)];
-			if (dst.empty()) dst.resize((size_t)dp * ((dh + 3) / 4));
+			if (dst.empty()) { dst.resize((size_t)dp * ((dh + 3) / 4)); gTextureStats.shadowBytes += (int64_t)dst.size(); }
 			for (uint32_t row = 0; row < rows; row++) {
 				size_t from = (size_t)(sy / 4 + row) * sp + (sx / 4) * bb, to = (size_t)(dy / 4 + row) * dp + (dx / 4) * bb;
 				if (from + bytes > src->second.size() || to + bytes > dst.size()) break;
@@ -1502,12 +1577,25 @@ static void copyRegion(const uint32_t *p) {
 	h = std::min(h, std::min(mh - std::min(mh, sy), dh - std::min(dh, dy)));
 	if (!w || !h) return;
 	bool three = s->dim == 3;
+	if (s->bcNative && getenv("PG_TRACE_BC_FORMATS")) logOnce("bccopy" + std::to_string(w) + "x" + std::to_string(h), "Metal renderer [trace]: BC copy %ux%u from mip %u (%ux%u) at %u,%u to %u,%u", w, h, sMip, mw, mh, sx, sy, dx, dy);
 	if (s->format == d->format) {
 		[blitEncoder() copyFromTexture:s->tex sourceSlice:three ? 0 : sLayer sourceLevel:sMip sourceOrigin:MTLOriginMake(sx, sy, three ? sz : 0)
 		                    sourceSize:MTLSizeMake(w, h, three ? std::max(1u, dep) : 1) toTexture:d->tex destinationSlice:d->dim == 3 ? 0 : dLayer
 		              destinationLevel:dMip destinationOrigin:MTLOriginMake(dx, dy, d->dim == 3 ? dz : 0)];
-	} else if (bytesPerTexel(s->format) == bytesPerTexel(d->format) && !s->isDepth && !d->isDepth && s->samples == 1 && d->samples == 1) {
+	} else if (s->bcNative && d->bcNative && bcBlockBytes(s->bcKind) == bcBlockBytes(d->bcKind)) {
+		if (getenv("PG_TRACE_BC_FORMATS")) logOnce("bctwin", "Metal renderer [trace]: BC copy between twin formats");
+		// sRGB and linear twins of one BC format: copy through a view of the destination in the source's format.
+		id<MTLTexture> target = [d->tex newTextureViewWithPixelFormat:s->format];
+		if (!target) { logOnce("copybcview", "Metal renderer: copy between BC formats %lu and %lu not supported", (unsigned long)s->format, (unsigned long)d->format); return; }
+		[blitEncoder() copyFromTexture:s->tex sourceSlice:three ? 0 : sLayer sourceLevel:sMip sourceOrigin:MTLOriginMake(sx, sy, three ? sz : 0)
+		                    sourceSize:MTLSizeMake(w, h, three ? std::max(1u, dep) : 1) toTexture:target destinationSlice:d->dim == 3 ? 0 : dLayer
+		              destinationLevel:dMip destinationOrigin:MTLOriginMake(dx, dy, d->dim == 3 ? dz : 0)];
+	} else if (!s->bcNative && !d->bcNative && bytesPerTexel(s->format) == bytesPerTexel(d->format) && !s->isDepth && !d->isDepth && s->samples == 1 && d->samples == 1) {
 		uint32_t bpp = bytesPerTexel(s->format), bpr = w * bpp;
+		// Different formats of one size are copied as raw bytes; if their channel layouts differ
+		// the colours come out wrong (suspected for short-lived magenta terrain patches).
+		logOnce("copyraw" + std::to_string(s->format) + "-" + std::to_string(d->format), "Metal renderer: raw copy between formats %lu and %lu (%ux%u, mip %u to %u)",
+		        (unsigned long)s->format, (unsigned long)d->format, w, h, sMip, dMip);
 		Alloc a = frameAlloc((size_t)bpr * h, 16);
 		id<MTLBlitCommandEncoder> e = blitEncoder();
 		[e copyFromTexture:s->tex sourceSlice:three ? 0 : sLayer sourceLevel:sMip sourceOrigin:MTLOriginMake(sx, sy, three ? sz : 0) sourceSize:MTLSizeMake(w, h, 1)
@@ -1528,7 +1616,12 @@ static void copyResource(uint32_t dstId, uint32_t srcId) {
 	if (so->kind != OTexture || dobj->kind != OTexture) return;
 	Texture *s = (Texture *)so, *d = (Texture *)dobj;
 	if (!s->tex || !d->tex) return;
-	if (s->bcKind && d->bcKind) d->compressedShadow = s->compressedShadow;
+	if (s->bcKind && d->bcKind && !s->compressedShadow.empty()) {
+		gTextureStats.bcCopies++;
+		for (auto &it : d->compressedShadow) gTextureStats.shadowBytes -= (int64_t)it.second.size();
+		d->compressedShadow = s->compressedShadow;
+		for (auto &it : d->compressedShadow) gTextureStats.shadowBytes += (int64_t)it.second.size();
+	}
 	if (s->format != d->format || s->samples != d->samples) { logOnce("copyres", "Metal renderer: CopyResource between different formats"); return; }
 	uint32_t mips = std::min(s->mips, d->mips);
 	uint32_t slices = s->dim == 3 ? 1 : std::min(s->depthOrLayers, d->depthOrLayers);
@@ -1647,11 +1740,33 @@ static void readback(const uint32_t *p) {
 	uint32_t w = hasBox ? r - l : mw, h = hasBox ? b - t : mh, d = hasBox ? bk - f : md;
 	uint32_t x0 = hasBox ? l : 0, y0 = hasBox ? t : 0, z0 = hasBox ? f : 0;
 	bool three = s->dim == 3;
+	if (s->bcNative && s->tex) {		// copy the blocks out of the GPU texture
+		w = std::min(w, mw - std::min(mw, x0)); h = std::min(h, mh - std::min(mh, y0));
+		uint32_t bb = bcBlockBytes(s->bcKind), rows = (h + 3) / 4, rowBytes = (w + 3) / 4 * bb, bpr = (rowBytes + 15) & ~15u;
+		if (!w || !h || rowBytes > rowPitch) { done(); return; }
+		uint32_t layers = three ? d : 1;
+		Alloc a = frameAlloc((size_t)bpr * rows * layers, 16);
+		[blitEncoder() copyFromTexture:s->tex sourceSlice:three ? 0 : layer sourceLevel:mip sourceOrigin:MTLOriginMake(x0, y0, three ? z0 : 0) sourceSize:MTLSizeMake(w, h, layers)
+		                      toBuffer:a.buf destinationOffset:a.off destinationBytesPerRow:bpr destinationBytesPerImage:bpr * rows];
+		uint8_t *src = a.ptr, *mem = R->mem;
+		uint64_t memSize = R->memSize;
+		R->onComplete.push_back([=]() {
+			for (uint32_t z = 0; z < layers; z++) for (uint32_t row = 0; row < rows; row++) {
+				uint64_t to = addr + (uint64_t)z * slicePitch + (uint64_t)row * rowPitch;
+				if (to + rowBytes > memSize) break;
+				memcpy(mem + to, src + ((size_t)z * rows + row) * bpr, rowBytes);
+			}
+			done();
+		});
+		commit(CReadback);
+		return;
+	}
 	if (s->bcKind) {		// the original blocks (the GPU holds a decoded copy)
+		gTextureStats.bcReadbacks++;
 		uint32_t bb = bcBlockBytes(s->bcKind), rows = (h + 3) / 4, pitch = (mw + 3) / 4 * bb, rowBytes = (w + 3) / 4 * bb;
 		for (uint32_t z = 0; z < (three ? d : 1); z++) {
 			auto it = s->compressedShadow.find(((uint64_t)mip << 32) | (three ? z0 + z : layer));
-			if (it == s->compressedShadow.end()) { logOnce("rbbc", "Metal renderer: compressed readback without original blocks"); break; }
+			if (it == s->compressedShadow.end()) { logOnce("rbbc" + std::to_string(s->width) + "x" + std::to_string(s->height), "Metal renderer: compressed readback of a %ux%u texture without its original blocks", s->width, s->height); break; }
 			for (uint32_t row = 0; row < rows; row++) {
 				size_t from = (size_t)(y0 / 4 + row) * pitch + (x0 / 4) * bb;
 				uint64_t to = addr + (uint64_t)z * slicePitch + (uint64_t)row * rowPitch;
@@ -1765,6 +1880,8 @@ static void present(uint32_t texId) {
 	f.lastSerial = R->serial - 1;
 	R->presents++;
 	double now = CACurrentMediaTime();
+	if (R->statPresentAt) { double gap = (now - R->statPresentAt) * 1000; if (gap > 50) R->longFrames++; if (gap > R->worstFrameMs) R->worstFrameMs = gap; }
+	R->statPresentAt = now;
 	R->lastPresent.store(now);
 	if (R->fpsWindow.record(now)) R->fps.store(R->fpsWindow.rate);
 	// loading progress for the app: first frame, then the world once 1.5 s went by without draws waiting for pipelines
@@ -1783,6 +1900,7 @@ static void present(uint32_t texId) {
 		}
 	}
 	R->pendingAtPresent = R->pendingSkips;
+	R->pipeWaitMs = 0;
 	// the next frame's ring slot must be idle on the GPU
 	R->frame++;
 	FrameRing &next = R->frames[R->frame % FRAME_SLOTS];
@@ -2038,6 +2156,18 @@ static void report() {
 		     (unsigned long long)R->waterDraws, (unsigned long long)R->waterSkipped, (unsigned long long)R->waterPending, (unsigned long long)R->waterMissingTextures);
 		R->waterDraws = R->waterSkipped = R->waterPending = R->waterMissingTextures = 0;
 	}
+	logf("[metal] stutter: %llu frames over 50 ms, longest %.0f ms", (unsigned long long)R->longFrames, R->worstFrameMs);
+	R->longFrames = 0; R->worstFrameMs = 0;
+	const double MB = 1048576.0;
+	logf("[metal] textures: GPU %.0f MB (BC: game counts %.0f MB, GPU holds %.0f MB), CPU block copies %.0f MB; BC readbacks %llu, BC copies %llu; create failures %llu, decode failures %llu",
+	     gTextureStats.gpuBytes / MB, gTextureStats.bcGameBytes / MB, gTextureStats.bcGpuBytes / MB, gTextureStats.shadowBytes / MB,
+	     (unsigned long long)gTextureStats.bcReadbacks.load(), (unsigned long long)gTextureStats.bcCopies.load(),
+	     (unsigned long long)gTextureStats.createFailures.load(), (unsigned long long)gTextureStats.decodeFailures.load());
+	std::string kinds;
+	for (int k = 1; k < 8; k++) for (int srgb = 0; srgb < 2; srgb++) if (int64_t v = gTextureStats.kindBytes[k][srgb]) {
+		char b[48]; snprintf(b, sizeof b, "%sBC%d%s %.0f MB", kinds.empty() ? "" : ", ", k, srgb ? " sRGB" : "", v / MB); kinds += b;
+	}
+	if (!kinds.empty()) logf("[metal] BC textures on the GPU by kind: %s", kinds.c_str());
 	memset(R->commitReasons, 0, sizeof R->commitReasons); memset(R->skipReasons, 0, sizeof R->skipReasons);
 	R->statT = now; R->statDraws = R->draws; R->statPresents = R->presents; R->statSkips = R->skipped; R->statPending = R->pendingSkips; R->statCommits = R->commits; R->busyMs = 0;
 }
@@ -2110,6 +2240,13 @@ static bool setup() {
 	R->queue = [R->device newCommandQueueWithMaxCommandBufferCount:64];
 	R->completion = dispatch_semaphore_create(0);
 	R->float32Filtering = R->device.supports32BitFloatFiltering;
+	// PG_FORCE_BC_DECODE=1 keeps the CPU decode path on BC-capable GPUs (simulator checks of the iPhone path).
+	gNativeBC = false;
+	if (@available(iOS 16.4, *)) gNativeBC = R->device.supportsBCTextureCompression && !getenv("PG_FORCE_BC_DECODE"); // iOS 16.0-16.3: decoded
+	// Packed 16-bit formats exist on every Apple GPU, but not on the simulator's (which aborts on them).
+#if !TARGET_OS_SIMULATOR
+	gPackedBC1 = !gNativeBC && !getenv("PG_NO_PACKED_BC1") && [R->device supportsFamily:MTLGPUFamilyApple3];
+#endif
 	R->borderColors = [R->device supportsFamily:MTLGPUFamilyApple7];
 	if (!loadShaderLibrary(R->device)) return false;
 	R->zeroBuffer = [R->device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
@@ -2147,7 +2284,8 @@ static bool setup() {
 	R->dssCache[0xdeb7ull] = [R->device newDepthStencilStateWithDescriptor:always];
 	if (!R->blitPipe) { logf("Metal renderer: present pipeline failed: %s", error.localizedDescription.UTF8String); return false; }
 	frameReportsInstall(R->device);
-	logf("Metal renderer: %s, 32-bit float filtering %s, border colours %s.", R->device.name.UTF8String, R->float32Filtering ? "yes" : "no (nearest fallback)", R->borderColors ? "yes" : "no");
+	logf("Metal renderer: %s, 32-bit float filtering %s, border colours %s, BC textures %s.", R->device.name.UTF8String, R->float32Filtering ? "yes" : "no (nearest fallback)",
+	     R->borderColors ? "yes" : "no", gNativeBC ? "native" : gPackedBC1 ? "decoded on the CPU (BC1 as 16-bit)" : "decoded on the CPU");
 	return true;
 }
 

@@ -8,6 +8,8 @@ double PGRenderedFramesPerSecond(void);
 void PGSetPresentPacing(double seconds);
 void PGAttachMetalLayer(void *layer);
 void PGStartGraphics(void *memory,uint64_t memorySize,uint64_t ring,uint64_t ringSize,uint64_t debug);
+// The GPU samples BC textures as they are (otherwise they are decoded, about 4 times larger).
+int PGGPUReadsBC(void);
 #ifdef __cplusplus
 }
 #endif

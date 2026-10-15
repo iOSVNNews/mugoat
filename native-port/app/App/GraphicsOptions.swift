@@ -124,6 +124,7 @@ enum GraphicsConfiguration {
                 PGConfigureEngine($0, UInt32(buffer.count), Int32(width), Int32(height), settings.frameRateCap == 0 ? 0 : settings.frameRateCap == 60 ? 1 : 2)
             }
         }
+        PGSetEngineMemoryMB(Int32(settings.engineMemoryMB))
         // Even frame pacing when the cap is below the screen's refresh rate (30 on 60 Hz, 30/60 on 120 Hz).
         let cap = settings.frameRateCap
         PGSetPresentPacing(cap > 0 && cap < UIScreen.main.maximumFramesPerSecond ? 1.0 / Double(cap) : 0)
