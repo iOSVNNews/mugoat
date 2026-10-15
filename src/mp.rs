@@ -1689,6 +1689,7 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
 
 fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     if ped == 0 || !c.exists(ped) { return; }
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
 
     // Neutralize in-game cell phone godmode / invincibility (1-999-PAINKILLER)
     c.i("SetEntityInvincible", &[i(ped), b(false)]);
