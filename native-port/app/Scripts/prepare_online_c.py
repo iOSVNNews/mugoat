@@ -18,20 +18,23 @@ def declarations(header):
 def generate(header, metadata):
     exports = declarations(header)
     names = [name for name in metadata['exports'] if name.startswith('mp:')] + ['emscripten_stack_get_current', '_emscripten_stack_alloc', '_emscripten_stack_restore']
+    # Sorted by bytes (strcmp order): each call finds its command by binary search (~8 comparisons)
+    # instead of comparing against every exported name in turn (hundreds of calls per frame online).
+    names = sorted(dict.fromkeys(names), key=lambda n: n.encode('utf-8'))
     info, calls = [], []
-    for name in names:
+    for index, name in enumerate(names):
         result, symbol, params = exports[name]
         if result not in TAGS and result != 'void': raise ValueError('Unsupported result: ' + result)
         if any(p not in TAGS for p in params): raise ValueError('Unsupported parameter: ' + name)
         assignments = ''.join(f'p[{i}]={TAGS[t]};' for i, t in enumerate(params))
-        info.append(f'if(!strcmp(name,{json.dumps(name)})) {{ if(capacity<{len(params)})return -2; {assignments} *result={TAGS.get(result,0)}; return {len(params)}; }}')
+        info.append(f'case {index}: {{ if(capacity<{len(params)})return -2; {assignments} *result={TAGS.get(result,0)}; return {len(params)}; }}')
         args = [f'(u32)a[{i}].bits' if t == 'u32' else f'(u64)a[{i}].bits' if t == 'u64' else f'online_{t}(a[{i}].bits)' for i, t in enumerate(params)]
         invocation = f'{symbol}((w2c_game*)instance' + ''.join(',' + a for a in args) + ')'
         checks = ' || '.join(f'a[{i}].type!={TAGS[t]}' for i, t in enumerate(params)) or 'false'
         if result == 'void': body = invocation + '; out->type=0;out->bits=0;'
         elif result in ('u32','u64'): body = f'out->type={TAGS[result]};out->bits={invocation};'
         else: body = f'{result} value={invocation};out->type={TAGS[result]};out->bits=0;memcpy(&out->bits,&value,sizeof value);'
-        calls.append(f'if(!strcmp(name,{json.dumps(name)})) {{ if(count!={len(params)} || ({checks}))return false; {body} return true; }}')
+        calls.append(f'case {index}: {{ if(count!={len(params)} || ({checks}))return false; {body} return true; }}')
     tls_type, tls_symbol, tls_params = exports['mugoat:tls-base']
     if tls_type != 'u64*' or tls_params: raise ValueError('Unexpected TLS export')
     source = '''#include "HostInternal.h"
@@ -39,11 +42,22 @@ def generate(header, metadata):
 #include <string.h>
 static f32 online_f32(uint64_t bits){f32 v;uint32_t b=(uint32_t)bits;memcpy(&v,&b,4);return v;}
 static f64 online_f64(uint64_t bits){f64 v;memcpy(&v,&bits,8);return v;}
+static const char *const mugoat_command_names[]={'''+ ','.join(json.dumps(n) for n in names) + '''};
+static int mugoat_command_index(const char *name){
+ if(!name)return -1;
+ int low=0,high=(int)(sizeof mugoat_command_names/sizeof *mugoat_command_names)-1;
+ while(low<=high){int mid=low+(high-low)/2;int order=strcmp(name,mugoat_command_names[mid]);if(!order)return mid;if(order<0)high=mid-1;else low=mid+1;}
+ return -1;
+}
 int mugoat_command_info(const char *name,uint32_t *p,uint32_t capacity,uint32_t *result){
+switch(mugoat_command_index(name)){
 '''+ '\n'.join(info) + '''
+}
 return -1;}
 bool mugoat_command_call(void *instance,const char *name,const MugoatValue *a,uint32_t count,MugoatValue *out){
+switch(mugoat_command_index(name)){
 '''+ '\n'.join(calls) + '''
+}
 return false;}
 uint8_t *mugoat_memory_data(void *instance,uint64_t *size){
  struct w2c_env *host=(struct w2c_env*)((uint8_t*)instance - offsetof(struct w2c_env,game));

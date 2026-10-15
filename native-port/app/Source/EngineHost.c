@@ -1599,6 +1599,11 @@ void PGStartEngine(const char *path, const char *filesRoot, PGLogCallback callba
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
   pthread_attr_setstacksize(&attributes, 16 * 1024 * 1024);
+#ifdef __APPLE__
+  // The boot thread becomes the game's main update thread: give it the same class as the Metal
+  // renderer so the scheduler keeps it on performance cores at full clock instead of QOS_CLASS_DEFAULT.
+  pthread_attr_set_qos_class_np(&attributes, QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
   pthread_t thread;
   int result = pthread_create(&thread, &attributes, boot, NULL);
   pthread_attr_destroy(&attributes);

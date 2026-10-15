@@ -42,6 +42,11 @@ u32 w2c_env_0x5F_pthread_create_js(struct w2c_env *host,u64 pthread,u64 attr,u64
   thread->host.memory=*w2c_env_memory(host);thread->wasi.env=&thread->host;
   thread->pthread=pthread;thread->start=routine;thread->arg=argument;
   pthread_attr_t attrs;pthread_attr_init(&attrs);pthread_attr_setstacksize(&attrs,16*1024*1024);
+#ifdef __APPLE__
+  // Without a class, new pthreads run at QOS_CLASS_DEFAULT, below the Metal renderer (user-interactive)
+  // and the UI. Engine workers (streaming, physics, the engine's render/submit thread) feed every frame.
+  pthread_attr_set_qos_class_np(&attrs,QOS_CLASS_USER_INITIATED,0);
+#endif
   pthread_t native;int e=pthread_create(&native,&attrs,runThread,thread);pthread_attr_destroy(&attrs);
   if(e){free(thread);return 6;}pthread_detach(native);return 0;
 }
