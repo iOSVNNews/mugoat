@@ -1048,6 +1048,8 @@ struct Avatar {
     veh_spin: f32,
 
     ragdoll: Option<Instant>,
+    /// When the remote player died here; the body is removed a few seconds later.
+    dead_since: Option<Instant>,
 
     entering: Option<(i32, Instant)>,
 
@@ -2699,6 +2701,23 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             if !pvp_enabled() || shielded || Some(target) != my_id || c.i("IsPedDeadOrDying", &[i(ped), b(true)]) != 0 {
                 continue;
             }
+            {
+                let now = Instant::now();
+                let mut guard = KNOCKDOWN.lock().unwrap();
+                let k = guard.get_or_insert_with(Knockdown::default);
+                let melee_hit = w == 0 || w == weapon("weapon_unarmed") || c.i("GetWeaponDamageType", &[i(w as i32)]) == 2;
+                if melee_hit {
+                    if k.immune_until.is_some_and(|t| now < t) { continue; }
+                    if k.last_melee.iter().any(|(id, t)| *id == from && now.duration_since(*t) < MELEE_HIT_EVERY) { continue; }
+                    k.last_melee.retain(|(id, t)| *id != from && now.duration_since(*t) < Duration::from_secs(5));
+                    k.last_melee.push((from, now));
+                }
+                if w == weapon("weapon_stungun") {
+                    k.allow_until = Some(now + Duration::from_millis(5500));
+                    k.can_ragdoll = Some(true);
+                    c.i("SetPedCanRagdoll", &[i(ped), b(true)]);
+                }
+            }
             game.hurt.retain(|(id, _)| *id != from);
             game.hurt.push((from, Instant::now()));
             eprintln!("[mp] got hit: {dmg} damage (weapon {w:#x}), health {}", c.i("GetEntityHealth", &[i(ped)]));
@@ -2715,6 +2734,12 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                 c.c_str(S_NAME, "SMALL_EXPLOSION_SHAKE");
                 c.i("ShakeGameplayCam", &[c.ptr(S_NAME), f(0.25)]);
                 if w != weapon("weapon_unarmed") && dmg >= 25 && c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 && c.i("IsPedRagdoll", &[i(ped)]) == 0 {
+                    let mut guard = KNOCKDOWN.lock().unwrap();
+                    let k = guard.get_or_insert_with(Knockdown::default);
+                    k.allow_until = Some(Instant::now() + Duration::from_millis(1500));
+                    k.can_ragdoll = Some(true);
+                    drop(guard);
+                    c.i("SetPedCanRagdoll", &[i(ped), b(true)]);
                     c.i("SetPedToRagdoll", &[i(ped), i(500), i(700), i(0), b(false), b(false), b(false)]);
                 }
             }
@@ -2736,6 +2761,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
                 c.i("SetEntityHealth", &[i(ped), i(if h < 100 { 0 } else { h }), i(0)]);
             }
         }
+    }
+    if me_ok && pvp_enabled() {
+        knockdown_guard(c, game, ped, my_pos);
     }
     let car_hits = std::mem::take(&mut *net.car_hits.lock().unwrap());
     if my_car != 0 && pvp_enabled() && c.i("GetPedInVehicleSeat", &[i(my_car), i(-1), b(false)]) == ped {
@@ -3542,6 +3570,8 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
             return;
         }
         a.ped = ped;
+        a.dead = false;
+        a.dead_since = None;
         a.ped_model = s.ped_model;
         c.i("SetPedDefaultComponentVariation", &[i(ped)]);
 
@@ -3607,9 +3637,18 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
     if s.dead() {
         if !a.dead {
             a.dead = true;
+            a.dead_since = Some(Instant::now());
             c.i("SetEntityInvincible", &[i(ped), b(false)]);
             c.i("SetPedCanRagdoll", &[i(ped), b(true)]);
             c.i("SetEntityHealth", &[i(ped), i(0), i(0)]);
+        } else if a.dead_since.is_some_and(|t| t.elapsed() > Duration::from_secs(6)) {
+            // The player respawns elsewhere: don't leave their body (and name) where they died.
+            let body = std::mem::replace(&mut a.ped, 0);
+            if c.exists(body) {
+                let r = c.ref_arg(body);
+                c.i("DeletePed", &[r]);
+            }
+            a.dead_since = None;
         }
         return;
     }
@@ -4049,6 +4088,61 @@ fn aim_walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3],
     w.aim = Some((aim, Instant::now()));
 }
 
+/// Melee in PvP used to stun-lock: each hit could knock the player down, the next punches arrived
+/// while they lay there, and an avatar pushed into them kept them down until they died.
+#[derive(Default)]
+struct Knockdown {
+    /// Deliberate knockdowns (stun gun, heavy melee weapon) may ragdoll until then.
+    allow_until: Option<Instant>,
+    /// Melee hits are ignored until then (just got back up).
+    immune_until: Option<Instant>,
+    /// Last melee hit applied per attacker (spam limit).
+    last_melee: Vec<(u8, Instant)>,
+    ragdoll_since: Option<Instant>,
+    can_ragdoll: Option<bool>,
+}
+static KNOCKDOWN: Mutex<Option<Knockdown>> = Mutex::new(None);
+const MELEE_HIT_EVERY: Duration = Duration::from_millis(650);
+const STAND_UP_AFTER: Duration = Duration::from_millis(2500);
+const GET_UP_IMMUNITY: Duration = Duration::from_millis(2000);
+
+/// Once per frame online: no ragdoll from other players' bodies pushing into this one (only from
+/// deliberate knockdowns), and a player kept on the ground near another player gets back up.
+fn knockdown_guard(c: &mut Cmd, game: &Game, ped: i32, my_pos: [f32; 3]) {
+    let now = Instant::now();
+    let mut guard = KNOCKDOWN.lock().unwrap();
+    let k = guard.get_or_insert_with(Knockdown::default);
+    let allowed = k.allow_until.is_some_and(|t| now < t);
+    let in_car = c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0;
+    let mut nearest = f32::MAX;
+    for a in game.avatars.values() {
+        if a.ped == 0 || a.veh != 0 || a.dead || !c.exists(a.ped) { continue; }
+        nearest = nearest.min(dist(c_pos(c, a.ped), my_pos));
+    }
+    let want = in_car || allowed || nearest > 3.0;
+    if k.can_ragdoll != Some(want) {
+        c.i("SetPedCanRagdoll", &[i(ped), b(want)]);
+        k.can_ragdoll = Some(want);
+    }
+    let down = !in_car && c.i("IsPedRagdoll", &[i(ped)]) != 0 && c.i("IsPedDeadOrDying", &[i(ped), b(true)]) == 0;
+    if !down { k.ragdoll_since = None; return; }
+    let since = *k.ragdoll_since.get_or_insert(now);
+    let limit = if allowed { Duration::from_millis(5500) } else { STAND_UP_AFTER };
+    if nearest < 10.0 && now.duration_since(since) > limit {
+        c.i("ClearPedTasksImmediately", &[i(ped)]);
+        k.ragdoll_since = None;
+        k.allow_until = None;
+        k.immune_until = Some(now + GET_UP_IMMUNITY);
+        eprintln!("[mp] stood the player up after {:?} on the ground", now.duration_since(since));
+    }
+}
+
+/// True when `pos` is inside the local player (an avatar moved there would shove them over).
+fn on_local_player(c: &mut Cmd, pos: [f32; 3]) -> bool {
+    let me = c.i("PlayerPedId", &[]);
+    me != 0 && c.i("IsPedInAnyVehicle", &[i(me), b(false)]) == 0 && dist(c_pos(c, me), pos) < 1.1
+}
+
 fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], heading: f32) {
     if c.i("IsPedRagdoll", &[i(ped)]) != 0 {
         return;
@@ -4057,8 +4151,8 @@ fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], hea
     let speed = (vel[0].powi(2) + vel[1].powi(2)).sqrt();
     let err = dist(cur, pos);
 
-    // Hard teleport only if out of bounds or desynced beyond 5m:
-    if err > 5.0 {
+    // Hard teleport only if out of bounds or desynced beyond 5m (never into the local player):
+    if err > 5.0 && !on_local_player(c, pos) {
         let p = c.vec_arg(1, pos);
         c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
         w.since = None;
@@ -4086,8 +4180,11 @@ fn walk(c: &mut Cmd, ped: i32, w: &mut Walker, pos: [f32; 3], vel: [f32; 3], hea
     if err > 1.2 {
         let k = if err > 3.0 { 0.35 } else { 0.1 };
         let z = if (pos[2] - cur[2]).abs() > 0.8 { cur[2] + (pos[2] - cur[2]) * k } else { cur[2] };
-        let p = c.vec_arg(2, [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, z]);
-        c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
+        let step = [cur[0] + (pos[0] - cur[0]) * k, cur[1] + (pos[1] - cur[1]) * k, z];
+        if !on_local_player(c, step) {
+            let p = c.vec_arg(2, step);
+            c.i("SetEntityCoordsNoOffset", &[i(ped), p, b(false), b(false), b(false)]);
+        }
     }
 
     let target = [pos[0] + vel[0] * 1.5, pos[1] + vel[1] * 1.5, pos[2]];
