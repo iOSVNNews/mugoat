@@ -494,6 +494,16 @@ pub const ALL_CHEAT_WEAPONS: &[&str] = &[
     "weapon_ball", "weapon_snowball", "weapon_petrolcan", "weapon_parachute",
 ];
 
+/// Weapon hashes never change: hash the list once instead of 77 joaat() calls per check.
+fn cheat_weapon_hashes() -> &'static [(&'static str, u32)] {
+    static HASHES: OnceLock<Vec<(&'static str, u32)>> = OnceLock::new();
+    HASHES.get_or_init(|| ALL_CHEAT_WEAPONS.iter().map(|name| (*name, proto::joaat(name))).collect())
+}
+/// A full inventory scan costs ~150 engine calls on the game thread, so it runs at most this often.
+/// The weapon in the player's hand is still checked every frame.
+const WEAPON_SCAN_EVERY: Duration = Duration::from_millis(500);
+static LAST_WEAPON_SCAN: Mutex<Option<Instant>> = Mutex::new(None);
+
 pub const BANNED_CHEAT_WEAPONS: &[&str] = &[
     "weapon_rpg", "weapon_minigun", "weapon_grenadelauncher", "weapon_stickybomb", "weapon_molotov",
     "weapon_railgun", "weapon_hominglauncher", "weapon_firework", "weapon_grenade",
@@ -1171,7 +1181,6 @@ fn update_camera_mode(c: &mut Cmd<'_, '_>) {
 }
 
 static STORY_START_WARPED: AtomicBool = AtomicBool::new(false);
-static STORY_SCRIPT_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn process_story_mode_startup(c: &mut Cmd<'_, '_>) {
     let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
@@ -1181,48 +1190,28 @@ fn process_story_mode_startup(c: &mut Cmd<'_, '_>) {
     let ped = c.i("PlayerPedId", &[]);
     if ped == 0 || !c.exists(ped) { return; }
 
-    // Coordinates of Franklin & Lamar street race after prologue heist:
-    // Whispymound Drive / Vinewood Hills mansion
-    let race_pos = [-14.0f32, 525.0f32, 143.0f32];
+    // Central Los Santos (Legion Square): open, safe, no locked iron gates, no mission script cutscene crashes
+    let spawn_pos = [215.0f32, -915.0f32, 30.6f32];
 
     if !STORY_START_WARPED.swap(true, Ordering::Relaxed) {
         let cur = c.v("GetEntityCoords", &[i(ped), b(false)]);
-        // North Yankton heist coordinates are around x: 5300, y: -5200 (or initial 0,0,0)
+        // North Yankton heist coordinates are around x: 5300, y: -5200 (or initial 0,0,0) or mansion trap
         let in_yankton = cur[0] > 2000.0 || cur[1] < -3500.0 || (cur[0].abs() < 1.0 && cur[1].abs() < 1.0);
-        if in_yankton {
-            let pos_arg = c.vec_arg(0, race_pos);
+        let in_mansion_trap = (cur[0] - (-14.0)).abs() < 30.0 && (cur[1] - 525.0).abs() < 30.0;
+        if in_yankton || in_mansion_trap {
+            let pos_arg = c.vec_arg(0, spawn_pos);
             c.i("SetEntityCoordsNoOffset", &[i(ped), pos_arg, b(false), b(false), b(false)]);
-            c.i("SetEntityHeading", &[i(ped), f(290.0)]);
+            c.i("SetEntityHeading", &[i(ped), f(0.0)]);
 
             // Show HUD notification to player
-            let text = "iOSVN Server · Cốt truyện: Đua xe Los Santos (Franklin & Lamar)";
+            let text = "iOSVN Server · Chế độ Cốt truyện: Los Santos (Legion Square)";
             c.c_str(S_TEXT, "STRING");
             c.c_str(S_NAME, text);
             let _ = c.i("BeginTheFeedPost", &[c.ptr(S_TEXT)]);
             let _ = c.i("AddTextComponentSubStringPlayerName", &[c.ptr(S_NAME)]);
             let _ = c.i("EndTheFeedPostTicker", &[b(false), b(true)]);
 
-            eprintln!("[story] skipped prologue heist -> spawned at Franklin & Lamar race in Los Santos: {race_pos:?}");
-        }
-    }
-
-    if !STORY_SCRIPT_STARTED.load(Ordering::Relaxed) {
-        for script in &["armenian1", "franklin0", "arm1"] {
-            c.c_str(S_NAME, script);
-            let name_arg = c.ptr(S_NAME);
-            if c.i("DoesScriptExist", &[name_arg]) != 0 {
-                let _ = c.i("RequestScript", &[name_arg]);
-                let _ = c.i("RequestScript2", &[name_arg]);
-                if c.i("HasScriptLoaded", &[name_arg]) != 0 {
-                    let id = c.i("StartNewScript", &[name_arg, i(1424)]);
-                    if id == 0 {
-                        let _ = c.i("StartNewScript2", &[name_arg, i(1424)]);
-                    }
-                    STORY_SCRIPT_STARTED.store(true, Ordering::Relaxed);
-                    eprintln!("[story] started mission script {script} at street race event");
-                    break;
-                }
-            }
+            eprintln!("[story] skipped prologue heist -> spawned at Legion Square: {spawn_pos:?}");
         }
     }
 }
@@ -1354,16 +1343,30 @@ struct Cmd<'a, 'b> {
     scratch: u64,
 }
 
+/// Calls "mp:<cmd>" without allocating a new String for every engine call (hundreds per frame online).
+fn call_mp(caller: &mut Caller<'_, HostState>, cmd: &str, args: &[Val]) -> Option<Val> {
+    thread_local! { static NAME: std::cell::RefCell<String> = std::cell::RefCell::new(String::with_capacity(64)); }
+    NAME.with(|name| match name.try_borrow_mut() {
+        Ok(mut name) => {
+            name.clear();
+            name.push_str("mp:");
+            name.push_str(cmd);
+            call(caller, &name, args)
+        }
+        Err(_) => call(caller, &format!("mp:{cmd}"), args),
+    })
+}
+
 impl Cmd<'_, '_> {
     fn i(&mut self, cmd: &str, args: &[Val]) -> i32 {
-        match call(self.caller, &format!("mp:{cmd}"), args) {
+        match call_mp(self.caller, cmd, args) {
             Some(Val::I32(v)) => v,
             Some(Val::I64(v)) => v as i32,
             _ => 0,
         }
     }
     fn f(&mut self, cmd: &str, args: &[Val]) -> f32 {
-        match call(self.caller, &format!("mp:{cmd}"), args) {
+        match call_mp(self.caller, cmd, args) {
             Some(Val::F32(v)) => f32::from_bits(v),
             _ => 0.0,
         }
@@ -1381,14 +1384,14 @@ impl Cmd<'_, '_> {
     fn v(&mut self, cmd: &str, args: &[Val]) -> [f32; 3] {
         let mut full = vec![Val::I64(self.scratch as i64)];
         full.extend_from_slice(args);
-        call(self.caller, &format!("mp:{cmd}"), &full);
+        call_mp(self.caller, cmd, &full);
         [self.read_f32(0), self.read_f32(8), self.read_f32(16)]
     }
 
     fn v_packed(&mut self, cmd: &str, args: &[Val]) -> [f32; 3] {
         let mut full = vec![Val::I64(self.scratch as i64)];
         full.extend_from_slice(args);
-        call(self.caller, &format!("mp:{cmd}"), &full);
+        call_mp(self.caller, cmd, &full);
         [self.read_f32(0), self.read_f32(4), self.read_f32(8)]
     }
 
@@ -1608,10 +1611,21 @@ fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
     let knife_h = weapon("weapon_knife");
     let pistol_h = weapon("weapon_pistol");
     let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
+    let allowed = |wh: u32| wh == knife_h || wh == pistol_h || purchased.contains(&wh);
 
-    for &w_name in ALL_CHEAT_WEAPONS {
-        let wh = weapon(w_name);
-        if wh == knife_h || wh == pistol_h || purchased.contains(&wh) {
+    let full_scan = {
+        let mut last = LAST_WEAPON_SCAN.lock().unwrap();
+        let due = last.map(|t| t.elapsed() >= WEAPON_SCAN_EVERY).unwrap_or(true);
+        if due { *last = Some(Instant::now()); }
+        due
+    };
+    let banned_in_hand = !allowed(cur_w) && cheat_weapon_hashes().iter().any(|(_, wh)| *wh == cur_w);
+    if !full_scan && !banned_in_hand {
+        return;
+    }
+
+    for &(w_name, wh) in cheat_weapon_hashes() {
+        if allowed(wh) || (!full_scan && wh != cur_w) {
             continue;
         }
         let has_w = c.i("HasPedGotWeapon", &[i(ped), i(wh as i32), b(false)]) != 0
@@ -1698,20 +1712,25 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
 fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     if ped == 0 || !c.exists(ped) { return; }
     let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    // process_sandbox_and_mp_checks already ran this frame's cheat neutralization and weapon check
+    // when online; repeating them doubled ~150 engine calls per frame on the game thread.
+    let already_checked = crate::input::muguet_is_multiplayer();
 
-    // Neutralize in-game cell phone godmode / invincibility (1-999-PAINKILLER)
-    c.i("SetEntityInvincible", &[i(ped), b(false)]);
-    let player_id = c.i("PlayerId", &[]);
-    if player_id != 0 {
-        c.i("SetPlayerInvincible", &[i(player_id), b(false)]);
-        c.i("SetPlayerInvincible2", &[i(player_id), b(false)]);
+    if !already_checked {
+        // Neutralize in-game cell phone godmode / invincibility (1-999-PAINKILLER)
+        c.i("SetEntityInvincible", &[i(ped), b(false)]);
+        let player_id = c.i("PlayerId", &[]);
+        if player_id != 0 {
+            c.i("SetPlayerInvincible", &[i(player_id), b(false)]);
+            c.i("SetPlayerInvincible2", &[i(player_id), b(false)]);
+        }
+
+        // Neutralize in-game cell phone infinite ammo cheats
+        c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+
+        // Neutralize in-game cell phone slow-motion cheat (1-999-SLOWMO)
+        c.i("SetTimeScale", &[f(1.0)]);
     }
-
-    // Neutralize in-game cell phone infinite ammo cheats
-    c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
-
-    // Neutralize in-game cell phone slow-motion cheat (1-999-SLOWMO)
-    c.i("SetTimeScale", &[f(1.0)]);
 
     // 1. Paycheck every 180 seconds (+250$)
     let mut last_pay = LAST_PAYCHECK.lock().unwrap();
@@ -1725,7 +1744,9 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     }
 
     // 2. Anti-cheat check: Strip any unpurchased cheat weapons (from phone cheat 1-999-TOOLUP or singleplayer)
-    strip_unauthorized_weapons_check(c, ped);
+    if !already_checked {
+        strip_unauthorized_weapons_check(c, ped);
+    }
 
     // 3. Ammu-Nation interaction near blips (sprite 110)
     let near_shop = WORLD_SHOPS.iter().find(|s| {

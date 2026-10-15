@@ -144,13 +144,15 @@ jobs:
         run: |
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-AppleID-Free.ipa Mugoat-AppleID-Free.enc
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-Cert-Paid.ipa Mugoat-Cert-Paid.enc
-      - name: Publish Mugoat.ipa to Release v1.1.7
+      - name: Publish Mugoat.ipa to Release v2.0
         working-directory: native-port
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cp Mugoat-AppleID-Free.ipa Mugoat.ipa
-          gh release upload v1.1.7 Mugoat.ipa SHA256SUMS.txt Native-IPA-Free-validation.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view v2.0 --repo "$GITHUB_REPOSITORY" || gh release create v2.0 --title "Mugoat iOS v2.0 — Voice Chat 3D Proximity, Sandbox Online, Fix Loa & Tối Ưu Độ Ổn Định" --notes "Bản phát hành chính thức Mugoat iOS v2.0" --repo "$GITHUB_REPOSITORY"
+          gh release upload v2.0 Mugoat.ipa SHA256SUMS.txt Native-IPA-Free-validation.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload v1.1.7 Mugoat.ipa SHA256SUMS.txt Native-IPA-Free-validation.json --repo "$GITHUB_REPOSITORY" --clobber || true
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: Mugoat-Native-IPAs-encrypted

@@ -31,13 +31,14 @@ pub fn write_u32(m: &SharedMemory, a: u64, v: u32) { if let Some(p) = m.region(a
 pub fn write_u64(m: &SharedMemory, a: u64, v: u64) { if let Some(p) = m.region(a,8) { unsafe { std::ptr::write_unaligned(p.cast(), v) } } }
 pub fn write_bytes(m: &SharedMemory, a: u64, v: &[u8]) { if let Some(p) = m.region(a,v.len()) { unsafe { std::ptr::copy_nonoverlapping(v.as_ptr(),p,v.len()) } } }
 pub fn read_cstr(m: &SharedMemory, a: u64) -> String {
-    let mut result = Vec::new();
-    for offset in 0..65536 {
-        let Some(address) = a.checked_add(offset) else { break; };
-        let Some(p) = m.region(address,1) else { break; };
-        let b = unsafe { *p }; if b == 0 { break; } result.push(b);
-    }
-    String::from_utf8_lossy(&result).into_owned()
+    // Runs for every script thread every frame: look the memory up once, not once per byte.
+    let mut size = 0;
+    let base = unsafe { mugoat_memory_data(m.instance as *mut c_void, &mut size) };
+    if base.is_null() || a >= size { return String::new(); }
+    let (Ok(start), Ok(available)) = (usize::try_from(a), usize::try_from(size - a)) else { return String::new(); };
+    let bytes = unsafe { std::slice::from_raw_parts(base.add(start), available.min(65536)) };
+    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 mod config { pub fn bundled_resources() -> Option<std::path::PathBuf> { None } }
 mod input { pub fn muguet_is_multiplayer() -> bool { super::ENABLED.load(super::Ordering::Relaxed) } }
