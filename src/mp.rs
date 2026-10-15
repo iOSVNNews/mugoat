@@ -224,12 +224,15 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("AddBlipForCoord2", "hud_commands::CommandAddBlipForCoord(rage::scrVector const&)"),
     ("SetBlipSprite", "hud_commands::CommandSetBlipSprite(int, int)"),
     ("SetBlipSprite2", "hud_commands::SetBlipSprite(int, int)"),
-    ("SetBlipColour", "hud_commands::CommandSetBlipColour(int, int)"),
-    ("SetBlipColour2", "hud_commands::SetBlipColour(int, int)"),
-    ("SetBlipScale", "hud_commands::CommandSetBlipScale(int, float)"),
+    ("SetBlipColour", "hud_commands::ChangeBlipColour(int, int)"),
+    ("SetBlipColour2", "hud_commands::CommandSetBlipColour(int, int)"),
+    ("SetBlipScale", "hud_commands::CommandChangeBlipScale(int, float)"),
     ("SetBlipScale2", "hud_commands::SetBlipScale(int, float)"),
     ("SetBlipAsShortRange", "hud_commands::CommandSetBlipAsShortRange(int, bool)"),
     ("SetBlipAsShortRange2", "hud_commands::SetBlipAsShortRange(int, bool)"),
+    ("SetBlipCoords", "hud_commands::CommandSetBlipCoords(int, rage::scrVector const&)"),
+    ("SetBlipCoords2", "hud_commands::SetBlipCoords(int, rage::scrVector const&)"),
+    ("DoesBlipExist", "hud_commands::CommandDoesBlipExist(int)"),
     ("SetFollowPedCamViewMode", "camera_commands::CommandSetFollowPedCamViewMode(int)"),
     ("SetFollowPedCamViewMode2", "camera_commands::SetFollowPedCamViewMode(int)"),
     ("GetFollowPedCamViewMode", "camera_commands::CommandGetFollowPedCamViewMode()"),
@@ -501,9 +504,9 @@ pub fn submit_mic_audio(samples: &[f32]) {
     let Some(Some(net)) = NET.get() else { return; };
     if net.my_id.lock().unwrap().is_none() { return; }
 
-    // Noise gate: skip transmitting only total digital silence
+    // Noise gate: skip transmitting background hiss / ambient room silence
     let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt();
-    if rms < 0.0005 { return; }
+    if rms < 0.005 { return; }
 
     let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
     let pos_dm = [
@@ -516,8 +519,8 @@ pub fn submit_mic_audio(samples: &[f32]) {
     for chunk_samples in samples.chunks(960) {
         let seq = VOICE_SEQ.fetch_add(1, Ordering::Relaxed);
         let data: Vec<u8> = chunk_samples.iter().map(|&s| {
-            let boosted = (s * 2.5).clamp(-1.0, 1.0);
-            ((boosted * 127.0) + 128.0) as u8
+            let s_clamped = s.clamp(-1.0, 1.0);
+            ((s_clamped * 127.0) + 128.0) as u8
         }).collect();
         let chunk = proto::VoiceChunk { seq, pos: pos_dm, data };
         let mut payload = Vec::new();
@@ -538,13 +541,13 @@ pub fn voice_mix_audio(left: &mut [f32], right: &mut [f32]) {
     let now = Instant::now();
     queues.retain(|(_, q)| now.duration_since(q.last_heard) < Duration::from_secs(3) || !q.samples.is_empty());
 
-    // Mix active speakers into left and right audio channels sequentially
+    // Mix active speakers into left and right audio channels sequentially with soft limiting
     for (_, q) in queues.iter_mut() {
         let take = count.min(q.samples.len());
         for i in 0..take {
             let s = q.samples[i];
-            left[i] += s;
-            right[i] += s;
+            left[i] = (left[i] + s).clamp(-1.0, 1.0);
+            right[i] = (right[i] + s).clamp(-1.0, 1.0);
         }
         q.samples.drain(..take);
     }
@@ -983,6 +986,7 @@ struct Avatar {
 
     car_hit: (i16, i16, u8, i16),
     blip: i32,
+    blip_is_entity: bool,
     walk: Walker,
     weapon: u32,
     dead: bool,
@@ -1058,6 +1062,7 @@ struct Game {
     met: bool,
     unfreeze_at: Option<Instant>,
     spawn_shield: Option<Instant>,
+    last_player_loc_feed: Instant,
 }
 
 struct ShopBlip {
@@ -1133,17 +1138,6 @@ fn init_world_blips_once(c: &mut Cmd<'_, '_>) {
     let ped = c.i("PlayerPedId", &[]);
     if ped == 0 || !c.exists(ped) { return; }
     if WORLD_BLIPS_DONE.swap(true, Ordering::Relaxed) { return; }
-
-    c.c_str(S_NAME, "shop_controller");
-    let name_arg = c.ptr(S_NAME);
-    if c.i("DoesScriptExist", &[name_arg]) != 0 {
-        let _ = c.i("RequestScript", &[name_arg]);
-        let _ = c.i("RequestScript2", &[name_arg]);
-        if c.i("HasScriptLoaded", &[name_arg]) != 0 {
-            let _ = c.i("StartNewScript", &[name_arg, i(1424)]);
-            let _ = c.i("StartNewScript2", &[name_arg, i(1424)]);
-        }
-    }
 
     for shop in WORLD_SHOPS {
         let coord_arg = c.vec_arg(0, shop.pos);
@@ -1275,6 +1269,7 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
         met: false,
         unfreeze_at: None,
         spawn_shield: Some(Instant::now() + Duration::from_secs(8)),
+        last_player_loc_feed: Instant::now() - Duration::from_secs(30),
     });
 
     let is_host = thread == game.host && name == game.host_name;
@@ -1533,19 +1528,21 @@ fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: 
     let dz = my_pos[2] - sender_z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-    // Volume calculation: full volume up close (<= 30m), fading to 60% radio volume at distance
-    // so players in the same room can ALWAYS hear each other anywhere on the map!
-    let volume = if dist <= 30.0 {
+    // Strict Proximity Voice Chat: silent beyond 35 meters
+    if dist > 35.0 {
+        return;
+    }
+
+    // 0m - 6m: 100% full volume; 6m - 35m: smooth attenuation down to 0%
+    let volume = if dist <= 6.0 {
         1.0
-    } else if dist <= 120.0 {
-        (1.0 - (dist - 30.0) / 90.0 * 0.4).clamp(0.6, 1.0)
     } else {
-        0.6
+        (1.0 - (dist - 6.0) / (35.0 - 6.0)).clamp(0.0, 1.0)
     };
 
     let incoming_samples: Vec<f32> = chunk.data.iter().map(|&b| {
         let normalized = (b as f32 - 128.0) / 128.0;
-        normalized * volume * 2.0
+        normalized * volume
     }).collect();
 
     let mut queues = SPEAKER_QUEUES.lock().unwrap();
@@ -2359,6 +2356,28 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         }
     }
 
+    if me_ok && game.last_player_loc_feed.elapsed() >= Duration::from_secs(45) {
+        game.last_player_loc_feed = Instant::now();
+        let other_peers: Vec<(u8, String, [f32; 3])> = net.peers.lock().unwrap().iter().filter_map(|(id, p)| {
+            if Some(*id) == my_id { return None; }
+            let pos = p.snaps.back().map(|(_, s)| if s.in_vehicle() { s.veh_pos } else { s.pos })?;
+            Some((*id, p.name.clone(), pos))
+        }).collect();
+
+        if !other_peers.is_empty() {
+            let mut nearest: Option<(&str, f32)> = None;
+            for (_, name, pos) in &other_peers {
+                let d = dist(my_pos, *pos);
+                if nearest.as_ref().map(|(_, cd)| d < *cd).unwrap_or(true) {
+                    nearest = Some((name.as_str(), d));
+                }
+            }
+            if let Some((n_name, n_dist)) = nearest {
+                c.feed(&format!("~b~[Mugoat Online]~s~ Co ~y~{}~s~ nguoi choi! Gan nhat: ~g~{}~s~ (~w~{:.0}m~s~)", other_peers.len(), n_name, n_dist));
+            }
+        }
+    }
+
     const INPUT_ENTER: i32 = 23;
     let enter_held = c.i("IsControlPressed", &[i(0), i(INPUT_ENTER)]) != 0;
     let just_enter = (enter_held && !game.was_enter_pressed) || WANT_ENTER.swap(false, Ordering::Relaxed);
@@ -2905,6 +2924,66 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
         }
         a.hit = hit;
     }
+    // Maintain global radar and map blip for the avatar so players can always find each other
+    if s.dead() {
+        if a.blip != 0 {
+            let r = c.ref_arg(a.blip);
+            c.i("RemoveBlip", &[r]);
+            a.blip = 0;
+            a.blip_is_entity = false;
+        }
+    } else if a.ped != 0 && c.exists(a.ped) {
+        if a.blip != 0 && !a.blip_is_entity {
+            let r = c.ref_arg(a.blip);
+            c.i("RemoveBlip", &[r]);
+            a.blip = 0;
+        }
+        if a.blip == 0 {
+            a.blip = c.i("AddBlipForEntity", &[i(a.ped)]);
+            a.blip_is_entity = true;
+            if a.blip != 0 {
+                c.i("ShowHeadingIndicatorOnBlip", &[i(a.blip), b(true)]);
+                c.i("SetBlipAsShortRange", &[i(a.blip), b(false)]);
+                c.i("SetBlipAsShortRange2", &[i(a.blip), b(false)]);
+                c.i("SetBlipColour", &[i(a.blip), i(3)]);
+                c.i("SetBlipColour2", &[i(a.blip), i(3)]);
+                c.i("SetBlipScale", &[i(a.blip), f(0.85)]);
+                c.i("SetBlipScale2", &[i(a.blip), f(0.85)]);
+            }
+        }
+    } else {
+        // Ped not spawned yet or far away: maintain coordinate blip visible across whole map
+        if a.blip != 0 && a.blip_is_entity {
+            let r = c.ref_arg(a.blip);
+            c.i("RemoveBlip", &[r]);
+            a.blip = 0;
+            a.blip_is_entity = false;
+        }
+        let target_pos = if s.in_vehicle() { s.veh_pos } else { s.pos };
+        let pos_arg = c.vec_arg(0, target_pos);
+        if a.blip == 0 {
+            let mut blip = c.i("AddBlipForCoord", &[pos_arg]);
+            if blip == 0 {
+                blip = c.i("AddBlipForCoord2", &[pos_arg]);
+            }
+            if blip != 0 {
+                c.i("SetBlipSprite", &[i(blip), i(1)]);
+                c.i("SetBlipSprite2", &[i(blip), i(1)]);
+                c.i("SetBlipAsShortRange", &[i(blip), b(false)]);
+                c.i("SetBlipAsShortRange2", &[i(blip), b(false)]);
+                c.i("SetBlipColour", &[i(blip), i(3)]);
+                c.i("SetBlipColour2", &[i(blip), i(3)]);
+                c.i("SetBlipScale", &[i(blip), f(0.85)]);
+                c.i("SetBlipScale2", &[i(blip), f(0.85)]);
+                a.blip = blip;
+                a.blip_is_entity = false;
+            }
+        } else {
+            c.i("SetBlipCoords", &[i(a.blip), pos_arg]);
+            c.i("SetBlipCoords2", &[i(a.blip), pos_arg]);
+        }
+    }
+
     if a.ped == 0 {
         if s.dead() || !model_ready(c, s.ped_model) {
             return;
@@ -2928,9 +3007,22 @@ fn update_avatar(c: &mut Cmd, owner: u8, a: &mut Avatar, s: &State, look: Option
             c.i("SetPedRelationshipGroupHash", &[i(ped), i(group)]);
         }
         c.i("SetPedCanBeTargetted", &[i(ped), b(true)]);
+
+        if a.blip != 0 && !a.blip_is_entity {
+            let r = c.ref_arg(a.blip);
+            c.i("RemoveBlip", &[r]);
+            a.blip = 0;
+        }
         a.blip = c.i("AddBlipForEntity", &[i(ped)]);
+        a.blip_is_entity = true;
         if a.blip != 0 {
             c.i("ShowHeadingIndicatorOnBlip", &[i(a.blip), b(true)]);
+            c.i("SetBlipAsShortRange", &[i(a.blip), b(false)]);
+            c.i("SetBlipAsShortRange2", &[i(a.blip), b(false)]);
+            c.i("SetBlipColour", &[i(a.blip), i(3)]);
+            c.i("SetBlipColour2", &[i(a.blip), i(3)]);
+            c.i("SetBlipScale", &[i(a.blip), f(0.85)]);
+            c.i("SetBlipScale2", &[i(a.blip), f(0.85)]);
         }
         eprintln!("[mp] spawned avatar ped {ped} (model {:#x})", s.ped_model);
     }

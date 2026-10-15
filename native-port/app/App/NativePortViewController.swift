@@ -664,7 +664,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private func startAudio() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
             try session.setPreferredSampleRate(48000)
             try session.overrideOutputAudioPort(.speaker)
             try session.setActive(true)
@@ -738,6 +738,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         inputNode.removeTap(onBus: bus)
 
         let session = AVAudioSession.sharedInstance()
+        if enabled {
+            try? session.setMode(.voiceChat)
+        }
         try? session.overrideOutputAudioPort(.speaker)
 
         if enabled {
