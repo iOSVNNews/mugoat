@@ -93,8 +93,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private var proofController: GCController?
     private var proofInputSamples = 0
     private var proofInputActive = false
-    #if targetEnvironment(simulator)
-    private var simulatorKeys = Set<UIKeyboardHIDUsage>()
+    private var hardwareKeys = Set<UIKeyboardHIDUsage>()
     override var canBecomeFirstResponder: Bool { true }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -102,19 +101,18 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         // With keyboard and mouse on, keys reach the game as PC keys instead (KeyboardMouse).
-        let pcKeys = GameSettings.shared.keyboardMouse && KeyboardMouse.shared.hasKeyboard
-        for press in presses { if let key = press.key, !pcKeys { simulatorKeys.insert(key.keyCode) } }
+        let pcKeys = KeyboardMouse.shared.isPCMode
+        for press in presses { if let key = press.key, !pcKeys { hardwareKeys.insert(key.keyCode) } }
         super.pressesBegan(presses, with: event)
     }
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        for press in presses { if let key = press.key { simulatorKeys.remove(key.keyCode) } }
+        for press in presses { if let key = press.key { hardwareKeys.remove(key.keyCode) } }
         super.pressesEnded(presses, with: event)
     }
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        simulatorKeys.removeAll()
+        hardwareKeys.removeAll()
         super.pressesCancelled(presses, with: event)
     }
-    #endif
 
     override var prefersStatusBarHidden: Bool { true }
     /// While playing with a mouse (iPad), the pointer is captured so moving it looks around.
@@ -214,6 +212,16 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         tap3.cancelsTouchesInView = false
         view.addGestureRecognizer(tap3)
         KeyboardMouse.shared.start()
+        KeyboardMouse.shared.onControllerKey = { [weak self] usage, pressed in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if pressed {
+                    self.hardwareKeys.insert(usage)
+                } else {
+                    self.hardwareKeys.remove(usage)
+                }
+            }
+        }
         KeyboardMouse.shared.changed = { [weak self] in
             guard let self else { return }
             self.appendLog("Keyboard: \(KeyboardMouse.shared.hasKeyboard ? "connected" : "none"), mouse: \(KeyboardMouse.shared.hasMouse ? "connected" : "none")")
@@ -386,9 +394,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             home.alpha = 1.0
             home.settingsButton.isHidden = false
             home.layoutButton.isHidden = false
-            let memoryHint = line == "iOS could not reserve the engine memory."
-                ? L10n.text("iOS không cho game giữ nhiều RAM như vậy. Vào Cài đặt › Đồ hoạ › RAM cho game, chọn mức thấp hơn (ví dụ 4 GB).\n\n") : ""
-            showWhenFree(title: L10n.text("Không thể vào game"), message: line + "\n\n" + memoryHint + L10n.text("Hãy tắt hẳn ứng dụng (vuốt lên khỏi đa nhiệm) rồi mở lại. Nếu lỗi lặp lại, gửi file native-port-previous.log trong thư mục Mugoat."))
+            showWhenFree(title: L10n.text("Không thể vào game"), message: line + "\n\n" + L10n.text("Hãy tắt hẳn ứng dụng (vuốt lên khỏi đa nhiệm) rồi mở lại. Nếu lỗi lặp lại, gửi file native-port-previous.log trong thư mục Mugoat."))
         }
         if !written { LogWriter.shared.write(line) }
         for key in ["[wgpu] fps:", "[wgpu] draw costs", "Native frame costs:", "Phone memory:", "WORLD_READY"] where line.hasPrefix(key) {
@@ -1304,9 +1310,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         touchControls.reset(publish: false)
         gyro.setRunning(false, orientation: .landscapeRight)
         lastControllerPoll = nil
-        #if targetEnvironment(simulator)
-        simulatorKeys.removeAll()
-        #endif
+        hardwareKeys.removeAll()
         KeyboardMouse.shared.releaseAll()
         PGUpdateVirtualPad(PGPadState())
     }
@@ -1415,22 +1419,29 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         } else {
             PGTouchCameraEnabled(false)
         }
-        #if targetEnvironment(simulator)
-        var keys = PGPadState()
-        func held(_ key: UIKeyboardHIDUsage) -> Float { simulatorKeys.contains(key) ? 1 : 0 }
-        keys.leftX = held(.keyboardD) - held(.keyboardA)
-        keys.leftY = held(.keyboardW) - held(.keyboardS)
-        keys.rightX = held(.keyboardRightArrow) - held(.keyboardLeftArrow)
-        keys.rightY = held(.keyboardUpArrow) - held(.keyboardDownArrow)
-        keys.leftTrigger = held(.keyboardZ); keys.rightTrigger = held(.keyboardX)
-        let map: [(UIKeyboardHIDUsage, PadButtons)] = [(.keyboardSpacebar, .x), (.keyboardLeftShift, .a), (.keyboardF, .y), (.keyboardR, .b),
-            (.keyboardQ, .r1), (.keyboardTab, .l1), (.keyboardV, .select), (.keyboardEscape, .start), (.keyboardE, .l3),
-            (.keyboardReturnOrEnter, .a), (.keyboardDeleteOrBackspace, .b), (.keyboardI, .up), (.keyboardK, .down), (.keyboardJ, .left), (.keyboardL, .right)]
-        var keyButtons = PadButtons()
-        for (key, bit) in map where simulatorKeys.contains(key) { keyButtons.insert(bit) }
-        keys.padButtons = keyButtons
-        state.merge(keys)
-        #endif
+        if !pcControls {
+            var keys = PGPadState()
+            func held(_ key: UIKeyboardHIDUsage) -> Float { hardwareKeys.contains(key) ? 1 : 0 }
+            keys.leftX = held(.keyboardD) - held(.keyboardA)
+            keys.leftY = held(.keyboardW) - held(.keyboardS)
+            keys.rightX = held(.keyboardRightArrow) - held(.keyboardLeftArrow)
+            keys.rightY = held(.keyboardUpArrow) - held(.keyboardDownArrow)
+            keys.leftTrigger = held(.keyboardZ); keys.rightTrigger = held(.keyboardX)
+            let map: [(UIKeyboardHIDUsage, PadButtons)] = [
+                (.keyboardSpacebar, .x), (.keyboardLeftShift, .a), (.keyboardF, .y), (.keyboardR, .b),
+                (.keyboardQ, .r1), (.keyboardTab, .l1), (.keyboardV, .select), (.keyboardM, .select),
+                (.keyboardEscape, .start), (.keyboardP, .start), (.keyboardE, .l3), (.keyboardLeftControl, .l3),
+                (.keyboardC, .r3), (.keyboardReturnOrEnter, .a), (.keyboardDeleteOrBackspace, .b),
+                (.keyboardI, .up), (.keyboardK, .down), (.keyboardJ, .left), (.keyboardL, .right)
+            ]
+            var keyButtons = PadButtons()
+            for (key, bit) in map where hardwareKeys.contains(key) { keyButtons.insert(bit) }
+            keys.padButtons = keyButtons
+            state.merge(keys)
+            if diagnosticsOverlay?.isHidden != true && !hardwareKeys.isEmpty && !hasController {
+                controllerLabel.text = "Keyboard (Gamepad)"
+            }
+        }
         // Optional gyro: phone rotation adds to the right stick.
         let settings = GameSettings.shared
         let onFoot = vehicle == 0

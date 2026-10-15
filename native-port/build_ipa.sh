@@ -31,6 +31,7 @@ mkdir -p Resources
 cp "$MIRROR/data/manifest.json" Resources/manifest.json
 test -s Resources/manifest.json
 if [ "${PG_REUSE_PREPARED:-0}" = "1" ] && [ -s Generated/native-prepared-v1.txt ] && [ -s Generated/game_0.c ] && [ -s Generated/MugoatCommands.c ] && [ -s GeneratedResources/shaders-iphoneos.metallib ]; then
+  "$PY" Scripts/prepare_dynamic_cast_guard.py
   xcodegen generate --spec project.yml
 else
   "$PY" Scripts/prepare.py --mirror "$MIRROR"

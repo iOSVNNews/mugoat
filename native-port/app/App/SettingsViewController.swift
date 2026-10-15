@@ -88,7 +88,7 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: section)! {
         case .cheat: return isOnline ? 1 : 2
         case .mode: return GameMode.allCases.count
-        case .graphics: return settings.tier.allowed.count + 4
+        case .graphics: return settings.tier.allowed.count + 3
         case .controls: return 12
         case .gyro: return (settings.gyroAim == .off ? 1 : 3) + (settings.tiltSteer == .off ? 1 : 2)
         case .files: return fileRows.count
@@ -193,8 +193,6 @@ final class SettingsViewController: UITableViewController {
                     cell.accessoryView = toggle(settings.matchScreenShape, label: L10n.text("Fill the screen")) { [weak self] in
                         self?.settings.matchScreenShape = $0; self?.resolutionChanged?(); self?.tableView.reloadData()
                     }
-                } else if row == 3 {
-                    ramCell(cell, &content)
                 } else {
                     content.text = L10n.text("Frame rate")
                     content.secondaryText = L10n.text("Higher uses more power and heat; 30 FPS is steadiest. Unlocked goes up to 120 on ProMotion iPhones.")
@@ -620,50 +618,6 @@ final class SettingsViewController: UITableViewController {
         control.accessibilityLabel = label
         control.addAction(UIAction { [weak control] _ in changed(Double(control?.value ?? 0)) }, for: .valueChanged)
         return control
-    }
-    // MARK: RAM for the game
-
-    private func ramTitle(_ mb: Int) -> String {
-        mb == 0 ? String(format: L10n.text("Toàn bộ RAM (%.1f GB)"), Double(settings.tier.physicalMemoryMB) / 1024)
-                : String(format: "%.1f GB (%d MB)", Double(mb) / 1024, mb)
-    }
-    private func ramCell(_ cell: UITableViewCell, _ content: inout UIListContentConfiguration) {
-        content.text = L10n.text("RAM cho game")
-        content.secondaryText = L10n.text("Mặc định dùng toàn bộ RAM máy. Nếu không vào được game (lỗi \"iOS could not reserve the engine memory\") hoặc game hay văng, chọn mức thấp hơn. Tối thiểu 3 GB. Áp dụng ở lần vào game sau.")
-        let button = UIButton(type: .system)
-        button.setTitle(ramTitle(settings.engineMemoryMB) + " ▾", for: .normal)
-        button.showsMenuAsPrimaryAction = true
-        button.accessibilityLabel = L10n.text("RAM cho game")
-        let physical = settings.tier.physicalMemoryMB
-        let steps = [3072, 3584, 4096, 4608, 5120, 6144, 8192, 12288].filter { $0 < physical }
-        var actions = ([0] + steps).map { mb in
-            UIAction(title: ramTitle(mb), state: mb == settings.engineMemoryMB ? .on : .off) { [weak self] _ in
-                self?.settings.engineMemoryMB = mb; self?.reloadFooters(); self?.tableView.reloadData()
-            }
-        }
-        actions.append(UIAction(title: L10n.text("Nhập số MB…")) { [weak self] _ in self?.askRAM() })
-        button.menu = UIMenu(children: actions)
-        button.sizeToFit()
-        cell.accessoryView = button
-    }
-    private func askRAM() {
-        let physical = settings.tier.physicalMemoryMB
-        let alert = UIAlertController(title: L10n.text("RAM cho game"),
-            message: String(format: L10n.text("Nhập số MB game được dùng (3072 – %d). Để trống hoặc 0 để dùng toàn bộ RAM."), max(3072, physical)),
-            preferredStyle: .alert)
-        alert.addTextField { field in
-            field.keyboardType = .numberPad
-            field.placeholder = "4096"
-            if self.settings.engineMemoryMB > 0 { field.text = String(self.settings.engineMemoryMB) }
-        }
-        alert.addAction(UIAlertAction(title: L10n.text("Hủy"), style: .cancel))
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self, weak alert] _ in
-            guard let self else { return }
-            let value = Int(alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
-            self.settings.engineMemoryMB = value <= 0 ? 0 : min(value, max(3072, physical))
-            self.reloadFooters(); self.tableView.reloadData()
-        })
-        present(alert, animated: true)
     }
 
     private func toggle(_ on: Bool, label: String, changed: @escaping (Bool) -> Void) -> UISwitch {

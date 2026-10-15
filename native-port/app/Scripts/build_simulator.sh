@@ -11,6 +11,7 @@ python3 Scripts/prepare_trap_context.py
 python3 Scripts/prepare_scenario_blockers.py
 python3 Scripts/prepare_level_index.py
 python3 Scripts/prepare_fixup_guard.py
+python3 Scripts/prepare_dynamic_cast_guard.py
 python3 Scripts/prepare_format_strings.py
 python3 Scripts/prepare_video_memory.py
 python3 Scripts/prepare_plain_dsp.py
