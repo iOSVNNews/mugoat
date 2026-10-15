@@ -51,16 +51,27 @@ unsafe fn text(ptr: *const c_char) -> String { if ptr.is_null() { String::new() 
 
 #[no_mangle]
 pub unsafe extern "C" fn MugoatOnlineConfigure(server: *const c_char, name: *const c_char, room: *const c_char, mode: i32) -> bool {
-    if CONFIGURED.load(Ordering::Acquire) { return false; }
-    let server = text(server);
+    // The engine starts once per app run: a second Play (after a failed boot) keeps the first settings
+    // instead of being reported as an invalid server.
+    if CONFIGURED.load(Ordering::Acquire) { return true; }
+    let mut server = text(server);
+    // Accept what players paste: "udp://1.2.3.4:47520/", "http://host", spaces inside.
+    for scheme in ["udp://", "http://", "https://"] {
+        if server.to_ascii_lowercase().starts_with(scheme) { server = server[scheme.len()..].to_string(); }
+    }
+    server = server.split('/').next().unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect();
     if server.is_empty() { std::env::remove_var("MUGUET_SERVER"); }
     else {
         // IPv4/hostname[:port], the same format as the existing Muguet server.
-        if server.len()>253 || server.chars().any(char::is_whitespace) || server.contains('/') { return false; }
-        let mut name = text(name); let mut room = text(room);
+        if server.len()>253 || server.chars().any(|c| c.is_control()) { return false; }
+        let mut name: String = text(name).chars().filter(|c| !c.is_control()).collect();
+        let mut room: String = text(room).chars().filter(|c| !c.is_control()).collect();
         if name.is_empty() { name = "Player".into(); }
         if room.is_empty() { room = "default".into(); }
-        if name.len()>48 || room.len()>64 || name.chars().chain(room.chars()).any(char::is_control) { return false; }
+        // Byte limits counted whole characters: Vietnamese names with a role prefix
+        // ("[Băng đảng] ...") went over 48 bytes and the game refused to start.
+        let clip = |s: String, max: usize| { let mut end = s.len().min(max); while !s.is_char_boundary(end) { end -= 1; } s[..end].trim_end().to_string() };
+        name = clip(name, 48); room = clip(room, 64);
         std::env::set_var("MUGUET_SERVER",server);
         std::env::set_var("MUGUET_NAME",name);
         std::env::set_var("MUGUET_ROOM",room);

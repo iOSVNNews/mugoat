@@ -146,6 +146,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("SetEnableHandCuffs", "ped_commands::CommandSetEnableHandCuffs(int, bool)"),
     ("TaskHandsUp", "task_commands::CommandTaskHandsUp(int, int, int, int, int)"),
     ("DisablePlayerFiring", "player_commands::CommandDisablePlayerFiring(int, bool)"),
+    ("SetNewWaypoint", "hud_commands::CommandSetNewWaypoint(float, float)"),
     ("SetTimeScale", "misc_commands::CommandSetTimeScale(float)"),
     ("IsControlPressed", "pad_commands::CommandIsControlPressed(int, int)"),
     ("DisableControlAction", "pad_commands::CommandDisableControlAction(int, int, bool)"),
@@ -824,6 +825,25 @@ fn dispatch(net: &Net, kind: u8, p: &[u8], now: Instant) {
             proto::HEAL if p.len() >= 2 => {
                 if Some(p[1]) == *net.my_id.lock().unwrap() {
                     ROLE_EVENTS.lock().unwrap().push(RoleEvent::Healed { by: p[0] });
+                }
+            }
+            proto::CALL911 if p.len() >= 13 => {
+                let f = |o: usize| f32::from_le_bytes(p[o..o + 4].try_into().unwrap());
+                let pos = [f(1), f(5), f(9)];
+                if pos.iter().all(|v| v.is_finite()) {
+                    ROLE_EVENTS.lock().unwrap().push(RoleEvent::Call { by: p[0], pos });
+                }
+            }
+            proto::ROB if p.len() >= 4 => {
+                if Some(p[1]) == *net.my_id.lock().unwrap() {
+                    let amount = u16::from_le_bytes([p[2], p[3]]).min(1000) as i32;
+                    ROLE_EVENTS.lock().unwrap().push(RoleEvent::Robbed { by: p[0], amount });
+                }
+            }
+            proto::PAID if p.len() >= 4 => {
+                if Some(p[1]) == *net.my_id.lock().unwrap() {
+                    let amount = u16::from_le_bytes([p[2], p[3]]).min(1000) as i32;
+                    ROLE_EVENTS.lock().unwrap().push(RoleEvent::Paid { by: p[0], amount });
                 }
             }
             proto::KILLFEED if p.len() >= 6 => {
@@ -1665,7 +1685,13 @@ fn peer_role(id: u8) -> PeerRole {
         .map(|(_, role, _)| *role).unwrap_or_default()
 }
 
-enum RoleEvent { Arrested { by: u8 }, Healed { by: u8 } }
+enum RoleEvent {
+    Arrested { by: u8 },
+    Healed { by: u8 },
+    Call { by: u8, pos: [f32; 3] },
+    Robbed { by: u8, amount: i32 },
+    Paid { by: u8, amount: i32 },
+}
 static ROLE_EVENTS: Mutex<Vec<RoleEvent>> = Mutex::new(Vec::new());
 
 #[derive(Default)]
@@ -1680,6 +1706,12 @@ struct MyRole {
     last_blips: Option<Instant>,
     loadout_given: bool,
     intro_shown: bool,
+    /// Police: temporary map blips for 911 calls, removed after a minute.
+    calls: Vec<(i32, Instant)>,
+    last_call: Option<Instant>,
+    last_fare: Option<Instant>,
+    /// After being robbed, a civilian can call 911 with the cart button for a while.
+    victim_until: Option<Instant>,
 }
 static MY_ROLE: Mutex<Option<MyRole>> = Mutex::new(None);
 static ROLE_COOLDOWN: Mutex<Vec<(u8, Instant)>> = Mutex::new(Vec::new());
@@ -1692,6 +1724,14 @@ const JAIL_EXIT: [f32; 3] = [1847.9, 2586.1, 45.7];
 const WANTED_DECAY: Duration = Duration::from_secs(120);
 
 fn stars(n: u8) -> String { "*".repeat(n.min(5) as usize) }
+
+/// Other players riding as passengers in the car this player drives (their synced seat says so).
+fn taxi_passengers(net: &Net) -> usize {
+    let Some(me) = *net.my_id.lock().unwrap() else { return 0; };
+    net.peers.lock().unwrap().values().filter(|p| {
+        p.snaps.back().is_some_and(|(at, s)| at.elapsed() < Duration::from_secs(3) && s.in_vehicle() && s.veh_owner == me && s.seat != -1 && !s.dead())
+    }).count()
+}
 
 fn role_teleport(c: &mut Cmd, ped: i32, to: [f32; 3], heading: f32) {
     let pos = c.vec_arg(1, to);
@@ -1726,11 +1766,33 @@ fn role_on_kill(c: &mut Cmd, victim: u8) {
 fn role_interact(c: &mut Cmd, ped: i32, my_pos: [f32; 3]) -> bool {
     let Some(Some(net)) = NET.get() else { return false; };
     let role = role_of(&net.name);
-    if role != Role::Police && role != Role::Medic { return false; }
-    if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 {
-        c.feed("~y~Hãy xuống xe để thực hiện hành động của vai trò.~s~");
-        return true;
+    match role {
+        Role::Civilian => {
+            // Call 911 (after being robbed): every officer online gets the caller's position on the map.
+            let mut guard = MY_ROLE.lock().unwrap();
+            let me = guard.get_or_insert_with(MyRole::default);
+            if !me.victim_until.is_some_and(|t| Instant::now() < t) { return false; }
+            if me.last_call.map(|t| t.elapsed() < Duration::from_secs(30)).unwrap_or(false) {
+                c.feed("~y~Bạn vừa gọi cảnh sát, hãy chờ 30 giây.~s~");
+                return true;
+            }
+            me.last_call = Some(Instant::now());
+            drop(guard);
+            let mut payload = Vec::with_capacity(12);
+            for v in my_pos { payload.extend(v.to_le_bytes()); }
+            send_reliable(net, proto::CALL911, &payload, None);
+            c.feed("~b~[911]~s~ Đã gọi cảnh sát tới vị trí của bạn.");
+            return true;
+        }
+        Role::Driver => {
+            if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) == 0 { return false; }
+            let passengers = taxi_passengers(net);
+            c.feed(&format!("~y~[Tài xế]~s~ Chở người chơi khác: ~g~$40~s~ mỗi khách mỗi 30 giây khi xe đang chạy. Khách trên xe: {passengers}."));
+            return true;
+        }
+        _ => {}
     }
+    if c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0 { return false; }
     let candidates: Vec<(u8, String, f32, u16, bool)> = net.peers.lock().unwrap().iter().filter_map(|(id, p)| {
         let (at, s) = p.snaps.back()?;
         if at.elapsed() > Duration::from_secs(2) { return None; }
@@ -1749,10 +1811,7 @@ fn role_interact(c: &mut Cmd, ped: i32, my_pos: [f32; 3]) -> bool {
     match role {
         Role::Police => {
             let target = nearby.iter().find(|(id, _, _, _, dead)| { let r = peer_role(*id); !dead && r.wanted > 0 && !r.jailed && !r.cuffed });
-            let Some((id, name, ..)) = target else {
-                c.feed("~b~[Cảnh sát]~s~ Không có nghi phạm bị truy nã (*) nào trong phạm vi 3m.");
-                return true;
-            };
+            let Some((id, name, ..)) = target else { return false; };
             if !ready(*id, 5) { return true; }
             let wanted = peer_role(*id).wanted;
             send_reliable(net, proto::ARREST, &[*id, wanted], Some(*id));
@@ -1763,14 +1822,30 @@ fn role_interact(c: &mut Cmd, ped: i32, my_pos: [f32; 3]) -> bool {
         }
         Role::Medic => {
             let target = nearby.iter().find(|(_, _, _, health, dead)| !dead && *health > 100 && *health < 195);
-            let Some((id, name, ..)) = target else {
-                c.feed("~g~[Bác sĩ]~s~ Không có ai bị thương trong phạm vi 3m.");
-                return true;
-            };
+            let Some((id, name, ..)) = target else { return false; };
             if !ready(*id, 15) { c.feed("~g~[Bác sĩ]~s~ Vừa chữa cho người này, chờ một chút."); return true; }
             send_reliable(net, proto::HEAL, &[*id], Some(*id));
             let balance = WALLET_CASH.fetch_add(150, Ordering::Relaxed) + 150;
             c.feed(&format!("~g~[Bác sĩ]~s~ Đã chữa trị cho {name}. ~g~+$150~s~ | Ví: ~g~${balance}~s~"));
+        }
+        Role::Gang => {
+            // Rob a nearby civilian/medic/driver (not police, not other gang members). The victim's
+            // client pays what its wallet really holds (PAID); the robbery itself adds a wanted star.
+            let names: HashMap<u8, Role> = net.peers.lock().unwrap().iter().map(|(id, p)| (*id, role_of(&p.name))).collect();
+            let target = nearby.iter().find(|(id, _, _, _, dead)| {
+                !dead && !matches!(names.get(id), Some(Role::Police) | Some(Role::Gang)) && !peer_role(*id).jailed
+            });
+            let Some((id, name, ..)) = target else { return false; };
+            if !ready(*id, 60) { c.feed("~r~[Băng đảng]~s~ Người này vừa bị cướp, chờ 1 phút."); return true; }
+            let amount: u16 = 300;
+            let mut payload = vec![*id];
+            payload.extend(amount.to_le_bytes());
+            send_reliable(net, proto::ROB, &payload, Some(*id));
+            let mut guard = MY_ROLE.lock().unwrap();
+            let me = guard.get_or_insert_with(MyRole::default);
+            me.wanted = (me.wanted + 1).min(5);
+            me.last_crime = Some(Instant::now());
+            c.feed(&format!("~r~[Băng đảng]~s~ Đang cướp {name}... Bạn bị truy nã {} ({} sao).", stars(me.wanted), me.wanted));
         }
         _ => {}
     }
@@ -1792,8 +1867,9 @@ fn role_tick(c: &mut Cmd, game: &mut Game, net: &Net, ped: i32, my_pos: [f32; 3]
         let text = match role {
             Role::Police => "~b~[Cảnh sát]~s~ Đến gần người bị truy nã (*) và bấm nút tương tác để còng tay, bắt vào tù.",
             Role::Medic => "~g~[Bác sĩ]~s~ Đến gần người bị thương và bấm nút tương tác để chữa trị.",
-            Role::Gang => "~r~[Băng đảng]~s~ Giết người sẽ bị truy nã. Tránh xa cảnh sát!",
-            _ => "~s~Giết người sẽ bị truy nã (*); cảnh sát có thể bắt bạn vào tù.",
+            Role::Gang => "~r~[Băng đảng]~s~ Đến gần người khác và bấm nút tương tác để cướp tiền (bị truy nã 1 sao). Tránh xa cảnh sát!",
+            Role::Driver => "~y~[Tài xế]~s~ Chở người chơi khác trên xe của bạn: nhận $40 mỗi khách mỗi 30 giây khi xe chạy.",
+            Role::Civilian => "~s~[Dân thường] Lương cao hơn ($400/3 phút). Bị cướp thì bấm giỏ hàng để gọi cảnh sát (911).",
         };
         c.feed(text);
     }
@@ -1814,6 +1890,34 @@ fn role_tick(c: &mut Cmd, game: &mut Game, net: &Net, ped: i32, my_pos: [f32; 3]
             RoleEvent::Healed { by } if !dead => {
                 c.i("SetEntityHealth", &[i(ped), i(200), i(0)]);
                 c.feed(&format!("~g~[Bác sĩ] {} đã chữa trị cho bạn.~s~", by_name(by)));
+            }
+            RoleEvent::Call { by, pos } if role == Role::Police => {
+                let at = c.vec_arg(1, pos);
+                let blip = c.i("AddBlipForCoord", &[at]);
+                if blip != 0 {
+                    c.i("SetBlipSprite", &[i(blip), i(280)]);
+                    c.i("SetBlipSprite2", &[i(blip), i(280)]);
+                    c.i("SetBlipColour", &[i(blip), i(1)]);
+                    c.i("SetBlipColour2", &[i(blip), i(1)]);
+                    c.i("SetBlipAsShortRange", &[i(blip), b(false)]);
+                    c.i("SetBlipAsShortRange2", &[i(blip), b(false)]);
+                    me.calls.push((blip, now));
+                }
+                c.play_frontend("CHECKPOINT_NORMAL", "HUD_MINI_GAME_SOUNDSET");
+                c.feed(&format!("~b~[911]~s~ {} gọi cảnh sát, cách bạn {:.0}m (đánh dấu đỏ trên bản đồ).", by_name(by), dist(pos, my_pos)));
+            }
+            RoleEvent::Robbed { by, amount } => {
+                let paid = amount.clamp(0, WALLET_CASH.load(Ordering::Relaxed).max(0));
+                WALLET_CASH.fetch_sub(paid, Ordering::Relaxed);
+                let mut payload = vec![by];
+                payload.extend((paid as u16).to_le_bytes());
+                send_reliable(net, proto::PAID, &payload, Some(by));
+                me.victim_until = Some(now + Duration::from_secs(120));
+                c.feed(&format!("~r~Bạn bị {} cướp mất ${paid}!~s~ Bấm giỏ hàng trong 2 phút để gọi cảnh sát (911).", by_name(by)));
+            }
+            RoleEvent::Paid { by, amount } => {
+                let balance = WALLET_CASH.fetch_add(amount, Ordering::Relaxed) + amount;
+                c.feed(&format!("~r~[Băng đảng]~s~ Cướp được ~g~${amount}~s~ từ {} | Ví: ~g~${balance}~s~", by_name(by)));
             }
             _ => {}
         }
@@ -1849,6 +1953,34 @@ fn role_tick(c: &mut Cmd, game: &mut Game, net: &Net, ped: i32, my_pos: [f32; 3]
                 me.last_jail_note = Some(now);
                 c.feed(&format!("~r~[Nhà tù]~s~ Còn {} giây.", until.duration_since(now).as_secs()));
             }
+        }
+    }
+
+    let expired: Vec<i32> = me.calls.iter().filter(|(_, t)| t.elapsed() >= Duration::from_secs(60)).map(|(blip, _)| *blip).collect();
+    if !expired.is_empty() {
+        me.calls.retain(|(_, t)| t.elapsed() < Duration::from_secs(60));
+        for blip in expired {
+            let r = c.ref_arg(blip);
+            c.i("RemoveBlip", &[r]);
+        }
+    }
+
+    if role == Role::Driver && !dead {
+        let car = c.i("GetVehiclePedIsIn", &[i(ped), b(false)]);
+        let driving = car != 0 && c.i("GetPedInVehicleSeat", &[i(car), i(-1), b(false)]) == ped && c.f("GetEntitySpeed", &[i(car)]) > 3.0;
+        match (driving, me.last_fare) {
+            (false, _) => me.last_fare = None,
+            (true, None) => me.last_fare = Some(now),
+            (true, Some(t)) if t.elapsed() >= Duration::from_secs(30) => {
+                me.last_fare = Some(now);
+                let passengers = taxi_passengers(net) as i32;
+                if passengers > 0 {
+                    let fare = 40 * passengers;
+                    let balance = WALLET_CASH.fetch_add(fare, Ordering::Relaxed) + fare;
+                    c.feed(&format!("~y~[Tài xế]~s~ Tiền cước {passengers} khách: ~g~+${fare}~s~ | Ví: ~g~${balance}~s~"));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2109,9 +2241,11 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     let mut last_pay = LAST_PAYCHECK.lock().unwrap();
     if last_pay.map(|t| t.elapsed() > Duration::from_secs(180)).unwrap_or(true) {
         if last_pay.is_some() {
-            let balance = WALLET_CASH.fetch_add(250, Ordering::Relaxed) + 250;
-            eprintln!("[economy] paycheck received: +$250 (balance: ${balance})");
-            c.feed(&format!("~g~+$250~s~ [Lương công dân] | Ví: ~g~${balance}~s~"));
+            // Civilians live on their wages: they get more than the other roles.
+            let pay = if my_role() == Role::Civilian { 400 } else { 250 };
+            let balance = WALLET_CASH.fetch_add(pay, Ordering::Relaxed) + pay;
+            eprintln!("[economy] paycheck received: +${pay} (balance: ${balance})");
+            c.feed(&format!("~g~+${pay}~s~ [Lương công dân] | Ví: ~g~${balance}~s~"));
         }
         *last_pay = Some(Instant::now());
     }
@@ -2127,7 +2261,7 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
         let dx = my_pos[0] - s.pos[0];
         let dy = my_pos[1] - s.pos[1];
         let dz = my_pos[2] - s.pos[2];
-        (dx * dx + dy * dy + dz * dz) < 16.0 // 4.0 meters
+        (dx * dx + dy * dy) < 36.0 && dz.abs() < 4.0 // within 6 m of the counter, same floor
     });
 
     if let Some(_shop) = near_shop {
@@ -2178,7 +2312,14 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
         }
     } else if AMMU_BUY_REQUESTED.swap(false, Ordering::Relaxed) && !role_interact(c, ped, my_pos) {
         let cash = WALLET_CASH.load(Ordering::Relaxed);
-        c.feed(&format!("~y~Ví: ~g~${cash}~y~. Hãy đến Ammu-Nation (~r~icon súng trên bản đồ~y~) để mua vũ khí!~s~"));
+        let nearest = WORLD_SHOPS.iter().filter(|s| s.sprite == 110).min_by(|a, b| dist(a.pos, my_pos).total_cmp(&dist(b.pos, my_pos)));
+        if let Some(shop) = nearest {
+            c.i("SetNewWaypoint", &[f(shop.pos[0]), f(shop.pos[1])]);
+            c.play_frontend("WAYPOINT_SET", "HUD_FRONTEND_DEFAULT_SOUNDSET");
+            c.feed(&format!("~y~Ví: ~g~${cash}~y~. Đã đặt GPS tới Ammu-Nation gần nhất (~w~{:.0}m~y~). Tới quầy rồi bấm giỏ hàng để mua.~s~", dist(shop.pos, my_pos)));
+        } else {
+            c.feed(&format!("~y~Ví: ~g~${cash}~y~. Hãy đến Ammu-Nation (~r~icon súng trên bản đồ~y~) để mua vũ khí!~s~"));
+        }
     }
 }
 

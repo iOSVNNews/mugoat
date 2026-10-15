@@ -38,6 +38,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private let touchControls = TouchControlsView(frame: .zero)
     private let gyro = GyroInput()
     private var engineStarted = false
+    /// The engine stopped with an error: it can only start again in a new app process.
+    private var engineFailed = false
     private var bootedPreset = GameSettings.shared.graphicsPreset
     /// Render height multiplier while the phone is hot (1 = the chosen resolution).
     private var thermalScale = 1.0
@@ -329,14 +331,14 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             audioEngine.stop()
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             metalView.isPaused = true
-            engineStarted = false
-            launchButton.isEnabled = true
+            engineFailed = true
+            launchButton.isEnabled = false
+            launchButton.setTitle(L10n.text("Tắt hẳn app rồi mở lại"), for: .disabled); launchButton.setNeedsUpdateConfiguration()
             home.isHidden = false
             home.alpha = 1.0
             home.settingsButton.isHidden = false
             home.layoutButton.isHidden = false
-            refreshModeChoice()
-            showWhenFree(title: L10n.text("Không thể vào game"), message: line)
+            showWhenFree(title: L10n.text("Không thể vào game"), message: line + "\n\n" + L10n.text("Hãy tắt hẳn ứng dụng (vuốt lên khỏi đa nhiệm) rồi mở lại. Nếu lỗi lặp lại, gửi file native-port-previous.log trong thư mục Mugoat."))
         }
         if let logFile, let data = (line + "\n").data(using: .utf8),
            let handle = try? FileHandle(forWritingTo: logFile) {
@@ -941,7 +943,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     }
     /// Missing files or a mode choice are handled by tapping Play; only a running engine locks it.
     private func updatePlayEnabled() {
-        launchButton.isEnabled = !engineStarted
+        launchButton.isEnabled = !engineStarted && !engineFailed
     }
     static func isServerAddress(_ text: String) -> Bool {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), let host = url.host else { return false }

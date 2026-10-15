@@ -88,7 +88,7 @@ async function main() {
   if (finalStatus) {
     console.log('[AutoWatcher] Đang lưu và commit các thay đổi của Claude...');
     exec('git', ['add', '-A']);
-    exec('git', ['commit', '-m', 'feat(graphics,audio,mp): frame pacing, thermal scaling, wallet persistence and audio route fixes']);
+    exec('git', ['commit', '-m', 'feat(v2.0): shopping waypoint, 911 dispatch, robbery & taxi mechanics, audio routing fixes']);
   }
 
   // 2. Push to origin main
@@ -99,20 +99,36 @@ async function main() {
     console.error('[AutoWatcher] Lỗi push:', err.message);
   }
 
+  // Record current run ID before triggering
+  let prevRunId = 0;
+  try {
+    const listBefore = JSON.parse(exec('gh', ['run', 'list', '--workflow=build-mugoat-native.yml', '--limit', '1', '--json', 'databaseId']));
+    if (listBefore.length > 0) prevRunId = listBefore[0].databaseId;
+  } catch {}
+
   // 3. Trigger build workflow
   console.log('[AutoWatcher] Đang kích hoạt workflow build Mugoat Native IPA v2.0...');
   cp.execFileSync('gh', ['workflow', 'run', 'build-mugoat-native.yml', '--ref', 'main'], { cwd: rootDir, stdio: 'inherit' });
 
-  // 4. Wait for run to register
-  await sleep(8000);
-  const runList = exec('gh', ['run', 'list', '--workflow=build-mugoat-native.yml', '--limit', '1', '--json', 'databaseId,status']);
-  const runs = JSON.parse(runList);
-  if (!runs.length) {
-    console.error('[AutoWatcher] Không tìm thấy workflow run!');
+  // 4. Wait for new run to register
+  let runId = null;
+  for (let attempt = 0; attempt < 25; attempt++) {
+    await sleep(3000);
+    try {
+      const runList = exec('gh', ['run', 'list', '--workflow=build-mugoat-native.yml', '--limit', '1', '--json', 'databaseId,status']);
+      const runs = JSON.parse(runList);
+      if (runs.length && runs[0].databaseId !== prevRunId) {
+        runId = runs[0].databaseId;
+        break;
+      }
+    } catch {}
+  }
+
+  if (!runId) {
+    console.error('[AutoWatcher] Không thể xác định run ID mới của workflow!');
     return;
   }
 
-  const runId = runs[0].databaseId;
   console.log(`[AutoWatcher] Đang theo dõi realtime tiến trình build: ${runId}...`);
   cp.execFileSync('gh', ['run', 'watch', String(runId)], { cwd: rootDir, stdio: 'inherit' });
 

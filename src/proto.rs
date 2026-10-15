@@ -109,6 +109,12 @@ pub const ROLE: u8 = 24;
 pub const ARREST: u8 = 25;
 /// Reliable: a medic treats [target id].
 pub const HEAL: u8 = 26;
+/// Reliable, to everyone: a civilian calls the police from [x, y, z] (f32 each).
+pub const CALL911: u8 = 27;
+/// Reliable: a gang member robs [target id, amount u16].
+pub const ROB: u8 = 28;
+/// Reliable: the robbed player hands over [robber id, amount u16] (what the wallet really held).
+pub const PAID: u8 = 29;
 
 pub const WEATHERS: [&str; 14] = [
     "EXTRASUNNY", "CLEAR", "CLOUDS", "SMOG", "FOGGY", "OVERCAST", "RAIN", "THUNDER",
