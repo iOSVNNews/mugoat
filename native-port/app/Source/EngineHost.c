@@ -1557,11 +1557,6 @@ void w2c_game_f63032(w2c_game*, u64);
 u32 w2c_game_f58715(w2c_game*); // PLAYER_PED_ID
 static _Atomic bool aircraftWeaponRequested;
 void PGNextAircraftWeapon(void) { atomic_store(&aircraftWeaponRequested, true); }
-static uint32_t pg_joaat(const char *text) {
-  uint32_t h = 0;
-  for (const char *c = text; *c; c++) { h += (uint8_t)(*c >= 'A' && *c <= 'Z' ? *c + 32 : *c); h += h << 10; h ^= h >> 6; }
-  h += h << 3; h ^= h >> 11; h += h << 15; return h;
-}
 static void pg_next_aircraft_weapon(w2c_game *instance) {
   if (!atomic_exchange(&aircraftWeaponRequested, false)) return;
   static const char *names[] = {"VEHICLE_WEAPON_PLAYER_LAZER", "VEHICLE_WEAPON_SPACE_ROCKET", "VEHICLE_WEAPON_PLAYER_BUZZARD",
