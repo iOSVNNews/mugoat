@@ -26,17 +26,7 @@ static inline uint32_t pg_touch_context(const uint8_t *memory,uint64_t size){
  if(!pg_context_u64(memory,size,info+8,&check) || check!=ped)return 0;
  if(!pg_context_u64(memory,size,ped+5576,&check) || check!=vehicle)return 0;
  if(!(atomic_load_explicit((const _Atomic uint8_t *)(memory+ped+5291),memory_order_relaxed)&64))return 0;
- // GTA V Vehicle classes:
- // 0: Compacts, 1: Sedans, 2: SUVs, 3: Coupes, 4: Muscle, 5: Sports Classics,
- // 6: Sports, 7: Super, 8: Motorcycles, 9: Off-road, 10: Industrial, 11: Utility,
- // 12: Vans, 13: Cycles, 14: Boats, 15: Helicopters, 16: Planes, 17: Service,
- // 18: Emergency, 19: Military, 20: Commercial, 21: Trains, 22: Open Wheel
- switch (kind) {
-   case 15: return 9;  // Helicopters -> .heli
-   case 16: return 2;  // Planes -> .plane
-   case 8:  return 12; // Motorcycles -> .bike
-   case 13: return 13; // Cycles / Bicycles -> .bicycle
-   case 14: return 14; // Boats -> .boat
-   default: return 1;  // Cars, sedans, SUVs, trucks, vans, etc. -> .car (1)
- }
+ // 0 on foot, otherwise the engine's vehicle type + 1 (car 1, plane 2, heli 9,
+ // blimp 10, bike 12, bicycle 13, boat 14, submarine 16, ...).
+ return kind + 1;
 }

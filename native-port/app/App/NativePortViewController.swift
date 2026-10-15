@@ -1284,24 +1284,17 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
     }
     /// The engine follows back-buffer size changes while running.
-    /// A hot phone lowers its clocks and the frame rate drops for minutes. Rendering fewer pixels while
-    /// iOS reports serious/critical heat keeps it smoother and lets it cool; the resolution returns after.
     @objc private func thermalStateChanged() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let state = ProcessInfo.processInfo.thermalState
-            let scale = state == .critical ? 0.65 : state == .serious ? 0.8 : 1.0
-            guard scale != self.thermalScale else { return }
-            self.thermalScale = scale
-            self.appendLog("Thermal state \(state.rawValue): render resolution ×\(scale)")
-            self.applyLiveResolution()
+            self.appendLog("Thermal state changed to \(state.rawValue)")
         }
     }
     private func applyLiveResolution() {
         guard engineStarted else { return }
         let settings = GameSettings.shared
-        let chosenHeight = settings.renderHeight > 0 ? settings.renderHeight : bootedPreset.height
-        let renderHeight = thermalScale < 1 ? Int(Double(chosenHeight) * thermalScale) : settings.renderHeight
+        let renderHeight = settings.renderHeight > 0 ? settings.renderHeight : bootedPreset.height
         let (width, height) = GraphicsConfiguration.size(for: bootedPreset, renderHeight: renderHeight, screen: view.bounds.size, matchScreenShape: settings.matchScreenShape)
         PGSetBackBufferSize(Int32(width), Int32(height))
         appendLog("Graphics: live resize to \(width)×\(height)")
@@ -1422,15 +1415,32 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         if !pcControls {
             var keys = PGPadState()
             func held(_ key: UIKeyboardHIDUsage) -> Float { hardwareKeys.contains(key) ? 1 : 0 }
-            keys.leftX = held(.keyboardD) - held(.keyboardA)
-            keys.leftY = held(.keyboardW) - held(.keyboardS)
+            let isPlane = (vehicle == 2 || vehicle == 17 || vehicle == 9 || vehicle == 10 || vehicle == 16)
+            if isPlane {
+                // Aircraft flight: W throttle up, S throttle down, Q yaw left, E yaw right, A/D roll, Arrows pitch
+                keys.leftX = held(.keyboardD) - held(.keyboardA)
+                let pitch = held(.keyboardUpArrow) - held(.keyboardDownArrow)
+                keys.leftY = pitch != 0 ? pitch : (held(.keyboardW) - held(.keyboardS))
+                keys.rightTrigger = max(held(.keyboardX), held(.keyboardW))
+                keys.leftTrigger = max(held(.keyboardZ), held(.keyboardS))
+            } else if vehicle != 0 {
+                // Ground / water vehicles: W gas, S brake/reverse, A/D steer
+                keys.leftX = held(.keyboardD) - held(.keyboardA)
+                keys.leftY = 0
+                keys.rightTrigger = max(held(.keyboardX), held(.keyboardW))
+                keys.leftTrigger = max(held(.keyboardZ), held(.keyboardS))
+            } else {
+                // On foot: WASD move
+                keys.leftX = held(.keyboardD) - held(.keyboardA)
+                keys.leftY = held(.keyboardW) - held(.keyboardS)
+                keys.leftTrigger = held(.keyboardZ); keys.rightTrigger = held(.keyboardX)
+            }
             keys.rightX = held(.keyboardRightArrow) - held(.keyboardLeftArrow)
-            keys.rightY = held(.keyboardUpArrow) - held(.keyboardDownArrow)
-            keys.leftTrigger = held(.keyboardZ); keys.rightTrigger = held(.keyboardX)
+            keys.rightY = isPlane ? 0 : (held(.keyboardUpArrow) - held(.keyboardDownArrow))
             let map: [(UIKeyboardHIDUsage, PadButtons)] = [
                 (.keyboardSpacebar, .x), (.keyboardLeftShift, .a), (.keyboardF, .y), (.keyboardR, .b),
-                (.keyboardQ, .r1), (.keyboardTab, .l1), (.keyboardV, .select), (.keyboardM, .select),
-                (.keyboardEscape, .start), (.keyboardP, .start), (.keyboardE, .l3), (.keyboardLeftControl, .l3),
+                (.keyboardQ, .l1), (.keyboardE, .r1), (.keyboardTab, .l1), (.keyboardV, .select), (.keyboardM, .select),
+                (.keyboardEscape, .start), (.keyboardP, .start), (.keyboardLeftControl, .l3),
                 (.keyboardC, .r3), (.keyboardReturnOrEnter, .a), (.keyboardDeleteOrBackspace, .b),
                 (.keyboardI, .up), (.keyboardK, .down), (.keyboardJ, .left), (.keyboardL, .right)
             ]
