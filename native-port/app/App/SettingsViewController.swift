@@ -85,6 +85,7 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        switch Section(rawValue: section)! {
         case .cheat: return isOnline ? 1 : 2
         case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 4
