@@ -34,6 +34,16 @@ def generate(header, metadata):
         calls.append(f'if(!strcmp(name,{json.dumps(name)})) {{ if(count!={len(params)} || ({checks}))return false; {body} return true; }}')
     tls_type, tls_symbol, tls_params = exports['mugoat:tls-base']
     if tls_type != 'u64*' or tls_params: raise ValueError('Unexpected TLS export')
+    aliases = []
+    for name, index in metadata.get('indices', {}).items():
+        if name in exports:
+            result, symbol, params = exports[name]
+            param_defs = ', '.join([f'{t} a{i}' for i, t in enumerate(params)])
+            param_names = ''.join([f', a{i}' for i in range(len(params))])
+            full_params = f'w2c_game *instance' + (f', {param_defs}' if param_defs else '')
+            call_args = f'instance{param_names}'
+            ret = 'return ' if result != 'void' else ''
+            aliases.append(f'{result} w2c_game_f{index}({full_params}) {{ {ret}{symbol}({call_args}); }}')
     source = '''#include "HostInternal.h"
 #include "MugoatOnline.h"
 #include <string.h>
@@ -51,7 +61,7 @@ uint8_t *mugoat_memory_data(void *instance,uint64_t *size){
  wasm_rt_shared_memory_t *memory=w2c_env_memory(host);
  *size=memory->size;return (uint8_t*)(void*)memory->data;
 }
-'''
+''' + '\n'.join(aliases) + '\n'
     return source, tls_symbol
 
 def patch_hook(source, index, injection):

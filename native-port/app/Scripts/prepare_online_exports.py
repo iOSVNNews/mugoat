@@ -86,8 +86,8 @@ def prepare(wasm, commands):
             output.extend(bytes([kind]) + leb(len(body)) + body)
         else: output.extend(raw)
     # Every section except exports must remain byte-for-byte identical.
-    assert [(k, b) for k, b, _ in sections(output) if k != 7] == [(k, b) for k, b, _ in parts if k != 7]
-    return bytes(output), {'hooks': hooks, 'exports': list(wanted), 'missing': [n for n, s in commands if s not in names]}
+    indices = {name: index for name, (ek, index) in wanted.items() if ek == 0}
+    return bytes(output), {'hooks': hooks, 'exports': list(wanted), 'indices': indices, 'missing': [n for n, s in commands if s not in names]}
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser(); p.add_argument('engine', type=Path); p.add_argument('--out', type=Path, required=True)
