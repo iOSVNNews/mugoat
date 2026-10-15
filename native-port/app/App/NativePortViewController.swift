@@ -1439,7 +1439,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             keys.rightY = isPlane ? 0 : (held(.keyboardUpArrow) - held(.keyboardDownArrow))
             let map: [(UIKeyboardHIDUsage, PadButtons)] = [
                 (.keyboardSpacebar, .x), (.keyboardLeftShift, .a), (.keyboardF, .y), (.keyboardR, .b),
-                (.keyboardQ, .l1), (.keyboardE, .r1), (.keyboardTab, .l1), (.keyboardV, .select), (.keyboardM, .select),
+                (.keyboardQ, .l1), (.keyboardE, .r1), (.keyboardTab, isPlane ? .x : .l1), (.keyboardV, .select), (.keyboardM, .select),
                 (.keyboardEscape, .start), (.keyboardP, .start), (.keyboardLeftControl, .l3),
                 (.keyboardC, .r3), (.keyboardReturnOrEnter, .a), (.keyboardDeleteOrBackspace, .b),
                 (.keyboardI, .up), (.keyboardK, .down), (.keyboardJ, .left), (.keyboardL, .right)

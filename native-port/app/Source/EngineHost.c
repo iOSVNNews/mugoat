@@ -1559,8 +1559,11 @@ static _Atomic bool aircraftWeaponRequested;
 void PGNextAircraftWeapon(void) { atomic_store(&aircraftWeaponRequested, true); }
 static void pg_next_aircraft_weapon(w2c_game *instance) {
   if (!atomic_exchange(&aircraftWeaponRequested, false)) return;
-  static const char *names[] = {"VEHICLE_WEAPON_PLAYER_LAZER", "VEHICLE_WEAPON_SPACE_ROCKET", "VEHICLE_WEAPON_PLAYER_BUZZARD",
-                                "VEHICLE_WEAPON_PLAYER_SAVAGE", "VEHICLE_WEAPON_PLAYER_BULLET", "VEHICLE_WEAPON_PLANE_ROCKET"};
+  static const char *names[] = {
+    "VEHICLE_WEAPON_PLAYER_LAZER", "VEHICLE_WEAPON_PLANE_ROCKET", "VEHICLE_WEAPON_SPACE_ROCKET",
+    "VEHICLE_WEAPON_PLAYER_BUZZARD", "VEHICLE_WEAPON_PLAYER_SAVAGE", "VEHICLE_WEAPON_PLAYER_BULLET",
+    "VEHICLE_WEAPON_TURRET_VALKYRIE", "VEHICLE_WEAPON_TURRET_INSURGENT", "VEHICLE_WEAPON_CANNON_BLAZER"
+  };
   enum { COUNT = sizeof names / sizeof *names };
   static uint64_t call; // native call info: +0 result pointer, +16 arguments; then result and arguments
   if (!call) call = w2c_game_f100(instance, 64);

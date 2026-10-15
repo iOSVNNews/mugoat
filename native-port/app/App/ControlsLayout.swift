@@ -9,7 +9,7 @@ struct ControlsLayout {
     }
     private static let key = "controlsLayout"
     /// Never hidden: the game cannot be played (or left) without them.
-    static let essential: Set<String> = ["fire", "aim", "enter", "gas", "brake", "pause", "settings", "airFire", "cheat", "speaker", "mic", "buyWeapon"]
+    static let essential: Set<String> = ["fire", "aim", "enter", "gas", "brake", "pause", "settings", "airFire", "vehicleWeapon", "cheat", "speaker", "mic", "buyWeapon"]
 
     static var entries: [String: Entry] {
         get {

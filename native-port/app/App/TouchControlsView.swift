@@ -39,7 +39,8 @@ enum ControlStyle {
         "mic": "mic.fill", "mic_muted": "mic.slash.fill", "buy_weapon": "cart.fill",
         "tow_hook": "car.side.rear.tow.hitch.fill", "tow_arm_up": "arrow.up.to.line", "tow_arm_down": "arrow.down.to.line", "roof": "convertible.side.arrowtriangle.up.arrowtriangle.down.fill",
         "steer_left": "arrowtriangle.left.fill", "steer_right": "arrowtriangle.right.fill",
-        "phone_option": "circle.grid.3x3.fill", "taxi_hurry": "hare.fill", "taxi_stop": "stop.fill"]
+        "phone_option": "circle.grid.3x3.fill", "taxi_hurry": "hare.fill", "taxi_stop": "stop.fill",
+        "missile": "flame.fill"]
     /// iOS 15-17 have no tow hitch or convertible symbols (they came in iOS 18).
     static let olderSymbol: [String: String] = [
         "tow_hook": "truck.pickup.side.fill", "roof": "car.side.arrowtriangle.up.arrowtriangle.down.fill"]
@@ -525,6 +526,8 @@ final class TouchControlsView: UIView {
         weapons.setIcon("weapons")
         enter.accessibilityLabel = context == .onFoot ? "Enter vehicle" : context.flying ? "Hold to exit aircraft" : "Exit vehicle"
         gas.setIcon(context == .bicycle ? "pedal" : "gas")
+        vehicleWeapon.setIcon(context.flying ? "missile" : "vehicle_weapon")
+        vehicleWeapon.accessibilityLabel = context.flying ? "Switch aircraft weapons (missiles / cannons)" : "Next vehicle weapon"
         if MugoatOnlineEnabled() {
             let spkOn = MugoatVoiceIsSpeakerEnabled()
             speaker.setIcon(spkOn ? "speaker" : "speaker_muted")
@@ -598,7 +601,9 @@ final class TouchControlsView: UIView {
         place(driveBy, 0.655, 0.50, 58)
         place(horn, 0.06, 0.36, 46)
         place(lookBack, 0.155, 0.36, 44)
-        place(vehicleWeapon, 0.955, 0.17, 48)
+        if !context.flying {
+            place(vehicleWeapon, 0.955, 0.17, 48)
+        }
         pedal(surface, 0.655, 0.64, 62, 66)
         pedal(dive, 0.655, 0.84, 62, 66)
         place(steerLeft, 0.08, 0.76, 80)
@@ -611,6 +616,9 @@ final class TouchControlsView: UIView {
         // Aircraft: the left stick flies; the right thumb works throttle pedals and the rudder, and
         // anywhere else on the right looks around.
         place(airFire, 0.80, 0.30, 62)
+        if context.flying {
+            place(vehicleWeapon, 0.935, 0.26, 54)
+        }
         place(gear, 0.655, 0.24, 46)
         pedal(throttleUp, 0.905, 0.56, 74, 96)
         pedal(throttleDown, 0.905, 0.85, 74, 64)
@@ -763,8 +771,9 @@ final class TouchControlsView: UIView {
             roles[id] = .weaponWheel(start: point, current: point)
             updateVisibility()
         case vehicleWeapon where context.flying:
-            // INPUT_VEH_FLY_SELECT_NEXT_WEAPON shares D-pad left with the radio (a tap changes the
-            // station), so the cannon/missiles switch directly instead.
+            // Cycle aircraft weapons: send .x (Square/X) to GTA V's vehicle weapon manager,
+            // with script fallback via PGNextAircraftWeapon().
+            pulse(.x, for: 0.15)
             PGNextAircraftWeapon()
         case roof:
             // INPUT_VEH_ROOF is D-pad right held (a short press is the headlights).
@@ -1098,6 +1107,7 @@ final class TouchControlsView: UIView {
             if yawLeft.pressed { held.insert(.l1) }
             if yawRight.pressed { held.insert(.r1) }
             if airFire.pressed { held.insert(.a) }
+            if vehicleWeapon.pressed { held.insert(.x) }
             if gear.pressed { held.insert(.l3) }
             if let start = exitHoldStart {
                 // Leaving an aircraft needs a short hold, so a slip cannot bail out.
