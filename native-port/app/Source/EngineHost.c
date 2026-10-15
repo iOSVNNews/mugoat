@@ -1973,11 +1973,11 @@ static void *boot(void *ignored) {
   (void)pg_engine_memory_mb();
   uint64_t physicalMemory=0;size_t physicalMemorySize=sizeof physicalMemory;
   if(sysctlbyname("hw.memsize",&physicalMemory,&physicalMemorySize,NULL,0)!=0)pg_log("Physical RAM query failed; using the engine's declared maximum address space.");
-  // The player's choice (Settings › Graphics › RAM for the game) replaces the device RAM; the
-  // default stays the full RAM. Some installs can't reserve that much (no extended virtual
-  // addressing): a lower number avoids "iOS could not reserve the engine memory".
+  // Automatic RAM sizing: defaults to full physical RAM. If iOS refuses a large reservation
+  // (e.g. installs signed without extended-virtual-addressing, or memory pressure), the engine
+  // automatically steps down the reservation to avoid "iOS could not reserve the engine memory".
   uint64_t sizingBytes=configuredEngineMB?configuredEngineMB*1048576:physicalMemory;
-  if(configuredEngineMB){char line[128];snprintf(line,sizeof line,"RAM for the game set by the player: %llu MB (device %llu MB).",(unsigned long long)configuredEngineMB,(unsigned long long)(physicalMemory/1048576));pg_log(line);}
+  if(configuredEngineMB){char line[128];snprintf(line,sizeof line,"RAM for the game configured: %llu MB (device %llu MB).",(unsigned long long)configuredEngineMB,(unsigned long long)(physicalMemory/1048576));pg_log(line);}
   PGEngineMemory memoryConfiguration=pg_engine_memory(sizingBytes,wasm2c_game_pagesize_env_memory);
   char memoryLog[256];snprintf(memoryLog,sizeof memoryLog,"Device RAM: %llu MB; engine virtual capacity: %llu MB; initial logical heap: %llu MB. Native streaming RAM clamp active with 384 MB headroom reserve.",physicalMemory/1048576,memoryConfiguration.maximumPages*wasm2c_game_pagesize_env_memory/1048576,memoryConfiguration.initialPages*wasm2c_game_pagesize_env_memory/1048576);pg_log(memoryLog);
 #if defined(PG_HAS_ARM64_SHARED_VECTORS) && !defined(PG_SHARED_SIMD_BYTEWISE)
@@ -1994,21 +1994,26 @@ static void *boot(void *ignored) {
   // The full maximum is mapped up front, then an inaccessible guard region:
   // unchecked builds (PG_UNCHECKED_MEMORY) rely on it so that an access past
   // the end faults instead of touching unrelated memory.
-  const uint64_t guardBytes=64ull<<20;
+  uint64_t guardBytes=64ull<<20;
   // Without the extended-virtual-addressing entitlement (stripped by some signing services) iOS
-  // refuses a reservation the size of the whole RAM: retry smaller, down to the engine's minimum.
+  // refuses a reservation the size of the whole RAM: automatically retry smaller down to what iOS allows.
   void *allocation=mmap(NULL,capacity+guardBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
-  const uint64_t minimumPages=(PG_ENGINE_MEMORY_MIN_BYTES+env.memory.page_size-1)/env.memory.page_size;
-  const uint64_t stepPages=(512ull<<20)/env.memory.page_size;
+  const uint64_t minimumPages=(1536ull*1048576+env.memory.page_size-1)/env.memory.page_size;
+  const uint64_t stepPages=(256ull<<20)/env.memory.page_size;
   while (allocation==MAP_FAILED && env.memory.max_pages>minimumPages) {
     env.memory.max_pages=env.memory.max_pages>minimumPages+stepPages?env.memory.max_pages-stepPages:minimumPages;
     if (env.memory.pages>env.memory.max_pages) { env.memory.pages=env.memory.max_pages; env.memory.size=env.memory.pages*env.memory.page_size; }
     capacity=env.memory.max_pages*env.memory.page_size;
     allocation=mmap(NULL,capacity+guardBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
-    if (allocation!=MAP_FAILED) { char line[128]; snprintf(line,sizeof line,"Engine memory reserved at %llu MB after the full size was refused.",capacity/1048576); pg_log(line); }
+    if (allocation!=MAP_FAILED) { char line[128]; snprintf(line,sizeof line,"Engine memory automatically adjusted and reserved at %llu MB after larger reservation was refused.",capacity/1048576); pg_log(line); break; }
+  }
+  if (allocation==MAP_FAILED && guardBytes>0) {
+    guardBytes=0;
+    allocation=mmap(NULL,capacity,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    if (allocation!=MAP_FAILED) { char line[128]; snprintf(line,sizeof line,"Engine memory automatically reserved at %llu MB (guard region omitted for low-memory device).",capacity/1048576); pg_log(line); }
   }
   if (allocation==MAP_FAILED) { pg_log("iOS could not reserve the engine memory."); return NULL; }
-  if (mprotect((uint8_t *)allocation+capacity,guardBytes,PROT_NONE)) pg_log("Engine memory guard region could not be protected.");
+  if (guardBytes>0 && mprotect((uint8_t *)allocation+capacity,guardBytes,PROT_NONE)) pg_log("Engine memory guard region could not be protected.");
   env.memory.data=(_Atomic volatile uint8_t *)allocation;
 #if TARGET_OS_SIMULATOR
   {char line[96];snprintf(line,sizeof line,"Engine memory at %p (simulator, for debugger watchpoints).",allocation);pg_log(line);}
