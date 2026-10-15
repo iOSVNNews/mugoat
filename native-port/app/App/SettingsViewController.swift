@@ -80,9 +80,13 @@ final class SettingsViewController: UITableViewController {
         if let text = label?.text { label?.text = L10n.text(text) }
     }
 
+    private var isOnline: Bool {
+        MugoatOnlineEnabled() || OnlineSettings.enabled
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
-        case .cheat: return 2
+        case .cheat: return isOnline ? 1 : 2
         case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 3
         case .controls: return 11
@@ -93,12 +97,16 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        [L10n.text("Menu Cheat & Mod"), L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
+        let cheatHeader = isOnline ? L10n.text("Quản lý Mod") : L10n.text("Menu Cheat & Mod")
+        return [cheatHeader, L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .cheat:
+            if isOnline {
+                return L10n.text("Mục Cheat bị ẩn khi chơi Online để đảm bảo công bằng. Bạn có thể mở Quản lý Mod để cài đặt tệp mod.")
+            }
             return L10n.text("Menu Cheat cho phép kích hoạt ngay các tính năng gian lận, spawn phương tiện và can thiệp game. Bạn cũng có thể mở Quản lý Mod để cài đặt tệp mod vào game.")
         case .mode:
             var text = L10n.text("Story mode saves stay on this phone between launches. Sandbox keeps its own separate files.")
@@ -130,7 +138,12 @@ final class SettingsViewController: UITableViewController {
         let presets = settings.tier.allowed
         switch Section(rawValue: indexPath.section)! {
         case .cheat:
-            if indexPath.row == 0 {
+            if isOnline {
+                content.text = L10n.text("Quản lý Mod riêng biệt")
+                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/mods")
+                cell.accessoryType = .disclosureIndicator
+                cell.selectionStyle = .default
+            } else if indexPath.row == 0 {
                 content.text = L10n.text("Menu Cheat (Trainer)")
                 content.secondaryText = L10n.text("Kích hoạt bất tử, full vũ khí, gọi xe cộ, máy bay, đổi thời tiết...")
                 cell.accessoryType = .disclosureIndicator
@@ -339,8 +352,13 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         if indexPath.section == Section.cheat.rawValue {
-            if indexPath.row == 0 { openCheat?() }
-            else { if let openMods { openMods() } else { showModManager() } }
+            if isOnline {
+                if let openMods { openMods() } else { showModManager() }
+            } else if indexPath.row == 0 {
+                openCheat?()
+            } else {
+                if let openMods { openMods() } else { showModManager() }
+            }
             return
         }
         if indexPath.section == Section.device.rawValue, indexPath.row == 4 {

@@ -1584,25 +1584,34 @@ fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     // Give basic melee knife:
     let knife = weapon("weapon_knife") as i32;
     let _ = c.i("GiveWeaponToPed", &[i(ped), i(knife), i(1), b(false), b(false)]);
-    let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(knife), b(true)]);
+
+    // Always give starting pistol so players can switch to guns immediately:
+    let pistol = weapon("weapon_pistol") as i32;
+    let _ = c.i("GiveWeaponToPed", &[i(ped), i(pistol), i(60), b(false), b(false)]);
+    let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(pistol), b(true)]);
     let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+
     // Re-grant purchased weapons
-    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
-    for &wh in &purchased {
+    let mut purchased = PURCHASED_WEAPONS.lock().unwrap();
+    if !purchased.contains(&(pistol as u32)) {
+        purchased.push(pistol as u32);
+    }
+    for &wh in purchased.iter() {
         let _ = c.i("GiveWeaponToPed", &[i(ped), i(wh as i32), i(120), b(false), b(false)]);
     }
-    eprintln!("[economy] stripped all cheat/singleplayer weapons; initialized player wallet at ${}", WALLET_CASH.load(Ordering::Relaxed));
+    eprintln!("[economy] stripped cheat weapons; granted starting pistol + knife, wallet: ${}", WALLET_CASH.load(Ordering::Relaxed));
 }
 
 fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
     if ped == 0 || !c.exists(ped) { return; }
     let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
     let knife_h = weapon("weapon_knife");
+    let pistol_h = weapon("weapon_pistol");
     let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
 
     for &w_name in ALL_CHEAT_WEAPONS {
         let wh = weapon(w_name);
-        if wh == knife_h || purchased.contains(&wh) {
+        if wh == knife_h || wh == pistol_h || purchased.contains(&wh) {
             continue;
         }
         let has_w = c.i("HasPedGotWeapon", &[i(ped), i(wh as i32), b(false)]) != 0
@@ -1613,7 +1622,7 @@ fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
             let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(wh as i32)]);
             let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
             if cur_w == wh {
-                let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(knife_h as i32), b(true)]);
+                let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(pistol_h as i32), b(true)]);
             }
             eprintln!("[anti-cheat] stripped unpurchased weapon: {w_name}");
         }
@@ -1657,13 +1666,15 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
         eprintln!("[mp/sandbox] rescued player from ({my_pos:?}, mansion_trap={is_in_mansion_trap}) to Legion Square {spawn_pos:?}");
     }
 
-    // 2. Disable in-game phone controls in engine
-    c.i("DisableControlAction", &[i(0), i(27), b(true)]);
-    c.i("DisableControlAction2", &[i(0), i(27), b(true)]);
-    c.i("DisableControlAction", &[i(0), i(172), b(true)]);
-    c.i("DisableControlAction2", &[i(0), i(172), b(true)]);
+    // Only apply multiplayer economy/anti-cheat restrictions in MULTIPLAYER (Sandbox Online or Story Online)
+    // In Sandbox OFFLINE (!is_mp), players can freely test all weapons and sandbox features.
+    if !is_mp {
+        return;
+    }
 
-    // 3. Neutralize in-game cell phone godmode (1-999-PAINKILLER)
+    // 2. Cell phone controls are NOT disabled: player can freely bring out and use their in-game cell phone!
+
+    // 3. Neutralize in-game cell phone godmode (1-999-PAINKILLER) in multiplayer
     c.i("SetEntityInvincible", &[i(ped), b(false)]);
     let player_id = c.i("PlayerId", &[]);
     if player_id != 0 {
@@ -1671,11 +1682,11 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
         c.i("SetPlayerInvincible2", &[i(player_id), b(false)]);
     }
 
-    // 4. Neutralize cell phone infinite ammo and slowmo
+    // 4. Neutralize cell phone infinite ammo and slowmo in multiplayer
     c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
     c.i("SetTimeScale", &[f(1.0)]);
 
-    // 5. Strip unpurchased weapons every tick
+    // 5. Strip unpurchased cheat weapons every tick in multiplayer
     let count = SANDBOX_STARTUP_TICKS.fetch_add(1, Ordering::Relaxed);
     if count < 30 && count % 5 == 0 {
         strip_all_unauthorized_weapons(c, ped);
@@ -1809,8 +1820,8 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
         game.my_car = my_car;
     }
 
-    let is_sandbox = std::env::var("MUGUET_MODE").map(|m| m == "sandbox").unwrap_or(false);
-    if me_ok && (my_id.is_some() || is_sandbox) {
+    let is_mp = crate::input::muguet_is_multiplayer() || my_id.is_some();
+    if me_ok && is_mp {
         if !WEAPONS_INITIALIZED.swap(true, Ordering::Relaxed) {
             strip_all_unauthorized_weapons(c, ped);
         }
