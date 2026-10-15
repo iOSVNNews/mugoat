@@ -77,6 +77,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("RequestWeaponAsset", "weapon_commands::RequestWeaponAsset(int, int, int)"),
     ("HasWeaponAssetLoaded", "weapon_commands::HasWeaponAssetLoaded(int)"),
     ("GetPlayerInvincible", "player_commands::CommandGetPlayerInvincible(int)"),
+    ("SetPlayerInvincible", "player_commands::CommandSetPlayerInvincible(int, bool)"),
+    ("SetPlayerInvincible2", "player_commands::SetPlayerInvincible(int, bool)"),
     ("GetEntityCanBeDamaged", "entity_commands::CommandGetEntityCanBeDamaged(int)"),
     ("GetVehicleEngineHealth", "vehicle_commands::CommandGetVehicleEngineHealth(int)"),
     ("SetVehicleEngineHealth", "vehicle_commands::CommandSetVehicleEngineHealth(int, float)"),
@@ -143,6 +145,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("SetPedArmour", "ped_commands::CommandSetPedArmour(int, int)"),
     ("SetTimeScale", "misc_commands::CommandSetTimeScale(float)"),
     ("IsControlPressed", "pad_commands::CommandIsControlPressed(int, int)"),
+    ("DisableControlAction", "pad_commands::CommandDisableControlAction(int, int, bool)"),
+    ("DisableControlAction2", "pad_commands::DisableControlAction(int, int, bool)"),
     ("SetClockTime", "clock_commands::CommandSetClockTime(int, int, int)"),
     ("GetClockHours", "clock_commands::CommandGetClockHours()"),
     ("GetClockMinutes", "clock_commands::CommandGetClockMinutes()"),
@@ -468,12 +472,23 @@ pub const AMMU_ITEMS: &[ShopItem] = &[
 ];
 
 pub const ALL_CHEAT_WEAPONS: &[&str] = &[
-    "weapon_knife", "weapon_bat", "weapon_pistol", "weapon_combatpistol", "weapon_appistol", "weapon_pistol50",
-    "weapon_microsmg", "weapon_smg", "weapon_assaultsmg", "weapon_assaultrifle", "weapon_carbinerifle",
-    "weapon_advancedrifle", "weapon_mg", "weapon_combatmg", "weapon_pumpshotgun", "weapon_sawnoffshotgun",
-    "weapon_assaultshotgun", "weapon_sniperrifle", "weapon_heavysniper", "weapon_grenadelauncher",
-    "weapon_rpg", "weapon_minigun", "weapon_grenade", "weapon_stickybomb", "weapon_molotov",
-    "weapon_railgun", "weapon_hominglauncher", "weapon_firework",
+    "weapon_knife", "weapon_nightstick", "weapon_hammer", "weapon_bat", "weapon_golfclub", "weapon_crowbar",
+    "weapon_bottle", "weapon_dagger", "weapon_hatchet", "weapon_knuckle", "weapon_machete", "weapon_flashlight",
+    "weapon_switchblade", "weapon_battleaxe", "weapon_poolcue", "weapon_wrench",
+    "weapon_pistol", "weapon_combatpistol", "weapon_appistol", "weapon_pistol50", "weapon_snspistol",
+    "weapon_heavypistol", "weapon_vintagepistol", "weapon_marksmanpistol", "weapon_revolver", "weapon_doubleaction",
+    "weapon_microsmg", "weapon_smg", "weapon_assaultsmg", "weapon_combatpdw", "weapon_machinepistol",
+    "weapon_minismg", "weapon_gusenberg",
+    "weapon_assaultrifle", "weapon_carbinerifle", "weapon_advancedrifle", "weapon_specialcarbine",
+    "weapon_bullpuprifle", "weapon_compactrifle",
+    "weapon_mg", "weapon_combatmg",
+    "weapon_pumpshotgun", "weapon_sawnoffshotgun", "weapon_assaultshotgun", "weapon_bullpupshotgun",
+    "weapon_musket", "weapon_heavyshotgun", "weapon_dbshotgun", "weapon_autoshotgun",
+    "weapon_sniperrifle", "weapon_heavysniper", "weapon_marksmanrifle",
+    "weapon_grenadelauncher", "weapon_rpg", "weapon_minigun", "weapon_railgun", "weapon_hominglauncher",
+    "weapon_compactlauncher", "weapon_firework",
+    "weapon_grenade", "weapon_stickybomb", "weapon_molotov", "weapon_smokegrenade", "weapon_flaregun",
+    "weapon_ball", "weapon_snowball", "weapon_petrolcan", "weapon_parachute",
 ];
 
 pub const BANNED_CHEAT_WEAPONS: &[&str] = &[
@@ -1167,7 +1182,7 @@ static STORY_SCRIPT_STARTED: AtomicBool = AtomicBool::new(false);
 fn process_story_mode_startup(c: &mut Cmd<'_, '_>) {
     let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
     let is_mp = crate::input::muguet_is_multiplayer();
-    if !is_mp && mode != "story" { return; }
+    if is_mp || mode != "story" { return; }
 
     let ped = c.i("PlayerPedId", &[]);
     if ped == 0 || !c.exists(ped) { return; }
@@ -1309,6 +1324,13 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
                 *horn_at = Some(Instant::now());
             }
         }
+
+        let ped = c.i("PlayerPedId", &[]);
+        if ped != 0 && c.exists(ped) {
+            let my_pos = c.v("GetEntityCoords", &[i(ped), b(false)]);
+            process_sandbox_and_mp_checks(&mut c, ped, my_pos);
+        }
+
         if let Some(net) = net {
             frame(&mut c, game, net);
         }
@@ -1567,7 +1589,102 @@ fn strip_all_unauthorized_weapons(c: &mut Cmd<'_, '_>, ped: i32) {
     let _ = c.i("GiveWeaponToPed", &[i(ped), i(knife), i(1), b(false), b(false)]);
     let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(knife), b(true)]);
     let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+    // Re-grant purchased weapons
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    for &wh in &purchased {
+        let _ = c.i("GiveWeaponToPed", &[i(ped), i(wh as i32), i(120), b(false), b(false)]);
+    }
     eprintln!("[economy] stripped all cheat/singleplayer weapons; initialized player wallet at ${}", WALLET_CASH.load(Ordering::Relaxed));
+}
+
+fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
+    if ped == 0 || !c.exists(ped) { return; }
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    let knife_h = weapon("weapon_knife");
+    let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
+
+    for &w_name in ALL_CHEAT_WEAPONS {
+        let wh = weapon(w_name);
+        if wh == knife_h || purchased.contains(&wh) {
+            continue;
+        }
+        let has_w = c.i("HasPedGotWeapon", &[i(ped), i(wh as i32), b(false)]) != 0
+            || c.i("HasPedGotWeapon2", &[i(ped), i(wh as i32), b(false)]) != 0
+            || cur_w == wh;
+        if has_w {
+            let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(wh as i32)]);
+            let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(wh as i32)]);
+            let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+            if cur_w == wh {
+                let _ = c.i("SetCurrentPedWeapon", &[i(ped), i(knife_h as i32), b(true)]);
+            }
+            eprintln!("[anti-cheat] stripped unpurchased weapon: {w_name}");
+        }
+    }
+}
+
+static SANDBOX_WARPED: AtomicBool = AtomicBool::new(false);
+static SANDBOX_RESCUE_CD: Mutex<Option<Instant>> = Mutex::new(None);
+static SANDBOX_STARTUP_TICKS: AtomicUsize = AtomicUsize::new(0);
+
+fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
+    if ped == 0 || !c.exists(ped) { return; }
+    let mode = std::env::var("MUGUET_MODE").unwrap_or_default();
+    let is_mp = crate::input::muguet_is_multiplayer();
+    let is_sandbox = mode == "sandbox";
+    if !is_mp && !is_sandbox { return; }
+
+    // 1. Legion Square spawn & mansion rescue:
+    // Whispymound Drive / Vinewood Hills mansion trap coordinates: [-14.0, 525.0, 143.0]
+    let is_in_mansion_trap = (my_pos[0] - (-14.0)).abs() < 40.0 && (my_pos[1] - 525.0).abs() < 40.0;
+    let is_in_yankton = my_pos[0] > 2000.0 || my_pos[1] < -3500.0;
+    let is_in_ocean_origin = my_pos[0].abs() < 50.0 && my_pos[1].abs() < 50.0;
+    let is_under_map = my_pos[2] < -5.0;
+    let in_car = c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0;
+
+    let need_initial_spawn = !SANDBOX_WARPED.swap(true, Ordering::Relaxed) && (is_in_mansion_trap || is_in_yankton || is_in_ocean_origin);
+
+    let mut rescue_cd = SANDBOX_RESCUE_CD.lock().unwrap();
+    let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(4)).unwrap_or(true);
+
+    if (need_initial_spawn || is_in_mansion_trap || is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
+        *rescue_cd = Some(Instant::now());
+        let spawn_pos = [215.0f32, -915.0f32, 30.6f32]; // Legion Square, Los Santos
+        let pos_arg = c.vec_arg(1, spawn_pos);
+        let zero_vel = c.vec_arg(2, [0.0f32, 0.0f32, 0.0f32]);
+        c.i("ClearPedTasksImmediately", &[i(ped)]);
+        c.i("SetEntityCoordsNoOffset", &[i(ped), pos_arg, b(false), b(false), b(false)]);
+        c.i("SetEntityVelocity", &[i(ped), zero_vel]);
+        c.i("SetEntityHeading", &[i(ped), f(0.0)]);
+        c.feed("~g~[iOSVN] Đã chuyển vị trí về trung tâm Los Santos (Legion Square)~s~");
+        eprintln!("[mp/sandbox] rescued player from ({my_pos:?}, mansion_trap={is_in_mansion_trap}) to Legion Square {spawn_pos:?}");
+    }
+
+    // 2. Disable in-game phone controls in engine
+    c.i("DisableControlAction", &[i(0), i(27), b(true)]);
+    c.i("DisableControlAction2", &[i(0), i(27), b(true)]);
+    c.i("DisableControlAction", &[i(0), i(172), b(true)]);
+    c.i("DisableControlAction2", &[i(0), i(172), b(true)]);
+
+    // 3. Neutralize in-game cell phone godmode (1-999-PAINKILLER)
+    c.i("SetEntityInvincible", &[i(ped), b(false)]);
+    let player_id = c.i("PlayerId", &[]);
+    if player_id != 0 {
+        c.i("SetPlayerInvincible", &[i(player_id), b(false)]);
+        c.i("SetPlayerInvincible2", &[i(player_id), b(false)]);
+    }
+
+    // 4. Neutralize cell phone infinite ammo and slowmo
+    c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
+    c.i("SetTimeScale", &[f(1.0)]);
+
+    // 5. Strip unpurchased weapons every tick
+    let count = SANDBOX_STARTUP_TICKS.fetch_add(1, Ordering::Relaxed);
+    if count < 30 && count % 5 == 0 {
+        strip_all_unauthorized_weapons(c, ped);
+    } else {
+        strip_unauthorized_weapons_check(c, ped);
+    }
 }
 
 fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
@@ -1578,6 +1695,7 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     let player_id = c.i("PlayerId", &[]);
     if player_id != 0 {
         c.i("SetPlayerInvincible", &[i(player_id), b(false)]);
+        c.i("SetPlayerInvincible2", &[i(player_id), b(false)]);
     }
 
     // Neutralize in-game cell phone infinite ammo cheats
@@ -1597,19 +1715,8 @@ fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
         *last_pay = Some(Instant::now());
     }
 
-    // 2. Anti-cheat check: Remove banned cheat weapons (RPG, Minigun, Explosives from 1-999-TOOLUP)
-    let cur_w = c.i("GetSelectedPedWeapon", &[i(ped)]) as u32;
-    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
-    for banned in BANNED_CHEAT_WEAPONS {
-        let bh = weapon(banned);
-        if cur_w == bh && !purchased.contains(&bh) {
-            let _ = c.i("RemoveWeaponFromPed", &[i(ped), i(bh as i32)]);
-            let _ = c.i("RemoveWeaponFromPed2", &[i(ped), i(bh as i32)]);
-            let _ = c.i("SetPedInfiniteAmmoClip", &[i(ped), b(false)]);
-            eprintln!("[anti-cheat] seized banned cheat weapon: {banned}");
-            c.feed("~r~[ANTI-CHEAT] Đã tịch thu vũ khí cheat không hợp lệ!~s~");
-        }
-    }
+    // 2. Anti-cheat check: Strip any unpurchased cheat weapons (from phone cheat 1-999-TOOLUP or singleplayer)
+    strip_unauthorized_weapons_check(c, ped);
 
     // 3. Ammu-Nation interaction near blips (sprite 110)
     let near_shop = WORLD_SHOPS.iter().find(|s| {
@@ -1835,6 +1942,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
 
     // Safety check: Prevent falling through map / spawning in ocean void / stuck in North Yankton
     if me_ok {
+        let is_in_mansion_trap = (my_pos[0] - (-14.0)).abs() < 40.0 && (my_pos[1] - 525.0).abs() < 40.0;
         let is_in_yankton = my_pos[0] > 2000.0 || my_pos[1] < -3500.0;
         let is_in_ocean_origin = my_pos[0].abs() < 50.0 && my_pos[1].abs() < 50.0;
         let is_under_map = my_pos[2] < -5.0;
@@ -1842,9 +1950,9 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
 
         static RESCUE_COOLDOWN: Mutex<Option<Instant>> = Mutex::new(None);
         let mut rescue_cd = RESCUE_COOLDOWN.lock().unwrap();
-        let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(5)).unwrap_or(true);
+        let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(4)).unwrap_or(true);
 
-        if (is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
+        if (is_in_mansion_trap || is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
             *rescue_cd = Some(Instant::now());
             let spawn_pos = [215.0f32, -915.0f32, 30.6f32]; // Legion Square, Los Santos
             let pos_arg = c.vec_arg(1, spawn_pos);

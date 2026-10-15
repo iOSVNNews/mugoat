@@ -472,6 +472,12 @@ impl Overlay {
     }
 
     fn spec_act(&self, idx: usize) -> Option<(&'static str, Act)> {
+        if idx == 11 {
+            let is_sandbox = std::env::var("MUGUET_MODE").map(|m| m == "sandbox").unwrap_or(false);
+            if input::muguet_is_multiplayer() || is_sandbox {
+                return None;
+            }
+        }
         let s = &BUTTONS[idx];
         if self.menu.keys_visible() {
             if s.nav {

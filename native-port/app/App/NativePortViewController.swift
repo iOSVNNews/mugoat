@@ -669,8 +669,6 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             try session.overrideOutputAudioPort(.speaker)
             try session.setActive(true)
 
-            // Initialize inputNode upfront so the IO unit is prepared together with output, avoiding graph rebuild later
-            _ = audioEngine.inputNode
 
             let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
             let source = AVAudioSourceNode(format: format) { _, _, count, audioBufferList in
