@@ -1287,6 +1287,8 @@ pub fn script_tick(caller: &mut Caller<'_, HostState>, thread: u64, tls: u64) ->
     if scratch != 0 {
         let mut c = Cmd { caller, scratch };
         init_world_blips_once(&mut c);
+        // Before any weapon strip/re-grant runs, so bought weapons come back after a relaunch.
+        load_wallet_once();
         update_camera_mode(&mut c);
         #[cfg(not(feature = "native-port"))]
         process_story_mode_startup(&mut c);
@@ -1517,13 +1519,18 @@ fn play_sound(name: &str) {
 }
 
 fn receive_voice_chunk(net: &Net, sender_id: u8, chunk: proto::VoiceChunk, now: Instant) {
-    let sender_name = net.peers.lock().unwrap().get(&sender_id)
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| format!("Player {sender_id}"));
+    // The chunk's position is in decimetres as i16, so it saturates beyond ±3.2 km (Sandy Shores,
+    // Paleto Bay): two players up north would "hear" each other across the map. Prefer the sender's
+    // latest synced position and keep the chunk's only as a fallback.
+    let (sender_name, synced_pos) = net.peers.lock().unwrap().get(&sender_id)
+        .map(|p| (p.name.clone(), p.snaps.back().map(|(_, s)| if s.in_vehicle() { s.veh_pos } else { s.pos })))
+        .unwrap_or_else(|| (format!("Player {sender_id}"), None));
 
-    let sender_x = chunk.pos[0] as f32 / 10.0;
-    let sender_y = chunk.pos[1] as f32 / 10.0;
-    let sender_z = chunk.pos[2] as f32 / 10.0;
+    let [sender_x, sender_y, sender_z] = synced_pos.unwrap_or([
+        chunk.pos[0] as f32 / 10.0,
+        chunk.pos[1] as f32 / 10.0,
+        chunk.pos[2] as f32 / 10.0,
+    ]);
 
     let my_pos = LOCAL_POS.lock().unwrap().unwrap_or([0.0, 0.0, 0.0]);
     let dx = my_pos[0] - sender_x;
@@ -1643,7 +1650,21 @@ fn strip_unauthorized_weapons_check(c: &mut Cmd<'_, '_>, ped: i32) {
     }
 }
 
-static SANDBOX_WARPED: AtomicBool = AtomicBool::new(false);
+/// Why a player must be moved back to Legion Square, if at all. North Yankton lies around
+/// x 3000..5600, y -4300..-5600: the real map east of x = 2000 (Grapeseed, Palmer-Taylor, the east
+/// highway) and south of the port stays playable. The Vinewood Hills spawn trap is Franklin's street,
+/// and divers go below sea level, so those two only count while the session is starting.
+fn rescue_reason(my_pos: [f32; 3], in_car: bool) -> Option<&'static str> {
+    static FIRST_SEEN: OnceLock<Instant> = OnceLock::new();
+    let starting = FIRST_SEEN.get_or_init(Instant::now).elapsed() < Duration::from_secs(60);
+    let [x, y, z] = my_pos;
+    if x > 3000.0 && y < -4300.0 { return Some("north_yankton"); }
+    // The engine's default (0, 0, 0) spawn; the land there is about 60 m above sea level.
+    if !in_car && x.abs() < 50.0 && y.abs() < 50.0 && z < 10.0 { return Some("origin_void"); }
+    if z < if starting { -5.0 } else { -190.0 } { return Some("under_map"); }
+    if starting && (x + 14.0).abs() < 40.0 && (y - 525.0).abs() < 40.0 { return Some("mansion_spawn"); }
+    None
+}
 static SANDBOX_RESCUE_CD: Mutex<Option<Instant>> = Mutex::new(None);
 static SANDBOX_STARTUP_TICKS: AtomicUsize = AtomicUsize::new(0);
 
@@ -1654,20 +1675,14 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
     let is_sandbox = mode == "sandbox";
     if !is_mp && !is_sandbox { return; }
 
-    // 1. Legion Square spawn & mansion rescue:
-    // Whispymound Drive / Vinewood Hills mansion trap coordinates: [-14.0, 525.0, 143.0]
-    let is_in_mansion_trap = (my_pos[0] - (-14.0)).abs() < 40.0 && (my_pos[1] - 525.0).abs() < 40.0;
-    let is_in_yankton = my_pos[0] > 2000.0 || my_pos[1] < -3500.0;
-    let is_in_ocean_origin = my_pos[0].abs() < 50.0 && my_pos[1].abs() < 50.0;
-    let is_under_map = my_pos[2] < -5.0;
+    // 1. Legion Square spawn & out-of-bounds rescue (see rescue_reason).
     let in_car = c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0;
-
-    let need_initial_spawn = !SANDBOX_WARPED.swap(true, Ordering::Relaxed) && (is_in_mansion_trap || is_in_yankton || is_in_ocean_origin);
+    let reason = rescue_reason(my_pos, in_car);
 
     let mut rescue_cd = SANDBOX_RESCUE_CD.lock().unwrap();
     let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(4)).unwrap_or(true);
 
-    if (need_initial_spawn || is_in_mansion_trap || is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
+    if let (Some(reason), true) = (reason, can_rescue) {
         *rescue_cd = Some(Instant::now());
         let spawn_pos = [215.0f32, -915.0f32, 30.6f32]; // Legion Square, Los Santos
         let pos_arg = c.vec_arg(1, spawn_pos);
@@ -1677,7 +1692,7 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
         c.i("SetEntityVelocity", &[i(ped), zero_vel]);
         c.i("SetEntityHeading", &[i(ped), f(0.0)]);
         c.feed("~g~[iOSVN] Đã chuyển vị trí về trung tâm Los Santos (Legion Square)~s~");
-        eprintln!("[mp/sandbox] rescued player from ({my_pos:?}, mansion_trap={is_in_mansion_trap}) to Legion Square {spawn_pos:?}");
+        eprintln!("[mp/sandbox] rescued player from {my_pos:?} ({reason}) to Legion Square {spawn_pos:?}");
     }
 
     // Only apply multiplayer economy/anti-cheat restrictions in MULTIPLAYER (Sandbox Online or Story Online)
@@ -1709,8 +1724,61 @@ fn process_sandbox_and_mp_checks(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]
     }
 }
 
+/// The wallet and bought weapons used to reset to $1000 / pistol on every launch.
+/// Kept in the app's Documents folder (native app only), in the format "cash\nhash,hash,...".
+#[cfg(feature = "native-port")]
+fn wallet_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Documents").join("mugoat-wallet.txt"))
+}
+#[cfg(not(feature = "native-port"))]
+fn wallet_path() -> Option<std::path::PathBuf> { None }
+
+static WALLET_LOADED: AtomicBool = AtomicBool::new(false);
+static WALLET_SAVED: Mutex<Option<(i32, Vec<u32>, Instant)>> = Mutex::new(None);
+
+/// Weapons that can be restored from the save: only what Ammu-Nation sells, plus the starting pistol.
+fn buyable_weapon(hash: u32) -> bool {
+    hash == weapon("weapon_pistol")
+        || AMMU_ITEMS.iter().any(|item| !item.is_armor && item.weapon_hash.starts_with("weapon_") && weapon(item.weapon_hash) == hash)
+}
+
+fn load_wallet_once() {
+    if WALLET_LOADED.swap(true, Ordering::Relaxed) { return; }
+    let Some(text) = wallet_path().and_then(|path| std::fs::read_to_string(path).ok()) else { return; };
+    let mut lines = text.lines();
+    if let Some(cash) = lines.next().and_then(|line| line.trim().parse::<i32>().ok()) {
+        WALLET_CASH.store(cash.clamp(0, 10_000_000), Ordering::Relaxed);
+    }
+    let mut purchased = PURCHASED_WEAPONS.lock().unwrap();
+    for hash in lines.next().unwrap_or("").split(',').filter_map(|h| h.trim().parse::<u32>().ok()) {
+        if buyable_weapon(hash) && !purchased.contains(&hash) { purchased.push(hash); }
+    }
+    let saved = (WALLET_CASH.load(Ordering::Relaxed), purchased.clone(), Instant::now());
+    drop(purchased);
+    *WALLET_SAVED.lock().unwrap() = Some(saved);
+    eprintln!("[economy] wallet restored: ${}", WALLET_CASH.load(Ordering::Relaxed));
+}
+
+/// Writes the wallet when it changed, at most every 2 s (a small file, off the hot path).
+fn save_wallet_if_changed() {
+    let cash = WALLET_CASH.load(Ordering::Relaxed);
+    let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
+    let mut saved = WALLET_SAVED.lock().unwrap();
+    if let Some((c, p, at)) = saved.as_ref() {
+        if (*c == cash && *p == purchased) || at.elapsed() < Duration::from_secs(2) { return; }
+    }
+    let Some(path) = wallet_path() else { return; };
+    let text = format!("{cash}\n{}\n", purchased.iter().map(u32::to_string).collect::<Vec<_>>().join(","));
+    let temporary = path.with_extension("tmp");
+    if std::fs::write(&temporary, text).and_then(|_| std::fs::rename(&temporary, &path)).is_ok() {
+        *saved = Some((cash, purchased, Instant::now()));
+    }
+}
+
 fn update_economy_and_shops(c: &mut Cmd<'_, '_>, ped: i32, my_pos: [f32; 3]) {
     if ped == 0 || !c.exists(ped) { return; }
+    load_wallet_once();
+    save_wallet_if_changed();
     let purchased = PURCHASED_WEAPONS.lock().unwrap().clone();
     // process_sandbox_and_mp_checks already ran this frame's cheat neutralization and weapon check
     // when online; repeating them doubled ~150 engine calls per frame on the game thread.
@@ -1972,17 +2040,14 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
 
     // Safety check: Prevent falling through map / spawning in ocean void / stuck in North Yankton
     if me_ok {
-        let is_in_mansion_trap = (my_pos[0] - (-14.0)).abs() < 40.0 && (my_pos[1] - 525.0).abs() < 40.0;
-        let is_in_yankton = my_pos[0] > 2000.0 || my_pos[1] < -3500.0;
-        let is_in_ocean_origin = my_pos[0].abs() < 50.0 && my_pos[1].abs() < 50.0;
-        let is_under_map = my_pos[2] < -5.0;
         let in_car = c.i("IsPedInAnyVehicle", &[i(ped), b(false)]) != 0;
+        let reason = rescue_reason(my_pos, in_car);
 
         static RESCUE_COOLDOWN: Mutex<Option<Instant>> = Mutex::new(None);
         let mut rescue_cd = RESCUE_COOLDOWN.lock().unwrap();
         let can_rescue = rescue_cd.map(|t| t.elapsed() > Duration::from_secs(4)).unwrap_or(true);
 
-        if (is_in_mansion_trap || is_in_yankton || (is_in_ocean_origin && !in_car) || is_under_map) && can_rescue {
+        if let (Some(reason), true) = (reason, can_rescue) {
             *rescue_cd = Some(Instant::now());
             let spawn_pos = [215.0f32, -915.0f32, 30.6f32]; // Legion Square, Los Santos
             let pos_arg = c.vec_arg(1, spawn_pos);
@@ -1993,7 +2058,7 @@ fn frame(c: &mut Cmd, game: &mut Game, net: &Net) {
             c.i("SetEntityHeading", &[i(ped), f(0.0)]);
             game.spawn_shield = Some(Instant::now() + Duration::from_secs(8));
             c.feed("~g~[iOSVN] Đã chuyển vị trí về trung tâm Los Santos (Legion Square)~s~");
-            eprintln!("[mp] rescued player from out-of-bounds ({my_pos:?}) to Legion Square {spawn_pos:?}");
+            eprintln!("[mp] rescued player from out-of-bounds {my_pos:?} ({reason}) to Legion Square {spawn_pos:?}");
         }
     }
 

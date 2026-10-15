@@ -258,6 +258,9 @@ static id<MTLBlitCommandEncoder> blitEncoder() {
 	return R->blit;
 }
 static void storeResult(uint64_t addr, uint64_t value, uint32_t seq);
+// Frame pacing: with a 30/60 FPS cap below the screen's refresh rate, each frame is held for the same
+// number of refreshes instead of alternating 1-2-3 (the visible judder of an uneven frame rate).
+static std::atomic<double> presentInterval{0};
 enum CommitReason { CPresent, CFence, CReadback, CIdle, CReasons };
 static const char *kCommitNames[CReasons] = {"present", "fence", "readback", "idle queries"};
 static void commit(CommitReason reason, id<CAMetalDrawable> drawable = nil) {
@@ -279,7 +282,11 @@ static void commit(CommitReason reason, id<CAMetalDrawable> drawable = nil) {
 		if (R->visNext > OCCLUSION_SLOTS - 1024 && !R->activeOcclusion) R->visNext = 0;
 	}
 	id<MTLCommandBuffer> cb = commandBuffer();
-	if (drawable) [cb presentDrawable:drawable];
+	if (drawable) {
+		double pacing = presentInterval.load(std::memory_order_relaxed);
+		if (pacing > 0) [cb presentDrawable:drawable afterMinimumDuration:pacing];
+		else [cb presentDrawable:drawable];
+	}
 	uint64_t serial = R->serial++;
 	auto *callbacks = new std::vector<std::function<void()>>();
 	callbacks->swap(R->onComplete);
@@ -2187,6 +2194,10 @@ extern "C" void PGStartMetalRenderer(void *memory, uint64_t memorySize, uint64_t
 	pthread_t thread;
 	pthread_create(&thread, &attr, threadMain, nullptr);
 	pthread_attr_destroy(&attr);
+}
+
+extern "C" void PGMetalRendererSetPresentInterval(double seconds) {
+	mr::presentInterval.store(std::isfinite(seconds) && seconds > 0 && seconds <= 0.1 ? seconds : 0);
 }
 
 extern "C" double PGMetalRendererFPS(void) {

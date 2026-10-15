@@ -27,6 +27,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private var diagnosticsOverlay: UIView? { home }
     private let audioEngine = AVAudioEngine()
     private var audioSource: AVAudioSourceNode?
+    /// Mic toggles and audio configuration changes touch the same session and engine: one at a time.
+    private let audioQueue = DispatchQueue(label: "mugoat.audio", qos: .userInitiated)
     private var isMicTapInstalled = false
     private var displayLink: CADisplayLink?
     private var lastControllerPoll: CFTimeInterval?
@@ -37,6 +39,8 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private let gyro = GyroInput()
     private var engineStarted = false
     private var bootedPreset = GameSettings.shared.graphicsPreset
+    /// Render height multiplier while the phone is hot (1 = the chosen resolution).
+    private var thermalScale = 1.0
     private var bootedMode: GameMode?
     private var stableTimer: Timer?
     private var healthTimer: Timer?
@@ -235,6 +239,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidConnect, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(releaseTouchControls), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(leftApp), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(thermalStateChanged), name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
         if let recovery = GameSettings.shared.recoverFromFailedBoot() {
             appendLog("Previous launch on \(recovery.failed.title) did not finish; lowered to \(recovery.fallback.title)\(recovery.resetHeight.map { ", resolution \($0)p back to Auto" } ?? "").")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.explainRecovery(recovery) }
@@ -712,7 +717,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             let session = AVAudioSession.sharedInstance()
             switch session.recordPermission {
             case .granted:
-                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self.audioQueue.async { [weak self] in
                     self?.configureMicRecording(enabled: true)
                 }
             case .denied:
@@ -724,7 +729,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                     DispatchQueue.main.async {
                         guard let self = self else { return }
                         if granted {
-                            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                            self.audioQueue.async { [weak self] in
                                 self?.configureMicRecording(enabled: true)
                             }
                         } else {
@@ -738,7 +743,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 break
             }
         } else {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            audioQueue.async { [weak self] in
                 self?.configureMicRecording(enabled: false)
             }
         }
@@ -748,8 +753,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let session = AVAudioSession.sharedInstance()
         if enabled {
             do {
+                // .defaultToSpeaker already uses the loudspeaker instead of the earpiece; forcing
+                // .speaker would also bypass connected headphones and feed the voice back into the mic.
                 try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-                try session.overrideOutputAudioPort(.speaker)
                 try session.setActive(true)
             } catch {
                 appendLog("[Voice] Lỗi thiết lập AVAudioSession: \(error.localizedDescription)")
@@ -764,7 +770,16 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
 
             let inputFormat = inputNode.inputFormat(forBus: bus)
             let outputFormat = inputNode.outputFormat(forBus: bus)
-            let tapFormat = inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 ? inputFormat : (outputFormat.sampleRate > 0 ? outputFormat : nil)
+            let tapFormat = inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 ? inputFormat
+                : (outputFormat.sampleRate > 0 && outputFormat.channelCount > 0 ? outputFormat : nil)
+            // No microphone route yet (0 channels): installing a tap would raise an Objective-C exception.
+            guard let tapFormat else {
+                appendLog("[Voice] Không tìm thấy micro khả dụng; tắt mic")
+                MugoatVoiceSetMicEnabled(false)
+                DispatchQueue.main.async { self.touchControls.updateVisibility() }
+                restoreGameAudio(micActive: false)
+                return
+            }
 
             inputNode.installTap(onBus: bus, bufferSize: 1024, format: tapFormat) { buffer, _ in
                 guard let channelData = buffer.floatChannelData?[0] else { return }
@@ -794,53 +809,68 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                 }
             }
             isMicTapInstalled = true
-            if !audioEngine.isRunning {
-                try? audioEngine.start()
-            }
+            startAudioEngine()
             appendLog("[Voice] Đã bật Micro - chuyển sang chế độ loa thoại")
         } else {
             if isMicTapInstalled {
                 audioEngine.inputNode.removeTap(onBus: 0)
                 isMicTapInstalled = false
             }
-            do {
-                try session.setCategory(.playback, mode: .default, options: [])
-                try session.setActive(true)
-            } catch {
-                appendLog("[Voice] Lỗi chuyển về loa thường: \(error.localizedDescription)")
-            }
-            if !audioEngine.isRunning {
-                try? audioEngine.start()
-            }
+            restoreGameAudio(micActive: false)
             appendLog("[Voice] Đã tắt Micro - chuyển về loa thường")
         }
     }
 
     @objc private func handleAudioEngineConfigurationChange(_ notification: Notification) {
         appendLog("[Audio] Cấu hình audio engine thay đổi, tự động khởi động lại...")
+        audioQueue.async { [weak self] in self?.restoreGameAudio(micActive: MugoatVoiceIsMicEnabled()) }
+    }
+
+    /// Puts the session back for game sound (or voice chat) and makes sure the engine runs.
+    private func restoreGameAudio(micActive: Bool) {
+        let session = AVAudioSession.sharedInstance()
         do {
-            let session = AVAudioSession.sharedInstance()
-            let micActive = MugoatVoiceIsMicEnabled()
             if micActive {
+                // .defaultToSpeaker already uses the loudspeaker instead of the earpiece; forcing
+                // .speaker would also bypass connected headphones and feed the voice back into the mic.
                 try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-                try session.overrideOutputAudioPort(.speaker)
             } else {
                 try session.setCategory(.playback, mode: .default, options: [])
             }
             try session.setActive(true)
-            if !audioEngine.isRunning {
-                try audioEngine.start()
-            }
         } catch {
-            appendLog("[Audio] Không thể khởi động lại audio engine: \(error.localizedDescription)")
+            appendLog("[Audio] Lỗi thiết lập AVAudioSession: \(error.localizedDescription)")
+        }
+        startAudioEngine()
+    }
+
+    /// Once the mic was used the engine owns an input node; with the .playback category some
+    /// devices then refuse to start it, leaving the game silent. Fall back to play-and-record
+    /// without voice processing (normal loudspeaker volume) so game sound always comes back.
+    private func startAudioEngine() {
+        guard !audioEngine.isRunning else { return }
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+        } catch {
+            appendLog("[Audio] Không khởi động được audio (\(error.localizedDescription)); thử chế độ dự phòng")
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                try session.setActive(true)
+                audioEngine.prepare()
+                try audioEngine.start()
+            } catch {
+                appendLog("[Audio] Không thể khởi động lại audio engine: \(error.localizedDescription)")
+            }
         }
     }
 
     @objc private func handleAudioRouteChange(_ notification: Notification) {
-        let session = AVAudioSession.sharedInstance()
-        if session.category == .playAndRecord {
-            try? session.overrideOutputAudioPort(.speaker)
-        }
+        // Headphones plugged in or out: iOS picks the route itself (.defaultToSpeaker covers the
+        // earpiece case). Forcing the speaker here sent sound past headphones and caused echo.
+        let reason = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init) ?? .unknown
+        appendLog("[Audio] Route changed (reason \(reason.rawValue))")
     }
 
     @objc private func controllerChanged() { pollController() }
@@ -1169,10 +1199,25 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
     }
     /// The engine follows back-buffer size changes while running.
+    /// A hot phone lowers its clocks and the frame rate drops for minutes. Rendering fewer pixels while
+    /// iOS reports serious/critical heat keeps it smoother and lets it cool; the resolution returns after.
+    @objc private func thermalStateChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let state = ProcessInfo.processInfo.thermalState
+            let scale = state == .critical ? 0.65 : state == .serious ? 0.8 : 1.0
+            guard scale != self.thermalScale else { return }
+            self.thermalScale = scale
+            self.appendLog("Thermal state \(state.rawValue): render resolution ×\(scale)")
+            self.applyLiveResolution()
+        }
+    }
     private func applyLiveResolution() {
         guard engineStarted else { return }
         let settings = GameSettings.shared
-        let (width, height) = GraphicsConfiguration.size(for: bootedPreset, renderHeight: settings.renderHeight, screen: view.bounds.size, matchScreenShape: settings.matchScreenShape)
+        let chosenHeight = settings.renderHeight > 0 ? settings.renderHeight : bootedPreset.height
+        let renderHeight = thermalScale < 1 ? Int(Double(chosenHeight) * thermalScale) : settings.renderHeight
+        let (width, height) = GraphicsConfiguration.size(for: bootedPreset, renderHeight: renderHeight, screen: view.bounds.size, matchScreenShape: settings.matchScreenShape)
         PGSetBackBufferSize(Int32(width), Int32(height))
         appendLog("Graphics: live resize to \(width)×\(height)")
     }
