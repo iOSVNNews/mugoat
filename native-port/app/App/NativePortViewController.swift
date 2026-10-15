@@ -284,6 +284,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidConnect, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(releaseTouchControls), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(leftApp), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(leftApp), name: UIApplication.willTerminateNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(thermalStateChanged), name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
         if let recovery = GameSettings.shared.recoverFromFailedBoot() {
             appendLog("Previous launch on \(recovery.failed.title) did not finish; lowered to \(recovery.fallback.title)\(recovery.resetHeight.map { ", resolution \($0)p back to Auto" } ?? "").")
@@ -364,14 +365,14 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             movementProofStarted = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 30) { self.verifyMovement() }
         }
-        if line == "WORLD_READY" { PGSetTargetingMode(Int32(GameSettings.shared.targetingMode)); if worldReadyAt == nil { worldReadyAt = CACurrentMediaTime() } }
+        if line == "WORLD_READY" {
+            PGSetTargetingMode(Int32(GameSettings.shared.targetingMode))
+            if worldReadyAt == nil { worldReadyAt = CACurrentMediaTime() }
+            GameSettings.shared.markBootStable()
+        }
         if line == "WORLD_READY", healthTimer == nil {
             // Every 10 s: physical RAM, process usage, OS headroom and game-file reads.
             healthTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.logHealth() }
-        }
-        if line == "WORLD_READY", stableTimer == nil {
-            // Three minutes in the world counts as a launch that fits in memory.
-            stableTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { _ in GameSettings.shared.markBootStable() }
         }
         if line == "WORLD_READY" || line.contains("\"label\":\"First frame\"") || line.contains("\"world\":true") {
             diagnosticsOverlay?.isHidden = true
@@ -1055,15 +1056,18 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     /// The popup after a launch that ran out of memory: what happened, what changed, and the way back.
     private func explainRecovery(_ recovery: GameSettings.BootRecovery) {
         let lowered = recovery.fallback != recovery.failed
-        let title = lowered ? "Graphics lowered to \(recovery.fallback.title)" : "Resolution set back to Auto"
-        var message = "The game closed while starting on \(recovery.failed.title)"
-        if let height = recovery.resetHeight { message += " at \(height)p" }
-        message += ". iOS reported an estimated process memory allowance of \(recovery.processAllowanceMB) MB at launch; this is separate from the device's total RAM."
-        message += lowered ? "\n\nThe game now starts on \(recovery.fallback.title)" : "\n\nThe game now starts at its usual resolution"
-        message += recovery.resetHeight != nil && lowered ? " with Auto resolution." : "."
-        message += " You can change this any time in Settings."
+        let title = lowered ? L10n.text("Tự động hạ đồ họa để tương thích") : L10n.text("Đã đặt lại độ phân giải về Tự động")
+        var message = "Lần khởi động trước trên \(recovery.failed.title)"
+        if let height = recovery.resetHeight { message += " tại \(height)p" }
+        message += " chưa hoàn tất. Đồ họa đã được tạm thời điều chỉnh về \(recovery.fallback.title)"
+        message += recovery.resetHeight != nil && lowered ? " (Độ phân giải Tự động)." : "."
+        message += " Bạn có thể chỉnh lại bất cứ lúc nào trong Cài đặt."
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        alert.addAction(UIAlertAction(title: L10n.text("Giữ nguyên thiết lập cũ"), style: .default) { [weak self] _ in
+            GameSettings.shared.undoRecovery(recovery)
+            self?.appendLog("Kept \(recovery.failed.title) after the warning.")
+        })
         alert.addAction(UIAlertAction(title: L10n.text("Share log"), style: .default) { _ in
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let logs = ["native-port-previous.log", "native-port.log"].map { documents.appendingPathComponent($0) }
@@ -1071,10 +1075,6 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             let sheet = UIActivityViewController(activityItems: logs, applicationActivities: nil)
             sheet.popoverPresentationController?.sourceView = self.view
             self.present(sheet, animated: true)
-        })
-        alert.addAction(UIAlertAction(title: "Try \(recovery.failed.title) again", style: .destructive) { _ in
-            GameSettings.shared.undoRecovery(recovery)
-            self.appendLog("Kept \(recovery.failed.title) after the warning.")
         })
         present(alert, animated: true)
     }
@@ -1097,7 +1097,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
                          GameSettings.shared.tier.physicalMemoryMB, used, free, d[0], d[1], Double(d[2]) / 1_048_576, avgMS, d[5], d[3], PGRenderedFramesPerSecond()))
     }
 
-    @objc private func leftApp() { if stableTimer?.isValid != false { GameSettings.shared.markBootInterrupted() } }
+    @objc private func leftApp() {
+        GameSettings.shared.markBootInterrupted()
+    }
 
     /// The touch-controls layout editor (pre-game, or from Settings).
     private func showLayoutEditor() {
@@ -1284,17 +1286,24 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         }
     }
     /// The engine follows back-buffer size changes while running.
+    /// A hot phone lowers its clocks and the frame rate drops for minutes. Rendering fewer pixels while
+    /// iOS reports serious/critical heat keeps it smoother and lets it cool; the resolution returns after.
     @objc private func thermalStateChanged() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let state = ProcessInfo.processInfo.thermalState
-            self.appendLog("Thermal state changed to \(state.rawValue)")
+            let scale = state == .critical ? 0.65 : state == .serious ? 0.8 : 1.0
+            guard scale != self.thermalScale else { return }
+            self.thermalScale = scale
+            self.appendLog("Thermal state \(state.rawValue): render resolution ×\(scale)")
+            self.applyLiveResolution()
         }
     }
     private func applyLiveResolution() {
         guard engineStarted else { return }
         let settings = GameSettings.shared
-        let renderHeight = settings.renderHeight > 0 ? settings.renderHeight : bootedPreset.height
+        let chosenHeight = settings.renderHeight > 0 ? settings.renderHeight : bootedPreset.height
+        let renderHeight = thermalScale < 1 ? Int(Double(chosenHeight) * thermalScale) : settings.renderHeight
         let (width, height) = GraphicsConfiguration.size(for: bootedPreset, renderHeight: renderHeight, screen: view.bounds.size, matchScreenShape: settings.matchScreenShape)
         PGSetBackBufferSize(Int32(width), Int32(height))
         appendLog("Graphics: live resize to \(width)×\(height)")

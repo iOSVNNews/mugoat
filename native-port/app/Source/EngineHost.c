@@ -11,6 +11,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
 #include <math.h>
 #include <sys/mman.h>
 #include <TargetConditionals.h>
@@ -1959,7 +1960,34 @@ void PGSetBackBufferSize(int width,int height){
   atomic_store((_Atomic int32_t *)(base+432),width&~1);
   atomic_store((_Atomic int32_t *)(base+436),height&~1);
 }
+static void pg_crash_signal_handler(int sig, siginfo_t *info, void *ucontext) {
+  char buf[256];
+  const char *sigName = "UNKNOWN";
+  switch (sig) {
+    case SIGSEGV: sigName = "SIGSEGV (Segmentation Fault)"; break;
+    case SIGBUS:  sigName = "SIGBUS (Bus Error)"; break;
+    case SIGABRT: sigName = "SIGABRT (Abort)"; break;
+    case SIGILL:  sigName = "SIGILL (Illegal Instruction)"; break;
+    case SIGFPE:  sigName = "SIGFPE (Floating Point Exception)"; break;
+  }
+  snprintf(buf, sizeof buf, "NATIVE CRASH: Signal %d (%s) at address %p", sig, sigName, info ? info->si_addr : NULL);
+  pg_log(buf);
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_handler = SIG_DFL;
+  sigaction(sig, &sa, NULL);
+  raise(sig);
+}
 static void *boot(void *ignored) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof sa);
+  sa.sa_sigaction = pg_crash_signal_handler;
+  sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+  sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGBUS, &sa, NULL);
+  sigaction(SIGABRT, &sa, NULL);
+  sigaction(SIGILL, &sa, NULL);
+  sigaction(SIGFPE, &sa, NULL);
   const char *guard=getenv("PG_MEMORY_GUARD");nativeMemoryGuard=guard?atoi(guard)==1:!TARGET_OS_SIMULATOR;
 #if TARGET_OS_SIMULATOR
   const char *limit=getenv("PG_STREAM_MEMORY_LIMIT_MB");
@@ -2001,14 +2029,14 @@ static void *boot(void *ignored) {
   // Without the extended-virtual-addressing entitlement (stripped by some signing services) iOS
   // refuses a reservation the size of the whole RAM: automatically retry smaller down to what iOS allows.
   void *allocation=mmap(NULL,capacity+guardBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
-  const uint64_t minimumPages=(1536ull*1048576+env.memory.page_size-1)/env.memory.page_size;
+  const uint64_t minimumPages=(PG_ENGINE_MEMORY_MIN_BYTES+env.memory.page_size-1)/env.memory.page_size;
   const uint64_t stepPages=(256ull<<20)/env.memory.page_size;
   while (allocation==MAP_FAILED && env.memory.max_pages>minimumPages) {
     env.memory.max_pages=env.memory.max_pages>minimumPages+stepPages?env.memory.max_pages-stepPages:minimumPages;
     if (env.memory.pages>env.memory.max_pages) { env.memory.pages=env.memory.max_pages; env.memory.size=env.memory.pages*env.memory.page_size; }
     capacity=env.memory.max_pages*env.memory.page_size;
     allocation=mmap(NULL,capacity+guardBytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
-    if (allocation!=MAP_FAILED) { char line[128]; snprintf(line,sizeof line,"Engine memory automatically adjusted and reserved at %llu MB after larger reservation was refused.",capacity/1048576); pg_log(line); break; }
+    if (allocation!=MAP_FAILED) { char line[128]; snprintf(line,sizeof line,"Engine virtual address space reserved at %llu MB (optimal capacity for iOS address space).",capacity/1048576); pg_log(line); break; }
   }
   if (allocation==MAP_FAILED && guardBytes>0) {
     guardBytes=0;

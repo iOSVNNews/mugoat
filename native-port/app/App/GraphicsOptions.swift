@@ -75,7 +75,7 @@ struct DeviceTier {
 
     /// Recommend from the device's actual RAM; all presets remain selectable.
     var recommended: GraphicsPreset {
-        physicalMemoryMB < 3400 ? .battery : physicalMemoryMB < 4600 ? .performance : physicalMemoryMB < 6000 ? .balanced : physicalMemoryMB < 8000 ? .quality : .ultra
+        physicalMemoryMB < 3400 ? .battery : physicalMemoryMB < 4600 ? .performance : physicalMemoryMB < 6000 ? .balanced : physicalMemoryMB < 8000 ? .quality : physicalMemoryMB < 12000 ? .ultra : .max
     }
     /// Every preset can be chosen; those above the recommended one show a warning.
     var allowed: [GraphicsPreset] { GraphicsPreset.allCases }
@@ -114,6 +114,7 @@ enum GraphicsConfiguration {
 
     /// Pass the chosen settings to the engine. Call before PGStartEngine.
     static func apply(_ settings: GameSettings, screen: CGSize) -> String {
+        PGSetEngineMemoryMB(Int32(settings.engineMemoryMB))
         let preset = settings.graphicsPreset
         let (width, height) = size(for: preset, renderHeight: settings.renderHeight, screen: screen, matchScreenShape: settings.matchScreenShape)
         let options = preset.engineOptions
