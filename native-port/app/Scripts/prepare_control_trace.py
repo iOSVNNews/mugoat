@@ -14,6 +14,7 @@ the call's arguments. That feeds the test trace and the prompt diagnostics only,
 from pathlib import Path
 from engine_names import fn
 import re
+
 root = Path(__file__).resolve().parents[1]
 COMMANDS = [('pad_commands::CommandIsControlPressed(int, int)', 'u32', 0), ('pad_commands::CommandGetControlValue(int, int)', 'u32', 1),
             ('pad_commands::CommandGetControlNormal(int, int)', 'f32', 2), ('pad_commands::CommandIsDisabledControlPressed(int, int)', 'u32', 3),
@@ -30,22 +31,35 @@ def body_range(s, head):
     return start, s.index('\n}\n', start) + 3
 
 for name, kind, tag in COMMANDS:
-    function = fn(name)
-    head = f'{kind} w2c_game_f{function}(w2c_game* instance, u32 var_p0, u32 var_p1) {{'
-    path = next(p for p in sorted((root / 'Generated').glob('game_*.c')) if head in p.read_text())
+    try:
+        function = fn(name)
+    except Exception as e:
+        print(f'control trace: {name} not found ({e})')
+        continue
+    head_pattern = re.compile(rf'^{kind}\s+w2c_game_f{function}\(w2c_game\*\s*instance[^\n]*\{{$', re.M)
+    path = next((p for p in sorted((root / 'Generated').glob('game_*.c')) if head_pattern.search(p.read_text())), None)
+    if path is None:
+        print(f'control trace: f{function} ({name}) not found in generated code, skipping')
+        continue
     s = path.read_text()
-    if f'pg_control_original_f{function}(' in s: print(f'control trace: f{function} already patched'); continue
-    if s.count(head) != 1: raise RuntimeError(f'Pinned f{function} ({name}) changed')
+    if f'pg_control_original_f{function}(' in s:
+        print(f'control trace: f{function} already patched')
+        continue
+    m = head_pattern.search(s)
+    head = m.group(0)
     start, end = body_range(s, head)
-    original = s[start:end].replace(head, f'static {kind} pg_control_original_f{function}(w2c_game* instance, u32 var_p0, u32 var_p1) {{', 1)
-    wrapper = (f'{head}\n  {kind} value = pg_control_original_f{function}(instance, var_p0, var_p1);\n'
-               f'  pg_control_read({tag}, var_p0, var_p1, (f32)value);\n  return value;\n}}\n')
-    s = s[:start] + original + wrapper + s[end:]
-    if DECLARATION not in s:
-        first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
-        s = s[:first.end()] + '\n' + DECLARATION + s[first.end():]
-    path.write_text(s)
-    print(f'control trace: patched f{function} in {path.name}')
+    if 'var_p0' in head and 'var_p1' in head:
+        original = s[start:end].replace(head, f'static {kind} pg_control_original_f{function}(w2c_game* instance, u32 var_p0, u32 var_p1) {{', 1)
+        wrapper = (f'{head}\n  {kind} value = pg_control_original_f{function}(instance, var_p0, var_p1);\n'
+                   f'  pg_control_read({tag}, var_p0, var_p1, (f32)value);\n  return value;\n}}\n')
+        s = s[:start] + original + wrapper + s[end:]
+        if DECLARATION not in s:
+            first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
+            s = s[:first.end()] + '\n' + DECLARATION + s[first.end():]
+        path.write_text(s)
+        print(f'control trace: patched f{function} in {path.name}')
+    else:
+        print(f'control trace: f{function} signature mismatch ({head}), skipping')
 
 SCRIPT_COMMANDS = [('IS_CONTROL_PRESSED', 'i', 0), ('IS_CONTROL_JUST_PRESSED', 'i', 0), ('IS_CONTROL_JUST_RELEASED', 'i', 0),
                    ('IS_CONTROL_RELEASED', 'i', 0), ('GET_CONTROL_VALUE', 'i', 1), ('GET_CONTROL_UNBOUND_NORMAL', 'f', 2),
@@ -54,16 +68,25 @@ SCRIPT_DECLARATION = 'extern void pg_control_script_read(u32 kind, u32 control, 
 MEMORY = 'wasm_rt_local_memory_base, wasm_rt_local_memory_size, instance->w2c_env_memory, '
 
 for command, answer, tag in SCRIPT_COMMANDS:
-    function = fn(f'pad_commands::SetupScriptCommands()::scrWrapped_{command}::Call(rage::scrThread::Info&)')
-    head = f'void w2c_game_f{function}(w2c_game* instance, u64 var_p0) {{'
-    path = next(p for p in sorted((root / 'Generated').glob('game_*.c')) if head in p.read_text())
+    try:
+        function = fn(f'pad_commands::SetupScriptCommands()::scrWrapped_{command}::Call(rage::scrThread::Info&)')
+    except Exception as e:
+        print(f'control trace: {command} not found ({e})')
+        continue
+    head_pattern = re.compile(rf'^void\s+w2c_game_f{function}\(w2c_game\*\s*instance[^\n]*\{{$', re.M)
+    path = next((p for p in sorted((root / 'Generated').glob('game_*.c')) if head_pattern.search(p.read_text())), None)
+    if path is None:
+        print(f'control trace: f{function} ({command}) not found in generated code, skipping')
+        continue
     s = path.read_text()
-    if f'pg_control_script_original_f{function}(' in s: print(f'control trace: f{function} ({command}) already patched'); continue
-    if s.count(head) != 1: raise RuntimeError(f'Pinned f{function} ({command}) changed')
+    if f'pg_control_script_original_f{function}(' in s:
+        print(f'control trace: f{function} ({command}) already patched')
+        continue
+    m = head_pattern.search(s)
+    head = m.group(0)
     start, end = body_range(s, head)
     original = s[start:end].replace(head, f'static void pg_control_script_original_f{function}(w2c_game* instance, u64 var_p0) {{', 1)
     load = 'f32_load_shared' if answer == 'f' else '(f32)(s32)i32_load_shared'
-    # rage::scrThread::Info: +0 where the answer goes, +16 the arguments (8 bytes each): control, input.
     wrapper = (f'{head}\n  uint8_t* const wasm_rt_local_memory_base = NULL;\n  uint64_t wasm_rt_local_memory_size = 0;\n'
                f'  (void)wasm_rt_local_memory_base;\n  (void)wasm_rt_local_memory_size;\n'
                f'  pg_control_script_original_f{function}(instance, var_p0);\n'

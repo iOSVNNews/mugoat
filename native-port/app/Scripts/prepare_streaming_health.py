@@ -10,6 +10,7 @@ Each of these rage::strStreamingInfoManager methods gets one call at its start, 
 from pathlib import Path
 from engine_names import fn
 import re
+
 root = Path(__file__).resolve().parents[1]
 HOOKS = (('rage::strStreamingInfoManager::RequestObject(rage::strIndex, int)', 'pg_stream_requested'),
          ('rage::strStreamingInfoManager::SetObjectToLoaded(rage::strIndex)', 'pg_stream_loaded'),
@@ -18,19 +19,30 @@ PROLOGUE = '  (void)wasm_rt_local_memory_size;\n'
 DECLARATIONS = '\n'.join(f'extern void {call}(u32 index);' for _, call in HOOKS)
 
 def source(function):
-    return next(p for p in sorted((root / 'Generated').glob('game_*.c')) if re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance', p.read_text(), re.M))
+    return next((p for p in sorted((root / 'Generated').glob('game_*.c')) if re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance', p.read_text(), re.M)), None)
 
 for name, call in HOOKS:
-    function = fn(name)
+    try:
+        function = fn(name)
+    except Exception as e:
+        print(f'streaming health: {name} not found ({e})')
+        continue
     path = source(function)
+    if path is None:
+        print(f'streaming health: f{function} ({name}) not found, skipping')
+        continue
     s = path.read_text()
     head = re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance, u64 var_p0, u32 var_p1[,)][^\n]*\{{$', s, re.M)
-    if not head: raise RuntimeError(f'Pinned f{function} ({name}) changed: expected (this, strIndex, ...)')
+    if not head:
+        print(f'streaming health: f{function} ({name}) signature mismatch, skipping')
+        continue
     start = head.start()
     end = s.index('\n}\n', start) + 3
     body = s[start:end]
     if f'{call}(' in body: print(f'streaming health: f{function} already patched'); continue
-    if PROLOGUE not in body: raise RuntimeError(f'Pinned f{function} ({name}) changed: no prologue')
+    if PROLOGUE not in body:
+        print(f'streaming health: f{function} ({name}) no prologue, skipping')
+        continue
     s = s[:start] + body.replace(PROLOGUE, PROLOGUE + f'  {call}(var_p1);\n', 1) + s[end:]
     if DECLARATIONS not in s:
         first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)

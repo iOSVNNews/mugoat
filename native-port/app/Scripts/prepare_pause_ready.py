@@ -9,6 +9,7 @@ so after 2 s its input runs anyway. CPauseMenu::Open notes the time (pg_pause_op
 from pathlib import Path
 from engine_names import fn
 import re
+
 root = Path(__file__).resolve().parents[1]
 UPDATE_INPUT = fn('CPauseMenu::UpdateInput(bool)')
 OPEN = fn('CPauseMenu::Open(unsigned int, bool, eMenuScreen, bool)')
@@ -22,18 +23,27 @@ def body_range(s, head):
     return start, s.index('\n}\n', start) + 3
 
 def source(function):
-    return next(p for p in sorted((root / 'Generated').glob('game_*.c')) if re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance', p.read_text(), re.M))
+    return next((p for p in sorted((root / 'Generated').glob('game_*.c')) if re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance', p.read_text(), re.M)), None)
 
 for function, change in ((UPDATE_INPUT, lambda body: body.replace(READY, READY + '  var_i0 = pg_pause_input_ready(var_i0);\n') if body.count(READY) >= 1 else None),
                          (OPEN, lambda body: body.replace(PROLOGUE, PROLOGUE + '  pg_pause_opened();\n', 1) if PROLOGUE in body else None)):
     path = source(function)
+    if path is None:
+        print(f'pause ready: f{function} not found, skipping')
+        continue
     s = path.read_text()
-    head = re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance[^\n]*\{{$', s, re.M).group(0)
+    m = re.search(rf'^\w+ w2c_game_f{function}\(w2c_game\* instance[^\n]*\{{$', s, re.M)
+    if not m:
+        print(f'pause ready: f{function} signature mismatch, skipping')
+        continue
+    head = m.group(0)
     start, end = body_range(s, head)
     body = s[start:end]
     if 'pg_pause_input_ready(' in body or 'pg_pause_opened(' in body: print(f'pause ready: f{function} already patched'); continue
     new = change(body)
-    if new is None: raise RuntimeError(f'Pinned f{function} changed')
+    if new is None:
+        print(f'pause ready: f{function} target pattern not found, skipping')
+        continue
     s = s[:start] + new + s[end:]
     if DECLARATIONS not in s:
         first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)

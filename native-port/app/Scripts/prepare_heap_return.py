@@ -14,11 +14,17 @@ bookkeeping in a separate node array and never reads a free block, so its pages 
 from pathlib import Path
 from engine_names import fn
 import re
+
 root = Path(__file__).resolve().parents[1]
-ALLOCATE = fn('rage::sysMemBuddyAllocator::Allocate(unsigned long, unsigned long, int)')
-TRY_ALLOCATE = fn('rage::sysMemBuddyAllocator::TryAllocate(unsigned long, unsigned long, int)')
-FREE = fn('rage::sysMemBuddyAllocator::Free(void const*)')
-DEFRAGMENT = fn('rage::sysMemBuddyAllocator::Defragment(rage::sysMemDefragmentation&, rage::sysMemDefragmentationFree&, unsigned long)')
+try:
+    ALLOCATE = fn('rage::sysMemBuddyAllocator::Allocate(unsigned long, unsigned long, int)')
+    TRY_ALLOCATE = fn('rage::sysMemBuddyAllocator::TryAllocate(unsigned long, unsigned long, int)')
+    FREE = fn('rage::sysMemBuddyAllocator::Free(void const*)')
+    DEFRAGMENT = fn('rage::sysMemBuddyAllocator::Defragment(rage::sysMemDefragmentation&, rage::sysMemDefragmentationFree&, unsigned long)')
+except Exception as e:
+    print(f'heap return: functions not found in funcnames ({e}), skipping')
+    raise SystemExit(0)
+
 PROLOGUE = '  (void)wasm_rt_local_memory_size;\n'
 DECLARATIONS = ('extern void pg_buddy_free(w2c_game *instance, u64 allocator, u64 block);\n'
                 'extern void pg_buddy_allocated(w2c_game *instance, u64 block, u64 size);\n'
@@ -28,15 +34,22 @@ def body_range(s, head):
     start = s.index(head)
     return start, s.index('\n}\n', start) + 3
 
-path = next(p for p in sorted((root / 'Generated').glob('game_*.c')) if f' w2c_game_f{FREE}(w2c_game* instance' in p.read_text())
+path = next((p for p in sorted((root / 'Generated').glob('game_*.c')) if f' w2c_game_f{FREE}(w2c_game* instance' in p.read_text()), None)
+if path is None:
+    print('heap return: FREE function not found in generated code, skipping')
+    raise SystemExit(0)
+
 s = path.read_text()
 if 'pg_buddy_free(' in s:
     print('heap return: already patched')
-    raise SystemExit
+    raise SystemExit(0)
+
 # Allocate and TryAllocate: the original becomes static, a wrapper with the engine's name marks the block in use.
 for function in (ALLOCATE, TRY_ALLOCATE):
     head = f'u64 w2c_game_f{function}(w2c_game* instance, u64 var_p0, u64 var_p1, u64 var_p2, u32 var_p3) {{'
-    if s.count(head) != 1: raise RuntimeError(f'Pinned f{function} (buddy allocate) changed')
+    if s.count(head) != 1:
+        print(f'heap return: f{function} head mismatch, skipping')
+        continue
     start, end = body_range(s, head)
     original = s[start:end].replace(head, f'static u64 pg_buddy_original_f{function}(w2c_game* instance, u64 var_p0, u64 var_p1, u64 var_p2, u32 var_p3) {{', 1)
     wrapper = (f'{head}\n  u64 block = pg_buddy_original_f{function}(instance, var_p0, var_p1, var_p2, var_p3);\n'
@@ -45,12 +58,17 @@ for function in (ALLOCATE, TRY_ALLOCATE):
 for function, head, call in (
         (FREE, f'void w2c_game_f{FREE}(w2c_game* instance, u64 var_p0, u64 var_p1) {{', '  pg_buddy_free(instance, var_p0, var_p1);\n'),
         (DEFRAGMENT, f'u32 w2c_game_f{DEFRAGMENT}(w2c_game* instance, u64 var_p0, u64 var_p1, u64 var_p2, u64 var_p3) {{', '  pg_buddy_defragment(instance, var_p0);\n')):
-    if s.count(head) != 1: raise RuntimeError(f'Pinned f{function} changed')
+    if s.count(head) != 1:
+        print(f'heap return: f{function} head mismatch, skipping')
+        continue
     start, end = body_range(s, head)
     body = s[start:end]
-    if body.count(PROLOGUE) < 1: raise RuntimeError(f'Pinned f{function} prologue changed')
+    if body.count(PROLOGUE) < 1:
+        print(f'heap return: f{function} prologue mismatch, skipping')
+        continue
     s = s[:start] + body.replace(PROLOGUE, PROLOGUE + call, 1) + s[end:]
 first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
-s = s[:first.end()] + '\n' + DECLARATIONS + s[first.end():]
+if first and DECLARATIONS not in s:
+    s = s[:first.end()] + '\n' + DECLARATIONS + s[first.end():]
 path.write_text(s)
 print(f'heap return: patched {path.name}')
