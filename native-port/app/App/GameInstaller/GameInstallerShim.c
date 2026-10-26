@@ -101,6 +101,14 @@ int gi_reader_errno(gi_reader *reader) { return archive_errno(reader->archive); 
 const char *gi_reader_format_name(gi_reader *reader) { return archive_format_name(reader->archive); }
 int gi_reader_has_encrypted_entries(gi_reader *reader) { return archive_read_has_encrypted_entries(reader->archive); }
 
+int64_t gi_reader_consumed(gi_reader *reader) { return archive_filter_bytes(reader->archive, 0); }
+int64_t gi_reader_header_position(gi_reader *reader) { return archive_read_header_position(reader->archive); }
+int gi_reader_is_plain_zip(gi_reader *reader) {
+    return (archive_format(reader->archive) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_ZIP
+        && archive_filter_count(reader->archive) == 1
+        && archive_filter_code(reader->archive, 0) == ARCHIVE_FILTER_NONE;
+}
+
 void gi_reader_close(gi_reader *reader) {
     if (!reader) return;
     archive_read_free(reader->archive);

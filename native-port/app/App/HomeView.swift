@@ -6,10 +6,10 @@ import UIKit
 final class HomeView: UIView {
     enum FilesState { case ready, attention, problem, busy }
 
-    let playButton = Theme.primaryButton("Vào game", symbol: "play.fill")
-    let settingsButton = Theme.glassButton("Đồ họa & FPS", symbol: "slider.horizontal.3")
-    let layoutButton = Theme.glassButton("Bố trí điều khiển", symbol: "hand.tap.fill")
-    let cheatButton = Theme.glassButton("Tiện ích game", symbol: "sparkles")
+    let playButton = Theme.primaryButton(AppLanguage.choose("Play"), symbol: "play.fill")
+    let settingsButton = Theme.glassButton(AppLanguage.choose("Settings"), symbol: "gearshape.fill")
+    let layoutButton = Theme.glassButton(AppLanguage.choose("Controls layout"), symbol: "hand.tap.fill")
+    let telegramButton = Theme.glassButton(AppLanguage.choose("Telegram"), symbol: "paperplane.fill")
     let preloadLabel = UILabel()
     let controllerLabel = UILabel()
     /// Taps on the game files card.
@@ -24,6 +24,9 @@ final class HomeView: UIView {
     private let filesSpinner = UIActivityIndicatorView(style: .medium)
     private var modeCards: [ModeCard] = []
     private let modeDetail = UILabel()
+    private let brandTitle = UILabel()
+    private let brandSubtitle = UILabel()
+    private let mapTitle = UILabel()
     /// Sandbox only: which map (it takes the place of the mode description).
     private let mapRow = UIStackView()
     private var mapChips: [UIButton] = []
@@ -34,26 +37,23 @@ final class HomeView: UIView {
         let backdrop = Theme.backdrop(image: "StartBackground")
         pin(backdrop, to: self)
 
-        let icon = UIImageView(image: UIImage(systemName: "gamecontroller.fill"))
-        icon.tintColor = Theme.accent
-        icon.contentMode = .center
-        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
-        icon.backgroundColor = Theme.accent.withAlphaComponent(0.12)
+        let icon = UIImageView(image: UIImage(named: "HomeIcon"))
         icon.layer.cornerRadius = 14
         icon.layer.cornerCurve = .continuous
         icon.clipsToBounds = true
         icon.widthAnchor.constraint(equalToConstant: 52).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 52).isActive = true
-        let title = UILabel()
-        title.text = "Mugoat"
-        title.font = Theme.display(34)
+        let title = brandTitle
+        title.text = "Mugoat NewGen"
+        title.font = Theme.display(30)
         title.textColor = Theme.text
         title.adjustsFontSizeToFitWidth = true
         title.minimumScaleFactor = 0.7
-        let subtitle = UILabel()
-        subtitle.text = "iOSVN  /  CHƠI THEO CÁCH CỦA BẠN"
-        subtitle.font = Theme.body(10, .semibold)
+        let subtitle = brandSubtitle
+        subtitle.text = AppLanguage.choose("Fan project · plays your own game files") + " · \(Theme.appVersion)"
+        subtitle.font = Theme.body(14, .medium)
         subtitle.textColor = Theme.secondaryText
+        subtitle.numberOfLines = 2		// long translations keep the version visible
         let titles = UIStackView(arrangedSubviews: [title, subtitle])
         titles.axis = .vertical
         titles.spacing = 2
@@ -73,34 +73,19 @@ final class HomeView: UIView {
         modes.distribution = .fillEqually
         modeDetail.font = Theme.body(13)
         modeDetail.textColor = Theme.secondaryText
-        modeDetail.numberOfLines = 1
+        modeDetail.numberOfLines = 2
         modeDetail.adjustsFontSizeToFitWidth = true
         modeDetail.minimumScaleFactor = 0.8
 
-        let toolsTitle = UILabel()
-        toolsTitle.text = "Thiết lập trải nghiệm"
-        toolsTitle.font = Theme.display(19, .bold)
-        toolsTitle.textColor = Theme.text
-        let toolsHint = UILabel()
-        toolsHint.text = "Chọn cấu hình phù hợp với máy của bạn."
-        toolsHint.font = Theme.body(13)
-        toolsHint.textColor = Theme.secondaryText
-        toolsHint.numberOfLines = 0
-        let guideLabel = UILabel()
-        guideLabel.text = "01  Chọn dữ liệu game\n02  Chọn chế độ chơi\n03  Bấm Vào game"
-        guideLabel.font = Theme.body(13, .medium)
-        guideLabel.textColor = Theme.secondaryText
-        guideLabel.numberOfLines = 0
-        let versionLabel = UILabel()
-        versionLabel.text = "Mugoat · iOSVN · \(Theme.appVersion)"
-        versionLabel.font = Theme.body(11)
-        versionLabel.textColor = Theme.tertiaryText
-        let secondary = UIStackView(arrangedSubviews: [toolsTitle, toolsHint, settingsButton, layoutButton, cheatButton, guideLabel, versionLabel])
-        secondary.axis = .vertical
-        secondary.spacing = 12
-        secondary.setCustomSpacing(6, after: toolsTitle)
-        secondary.setCustomSpacing(18, after: toolsHint)
-        secondary.setCustomSpacing(18, after: cheatButton)
+        telegramButton.addAction(UIAction { _ in UIApplication.shared.open(Theme.telegramURL) }, for: .touchUpInside)
+        telegramButton.accessibilityLabel = AppLanguage.choose("Five Star Port on Telegram")
+        let secondary = self.secondary
+        // Icons only, in every language; the names stay for VoiceOver.
+        settingsButton.accessibilityLabel = AppLanguage.choose("Settings")
+        layoutButton.accessibilityLabel = AppLanguage.choose("Controls layout")
+        for button in [telegramButton, layoutButton, settingsButton] { button.configuration?.title = nil }
+        secondary.addArrangedSubviews([telegramButton, layoutButton, settingsButton])
+        secondary.spacing = 10
         secondary.translatesAutoresizingMaskIntoConstraints = false
         for label in [preloadLabel, controllerLabel] {
             label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
@@ -109,8 +94,8 @@ final class HomeView: UIView {
         }
         preloadLabel.isHidden = true
 
-        let mapLabel = UILabel()
-        mapLabel.text = "Bản đồ"
+        let mapLabel = mapTitle
+        mapLabel.text = AppLanguage.choose("Map")
         mapLabel.font = Theme.body(13, .semibold)
         mapLabel.textColor = Theme.secondaryText
         mapRow.addArrangedSubview(mapLabel)
@@ -140,7 +125,7 @@ final class HomeView: UIView {
         column.setCustomSpacing(10, after: playButton)
         column.alignment = .fill
 
-        let scroll = UIScrollView()
+        let scroll = self.scroll
         scroll.showsVerticalScrollIndicator = false
         scroll.alwaysBounceVertical = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -151,12 +136,12 @@ final class HomeView: UIView {
         addSubview(log)
         addSubview(secondary)
         let guide = safeAreaLayoutGuide
-        let width = column.widthAnchor.constraint(equalTo: guide.widthAnchor, multiplier: 0.56)
+        let width = column.widthAnchor.constraint(equalTo: guide.widthAnchor, multiplier: 0.44)
         width.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 24),
-            scroll.topAnchor.constraint(equalTo: guide.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 28),
+            scroll.topAnchor.constraint(equalTo: topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             scroll.widthAnchor.constraint(equalTo: column.widthAnchor),
             column.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
             column.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
@@ -165,16 +150,15 @@ final class HomeView: UIView {
             // Centred vertically when there's room, scrolling when there isn't.
             column.heightAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.heightAnchor, constant: -24),
             width,
-            column.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            column.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
             column.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            secondary.leadingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: 30),
-            secondary.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -24),
-            secondary.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
-            secondary.topAnchor.constraint(greaterThanOrEqualTo: guide.topAnchor, constant: 12),
-            secondary.bottomAnchor.constraint(lessThanOrEqualTo: guide.bottomAnchor, constant: -12),
+            secondary.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -20),
+            // Long translations (Russian, German) must not run over the title column.
+            secondary.leadingAnchor.constraint(greaterThanOrEqualTo: scroll.trailingAnchor, constant: 12),
+            secondary.topAnchor.constraint(equalTo: guide.topAnchor, constant: 14),
             log.leadingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: 20),
             log.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
-            log.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
+            log.topAnchor.constraint(equalTo: secondary.bottomAnchor, constant: 12),
             log.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -16)
         ])
         column.distribution = .fill
@@ -189,6 +173,29 @@ final class HomeView: UIView {
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// Update language-specific titles in place without touching downloaded game files or layout.
+    private let scroll = UIScrollView()
+    private let secondary = UIStackView()
+    func refreshLanguage() {
+        brandTitle.text = "Mugoat NewGen"
+        brandSubtitle.text = AppLanguage.choose("Fan project · plays your own game files") + " · \(Theme.appVersion)"
+        mapTitle.text = AppLanguage.choose("Map")
+        playButton.configuration?.title = AppLanguage.choose("Play")
+        // The top-right buttons are icons in every language (long titles overlapped the column, GTA-47);
+        // their names stay for VoiceOver.
+        settingsButton.configuration?.title = nil
+        layoutButton.configuration?.title = nil
+        telegramButton.configuration?.title = nil
+        settingsButton.accessibilityLabel = AppLanguage.choose("Settings")
+        layoutButton.accessibilityLabel = AppLanguage.choose("Controls layout")
+        for (index, card) in modeCards.enumerated() {
+            card.setTitle(GameMode.allCases[index].title)
+        }
+        for (i, chip) in mapChips.enumerated() {
+            chip.configuration?.title = GameSettings.sandboxMapTitles[i]
+        }
+    }
 
     private func buildFilesCard() {
         let panel = Theme.panel(cornerRadius: 16)
@@ -251,23 +258,24 @@ final class HomeView: UIView {
         }
         filesIcon.image = symbol.isEmpty ? nil : UIImage(systemName: symbol)
         filesIcon.tintColor = color
-        filesCard.accessibilityLabel = "Game files: \(title). \(detail)"
+        filesCard.accessibilityLabel = AppLanguage.interpolate(AppLanguage.choose("Game files: {arg0}. {arg1}"), [title, detail])
     }
 
     /// Marks the chosen mode (nil: none yet) and shows its description.
     /// Shows the map choice (Sandbox) instead of the mode description, with `index` selected.
-    func setMap(_ index: Int, visible: Bool, enabled: Bool) {
+    func setMap(_ index: Int, visible: Bool, enabled: Bool, testMapAvailable: Bool = true) {
         mapRow.isHidden = !visible
         modeDetail.isHidden = visible
         for (i, chip) in mapChips.enumerated() {
             let selected = i == index
-            chip.isEnabled = enabled
+            // The GTA VI test map greys out when the game files don't include it.
+            chip.isEnabled = enabled && (i != 1 || testMapAvailable)
             chip.configuration?.baseForegroundColor = selected ? Theme.accent : Theme.text
             chip.configuration?.background.backgroundColor = selected ? Theme.accent.withAlphaComponent(0.18) : UIColor(white: 1, alpha: 0.1)
             chip.configuration?.background.strokeColor = selected ? Theme.accent : .clear
             chip.configuration?.background.strokeWidth = selected ? 1.5 : 0
             chip.accessibilityTraits = selected ? [.button, .selected] : .button
-            chip.accessibilityLabel = "Sandbox map: " + GameSettings.sandboxMapTitles[i]
+            chip.accessibilityLabel = AppLanguage.choose("Sandbox map: ") + GameSettings.sandboxMapTitles[i]
         }
     }
 
@@ -319,6 +327,11 @@ private final class ModeCard: UIControl {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    func setTitle(_ title: String) {
+        label.text = title
+        accessibilityLabel = title
+    }
+
     override var isSelected: Bool { didSet { update() } }
     override var isEnabled: Bool { didSet { update() } }
     override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.75 : 1 } }
@@ -331,4 +344,8 @@ private final class ModeCard: UIControl {
         panel.layer.borderWidth = isSelected ? 2 : 1
         accessibilityTraits = isSelected ? [.button, .selected] : .button
     }
+}
+
+private extension UIStackView {
+    func addArrangedSubviews(_ views: [UIView]) { views.forEach(addArrangedSubview) }
 }

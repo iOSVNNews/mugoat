@@ -1,0 +1,154 @@
+name: Build Mugoat Regeneration
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "mulone-v*"
+permissions:
+  contents: read
+concurrency:
+  group: newgen-paid
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      JOBS: '2'
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+    steps:
+      - name: Require private repo and Apple Silicon
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          test "$PRIVATE" = true
+          test "$(uname -m)" = arm64
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify original-release toolchain
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcodebuild -version | grep -Fx 'Xcode 26.2'
+          xcodebuild -version | grep -Fx 'Build version 17C52'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = '26.2'
+          xcrun clang --version
+      - name: Validate private build inputs
+        run: |
+          python3 tools/release_metadata.py
+          python3 tools/assemble_inputs.py --inputs inputs --out "$RUNNER_TEMP/game-files"
+          python3 app/Scripts/check_game_files.py --mirror "$RUNNER_TEMP/game-files"
+      - name: Install tools
+        run: brew install xcodegen
+      - name: Metal compiler
+        run: xcrun -sdk iphoneos metal --version > /dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
+      - name: Check sound import and built-in translation
+        run: python3 -m unittest discover -s tests -v
+      - name: Typecheck actual memory settings UI with iOS SDK
+        run: |
+          xcrun swiftc -typecheck -target arm64-apple-ios16.0-simulator -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" app/App/StreamingSettings.swift app/App/MemoryAccessViewController.swift app/Tests/MemorySettingsTypecheckStubs.swift
+      - name: Distance streaming policy
+        run: |
+          swiftc app/App/StreamingSettings.swift app/Tests/streaming_preferences.swift -o "$RUNNER_TEMP/streaming-preferences"
+          "$RUNNER_TEMP/streaming-preferences"
+          python3 tools/test_distance_bridge.py "$RUNNER_TEMP/distance-bridge.c"
+          clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined app/Tests/distance_streaming.c -o "$RUNNER_TEMP/distance-streaming"
+          "$RUNNER_TEMP/distance-streaming"
+          clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined app/Tests/streaming_health.c -o "$RUNNER_TEMP/streaming-health"
+          "$RUNNER_TEMP/streaming-health"
+      - name: Drive-by and guard regression
+        run: |
+          python3 tools/test_driveby_look.py "$RUNNER_TEMP/driveby.c"
+          python3 tools/test_guard_margin.py "$RUNNER_TEMP/guard-margin.c"
+      - name: Test real audio importer on macOS
+        run: |
+          cd app
+          clang -c App/GameInstaller/GameInstallerShim.c -I Vendor/libarchive.xcframework/macos-arm64/Headers -o "$RUNNER_TEMP/archive.o"
+          clang -c Source/SoundInflate.c -o "$RUNNER_TEMP/inflate.o"
+          python3 ../tools/extract_compatibility_test.py "$RUNNER_TEMP/compat.c"
+          clang -c "$RUNNER_TEMP/compat.c" -o "$RUNNER_TEMP/compat.o"
+          clang -c Tests/SoundTestStubs.c -o "$RUNNER_TEMP/stubs.o"
+          swiftc -import-objc-header Tests/SoundTestBridge.h -I App/GameInstaller App/ModInstaller.swift App/SoundArchive.swift App/SoundInstaller.swift App/ModVehicleSupport.swift App/SoundAssignments.swift Tests/SoundTestStubs.swift Tests/sound_import.swift "$RUNNER_TEMP/archive.o" "$RUNNER_TEMP/inflate.o" "$RUNNER_TEMP/stubs.o" "$RUNNER_TEMP/compat.o" Vendor/libarchive.xcframework/macos-arm64/libarchive.a -lz -lbz2 -o "$RUNNER_TEMP/sound-test"
+          "$RUNNER_TEMP/sound-test" "$GITHUB_WORKSPACE/tests/fixtures/h2r"
+      - name: Test native turbo physics and script bridge
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror -I app/Source app/Tests/turbo_model.c -lm -o "$RUNNER_TEMP/turbo-model"
+          "$RUNNER_TEMP/turbo-model"
+          clang -std=c11 -Wall -Wextra -Werror -pthread -I app/Source app/Tests/turbo_runtime.c -lm -o "$RUNNER_TEMP/turbo-runtime"
+          "$RUNNER_TEMP/turbo-runtime"
+      - name: Test real supplied vehicle, sound and save packages
+        run: |
+          python3 tools/assemble_test_inputs.py "$RUNNER_TEMP/real-mods"
+          python3 -c 'import zipfile,os; from pathlib import Path; p=Path(os.environ["RUNNER_TEMP"])/"real-mods"; z=zipfile.ZipFile(p/"maybach.zip","w",zipfile.ZIP_DEFLATED); [z.write(f,"maybach/replace/"+f.name) for f in (p/"maybach").iterdir()]; z.close()'
+          cd app
+          clang -I Source Tests/runtime_policy.c -o "$RUNNER_TEMP/policy-test"
+          "$RUNNER_TEMP/policy-test"
+          clang -I Source Tests/memory_budget.c -o "$RUNNER_TEMP/memory-test"
+          "$RUNNER_TEMP/memory-test"
+          swiftc -import-objc-header Tests/SoundTestBridge.h -I App/GameInstaller App/ModInstaller.swift App/SoundArchive.swift App/SoundInstaller.swift App/ModVehicleSupport.swift App/SoundAssignments.swift App/SaveImport.swift Tests/SoundTestStubs.swift Tests/SaveTestStubs.swift Tests/real_mod_import.swift "$RUNNER_TEMP/archive.o" "$RUNNER_TEMP/inflate.o" "$RUNNER_TEMP/stubs.o" "$RUNNER_TEMP/compat.o" Vendor/libarchive.xcframework/macos-arm64/libarchive.a -lz -lbz2 -o "$RUNNER_TEMP/real-mod-test"
+          "$RUNNER_TEMP/real-mod-test" "$RUNNER_TEMP/real-mods"
+      - name: Test complete language archive overlay and diagnostic filtering
+        run: |
+          python3 tools/test_archive_overlay.py "$RUNNER_TEMP/archive-overlay.c"
+          clang -std=c11 "$RUNNER_TEMP/archive-overlay.c" -o "$RUNNER_TEMP/archive-overlay-test"
+          "$RUNNER_TEMP/archive-overlay-test"
+          clang -I app/Source app/Tests/log_policy.c -o "$RUNNER_TEMP/log-policy-test"
+          "$RUNNER_TEMP/log-policy-test"
+          clang++ -std=c++20 -I app/Source app/Tests/gpu_metrics.cpp -o "$RUNNER_TEMP/gpu-metrics-test"
+          "$RUNNER_TEMP/gpu-metrics-test"
+      - name: Test all owner-supplied vehicle, engine sound and addon skin archives
+        run: |
+          python3 tools/owner_test_inputs.py assemble supplied-inputs "$RUNNER_TEMP/owner-mods"
+          clang -std=c11 -pthread app/Tests/sound_runtime.c -o "$RUNNER_TEMP/sound-runtime-test"
+          "$RUNNER_TEMP/sound-runtime-test"
+          cd app
+          swiftc -import-objc-header Tests/SoundTestBridge.h -I App/GameInstaller App/ModInstaller.swift App/SoundArchive.swift App/SoundInstaller.swift App/ModVehicleSupport.swift App/SkinInstaller.swift App/BundledMenyoo.swift App/StreamingSettings.swift Tests/SoundTestStubs.swift Tests/owner_mod_import.swift "$RUNNER_TEMP/archive.o" "$RUNNER_TEMP/inflate.o" "$RUNNER_TEMP/stubs.o" "$RUNNER_TEMP/compat.o" Vendor/libarchive.xcframework/macos-arm64/libarchive.a -lz -lbz2 -o "$RUNNER_TEMP/owner-mod-test"
+          "$RUNNER_TEMP/owner-mod-test" "$RUNNER_TEMP/owner-mods"
+      - name: Test visual intensity rewrite
+        run: |
+          clang -fobjc-arc -framework Foundation app/Source/VisualEffects.m app/Tests/visual_effects.m -o "$RUNNER_TEMP/visual-test"
+          cd app
+          "$RUNNER_TEMP/visual-test"
+      - name: Verify new supplied vehicle imports before IPA compilation
+        run: |
+          python3 tools/assemble_repair_inputs.py "$RUNNER_TEMP/repair-mods"
+          cd app
+          swiftc -import-objc-header Tests/SoundTestBridge.h -I App/GameInstaller App/ModInstaller.swift App/SoundArchive.swift Tests/SoundTestStubs.swift Tests/repair_mod_import.swift "$RUNNER_TEMP/archive.o" "$RUNNER_TEMP/inflate.o" "$RUNNER_TEMP/stubs.o" "$RUNNER_TEMP/compat.o" Vendor/libarchive.xcframework/macos-arm64/libarchive.a -lz -lbz2 -o "$RUNNER_TEMP/repair-test"
+          "$RUNNER_TEMP/repair-test" "$RUNNER_TEMP/repair-mods"
+      - name: Validate R004 skin resource repair and names
+        run: |
+          cd app
+          swiftc -import-objc-header Tests/SoundTestBridge.h -I App/GameInstaller App/ModInstaller.swift App/SoundArchive.swift App/ModVehicleSupport.swift App/SkinInstaller.swift App/BundledMenyoo.swift Tests/SoundTestStubs.swift Tests/r004_skin_import.swift "$RUNNER_TEMP/archive.o" "$RUNNER_TEMP/inflate.o" "$RUNNER_TEMP/stubs.o" "$RUNNER_TEMP/compat.o" Vendor/libarchive.xcframework/macos-arm64/libarchive.a -lz -lbz2 -o "$RUNNER_TEMP/r004-skins"
+          "$RUNNER_TEMP/r004-skins" "${{ github.workspace }}/r004-inputs" "$RUNNER_TEMP/repair-mods"
+      - name: Verify native lookup using the real VF8 index
+        run: python3 tools/test_native_resource_index.py "$RUNNER_TEMP/resource-index.m" "${{ github.workspace }}/r004-inputs"
+      - name: Verify extended resource runtime lookup
+        run: python3 tools/test_large_resource_runtime.py "$RUNNER_TEMP/large-resource.c"
+      - name: Verify spawn, camera, turbo and sound transition bridges
+        run: |
+          clang -std=c11 -pthread -fsanitize=address,undefined app/Tests/vehicle_spawn.c -lm -o "$RUNNER_TEMP/vehicle-spawn"
+          "$RUNNER_TEMP/vehicle-spawn"
+          clang -std=c11 -Wall -Wextra -Werror -pthread -I app/Source app/Tests/turbo_runtime.c -lm -o "$RUNNER_TEMP/turbo-runtime-full"
+          "$RUNNER_TEMP/turbo-runtime-full"
+          clang -std=c11 -pthread app/Tests/sound_runtime.c -o "$RUNNER_TEMP/sound-runtime-full"
+          "$RUNNER_TEMP/sound-runtime-full"
+      - name: Verify transition lifecycle guard
+        run: python3 tools/test_scene_lifecycle.py "$RUNNER_TEMP/scene-lifecycle.c"
+      - name: Build Mugoat-NewGen-Regeneration-R007
+        run: bash build_ipa.sh --mirror "$RUNNER_TEMP/game-files"
+      - name: Verify IPA entitlements
+        run: |
+          python3 tools/verify_ipa.py GTA5Port.ipa
+          mv GTA5Port.ipa Mugoat-NewGen-Regeneration-R007.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mugoat-NewGen-Regeneration-R007
+          path: Mugoat-NewGen-Regeneration-R007.ipa
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build-diagnostics
+          path: app/Build/xcodebuild.log
+          retention-days: 3

@@ -1,17 +1,27 @@
 #!/bin/bash
 # Build an unsigned IPA from YOUR OWN game files.
-# Usage: ./build_ipa.sh https://my-pc.tailnet-name.ts.net [--paid]   (files from your server)
-#        ./build_ipa.sh --mirror /path/to/game-folder [--paid]     (files already on this machine:
+# Usage: ./build_ipa.sh https://my-pc.tailnet-name.ts.net [--free]   (files from your server)
+#        ./build_ipa.sh --mirror /path/to/game-folder [--free]     (files already on this machine:
 #                                                                    the folder with data/manifest.json and b/)
-#   --paid  request the extra-memory entitlements (paid Apple developer account)
+#   The app asks for the extra-memory entitlements; sideloaders drop what an account can't grant.
+#   --free  leave them out, for an installer that refuses the app (--paid is still accepted)
+#   --lite  the Lite build for iPhones with little memory (about 4 GB of RAM): GTA5Port-Lite.ipa
 # Needs: an Apple Silicon Mac (or the GitHub Actions workflow), Xcode, xcodegen.
 set -euo pipefail
 SERVER=""
 MIRROR=""
-if [ "${1:-}" = "--mirror" ]; then MIRROR="$(cd "${2:?Usage: ./build_ipa.sh --mirror /path/to/game-folder [--paid]}" && pwd)"; shift 2
-else SERVER="${1:?Usage: ./build_ipa.sh https://your-server [--paid]  or  ./build_ipa.sh --mirror /path [--paid]}"; shift; fi
-ENTITLEMENTS=App/Free.entitlements
-[ "${1:-}" = "--paid" ] && ENTITLEMENTS=App/Full.entitlements
+if [ "${1:-}" = "--mirror" ]; then MIRROR="$(cd "${2:?Usage: ./build_ipa.sh --mirror /path/to/game-folder [--free]}" && pwd)"; shift 2
+else SERVER="${1:?Usage: ./build_ipa.sh https://your-server [--paid]  or  ./build_ipa.sh --mirror /path [--free]}"; shift; fi
+ENTITLEMENTS=App/Full.entitlements
+LITE=false
+for option in "$@"; do
+  case "$option" in
+    --free) ENTITLEMENTS=App/Free.entitlements ;;
+    --lite) LITE=true ;;
+  esac
+done
+IPA=GTA5Port.ipa
+$LITE && IPA=GTA5Port-Lite.ipa
 cd "$(dirname "$0")/app"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
 # The system Python runs natively on Apple Silicon (a Rosetta Python would
@@ -23,14 +33,16 @@ if [ -n "$SERVER" ]; then
   MIRROR="$PWD/Build/Inputs/mirror"
 fi
 "$PY" Scripts/check_game_files.py --mirror "$MIRROR"
-if [ "${PG_REUSE_PREPARED:-0}" = "1" ] && [ -s Generated/game_0.c ] && [ -s GeneratedResources/shaders-iphoneos.metallib ]; then
-  xcodegen generate --spec project.yml
-else
-  "$PY" Scripts/prepare.py --mirror "$MIRROR"
-fi
+"$PY" Scripts/prepare.py --mirror "$MIRROR"
 # The app opens with your server already filled in (without one, it asks where your files are).
 /usr/libexec/PlistBuddy -c "Set :PGDefaultAssetServer $SERVER" App/Info.plist
+/usr/libexec/PlistBuddy -c "Set :PGLiteMode $LITE" App/Info.plist
 
+# Fail on host Objective-C syntax errors before compiling the large generated engine.
+xcrun --sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 -std=gnu11 -DWASM_RT_USE_MMAP=0 -DWASM_RT_MEMCHECK_BOUNDS_CHECK=1 \
+  -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" -I Source -I Generated \
+  -I Tools/wabt-1.0.42/include -I Tools/wabt-1.0.42/share/wabt/wasm2c \
+  Source/NativeAssets.m Source/VisualEffects.m
 xcodebuild -project PlayGTA5Native.xcodeproj -scheme PlayGTA5Native \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath Build/Release -jobs "$JOBS" \
@@ -41,25 +53,12 @@ xcodebuild -project PlayGTA5Native.xcodeproj -scheme PlayGTA5Native \
 grep -E 'BUILD SUCCEEDED' Build/xcodebuild.log
 
 APP=Build/Release/Build/Products/Release-iphoneos/PlayGTA5Native.app
-ROOT_DIR="$(cd .. && pwd)"
-printf '%s\n' "${GITHUB_SHA:-local}" > "$APP/iosvn-build-revision.txt"
-
-# 1. Build IPA for Free Apple ID (SideStore / AltStore standard)
-STAGE_FREE=Build/IPA-Free
-rm -rf "$STAGE_FREE"
-mkdir -p "$STAGE_FREE/Payload"
-ditto "$APP" "$STAGE_FREE/Payload/PlayGTA5Native.app"
-codesign --force --sign - --entitlements App/Free.entitlements --generate-entitlement-der "$STAGE_FREE/Payload/PlayGTA5Native.app"
-(cd "$STAGE_FREE" && zip -qry "$ROOT_DIR/Mugoat-AppleID-Free.ipa" Payload)
-echo "Done (Free Apple ID): $ROOT_DIR/Mugoat-AppleID-Free.ipa"
-
-# 2. Build IPA for Paid Certificate / Developer Account (extra memory entitlements)
-STAGE_PAID=Build/IPA-Paid
-rm -rf "$STAGE_PAID"
-mkdir -p "$STAGE_PAID/Payload"
-ditto "$APP" "$STAGE_PAID/Payload/PlayGTA5Native.app"
-codesign --force --sign - --entitlements App/Full.entitlements --generate-entitlement-der "$STAGE_PAID/Payload/PlayGTA5Native.app"
-(cd "$STAGE_PAID" && zip -qry "$ROOT_DIR/Mugoat-Cert-Paid.ipa" Payload)
-cp "$ROOT_DIR/Mugoat-Cert-Paid.ipa" "$ROOT_DIR/Mugoat.ipa"
-echo "Done (Paid Certificate): $ROOT_DIR/Mugoat-Cert-Paid.ipa"
-
+# AltStore/SideStore re-sign the app; an ad-hoc signature with the chosen
+# entitlements tells them what to request.
+codesign --force --sign - --entitlements "$ENTITLEMENTS" --generate-entitlement-der "$APP"
+STAGE=Build/IPA
+mkdir -p "$STAGE/Payload"
+ditto "$APP" "$STAGE/Payload/PlayGTA5Native.app"
+rm -f "../$IPA"
+(cd "$STAGE" && zip -qry "../../../$IPA" Payload)
+echo "Done: $(cd .. && pwd)/$IPA"

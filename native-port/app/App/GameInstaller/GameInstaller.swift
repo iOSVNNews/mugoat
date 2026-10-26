@@ -51,6 +51,14 @@ public enum GameInstaller {
         public var requestTimeout: TimeInterval = 30
         /// URL only: extra HTTP headers (e.g. a cookie or token for the file host).
         public var httpHeaders: [String: String] = [:]
+        /// URL only: method and body of the first request (a download page's form); resumes use GET.
+        public var httpMethod = "GET"
+        public var httpBody: Data?
+        /// URL only: cookies the session starts with (a browser's); it keeps ones set on redirects too.
+        public var httpCookies: [HTTPCookie] = []
+        /// URL only: fetch like a browser, one request for the whole file, and use ranges only to
+        /// resume after a drop (some file hosts refuse a download asked for in pieces).
+        public var singleRequest = false
         /// Queue for the progress and completion callbacks.
         public var callbackQueue: DispatchQueue = .main
         /// How often progress is reported.
@@ -66,6 +74,10 @@ public enum GameInstaller {
         /// than the manifest says (also in the mirror's own unpacked copy). Tolerated ones are
         /// listed in `Report.toleratedSizeMismatches`.
         public var toleratedSizeMismatches: Set<String> = []
+        /// Ignore (and delete) the record of an interrupted install at the destination and start from
+        /// the beginning, rewriting every file. By default an interrupted install of the same archive
+        /// continues where it stopped (see `GameInstaller.resumableInstall(at:)`).
+        public var startFresh = false
         /// Tests only: pretend this much space is free.
         public var freeSpaceOverride: Int64?
         public init() {}
@@ -77,7 +89,8 @@ public enum GameInstaller {
 
     public struct Progress {
         public var phase: Phase
-        /// URL mode: bytes received from the network so far (all parts). Local mode: archive bytes read.
+        /// How far into the archive the download (URL) or reading (local) is, in bytes. When an
+        /// interrupted install continues, this starts at `resumedFromByte`, not at 0.
         public var downloadedBytes: Int64
         /// Size of the whole archive when known (Content-Length / file sizes).
         public var downloadTotalBytes: Int64?
@@ -96,6 +109,8 @@ public enum GameInstaller {
         public var pendingBytes: Int64
         /// Times a dropped connection was resumed.
         public var retries: Int
+        /// When an interrupted install continues: the archive offset it continued from (0 otherwise).
+        public var resumedFromByte: Int64 = 0
         public var fraction: Double { totalBytes > 0 ? min(1, Double(extractedBytes) / Double(totalBytes)) : 0 }
     }
 
@@ -116,9 +131,16 @@ public enum GameInstaller {
         /// Largest growth of disk use during the install, compared with the start
         /// (archive bytes still allocated + game bytes written + pending chunks).
         public var peakDiskIncrease: Int64
+        /// Archive bytes downloaded (URL) or read (local) in THIS run.
         public var downloadedBytes: Int64
         public var retries: Int
         public var format: String
+        /// The archive offset this run continued from (0 = it started at the beginning).
+        public var resumedFromByte: Int64 = 0
+        /// Game files unpacked by an earlier, interrupted run and kept (checked by size, not written again).
+        public var filesKeptFromEarlier: Int = 0
+        /// How an earlier interrupted install was continued, in plain words (nil when there was none).
+        public var resumeNote: String?
         /// Files whose size differs from the manifest but were allowed by `toleratedSizeMismatches`.
         public var toleratedSizeMismatches: [String] = []
     }
@@ -155,6 +177,11 @@ public struct InstallError: Error, LocalizedError, CustomStringConvertible {
         case notEnoughSpace, outOfSpace, webPageNotFile, httpError, networkLost, fileChangedOnServer
         case notAnArchive, unsupported, passwordProtected, corrupted, truncated, missingPart
         case noGameFiles, verificationFailed, sourceUnreadable, manifestUnreadable, cancelled, writeFailed
+        /// The download link stopped working part way (HTTP 401/403/404/410, or a web page instead of
+        /// the file): typical for download-portal links that expire. Get a fresh link (reopen the
+        /// download page) and call `install` again with the same destination: it continues from
+        /// where it stopped.
+        case linkExpired
     }
     public var kind: Kind
     /// A sentence or two a player can act on.

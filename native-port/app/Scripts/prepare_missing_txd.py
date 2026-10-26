@@ -9,9 +9,10 @@ never heard of (it can never load), so the script continues and draws nothing fo
 store knows still report their real state.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-FUNCTION = '50534'
+FUNCTION = str(fn('graphics_commands::HasStreamedTxdLoaded(char const*)'))
 MARK = 'pg_streamed_txd_loaded('
 done = False
 for path in sorted((root / 'Generated').glob('game_*.c')):

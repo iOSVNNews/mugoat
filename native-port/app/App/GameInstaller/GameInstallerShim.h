@@ -47,6 +47,16 @@ int gi_reader_errno(gi_reader *reader);
 const char *gi_reader_format_name(gi_reader *reader);
 /// Whether the archive (as far as read) contains encrypted entries: 1 yes, 0 no, <0 unknown.
 int gi_reader_has_encrypted_entries(gi_reader *reader);
+/// Archive bytes libarchive has consumed so far, counted from the start of the stream it was given.
+/// Right after gi_reader_next returned a regular zip file, this is exactly the end of that entry's
+/// local header (header offset + 30 + name length + extra length).
+int64_t gi_reader_consumed(gi_reader *reader);
+/// libarchive's archive_read_header_position(): a LOWER bound for the current entry's header offset
+/// (the streamable zip reader records it before consuming the previous entry's tail).
+int64_t gi_reader_header_position(gi_reader *reader);
+/// 1 when the stream is a zip read without a compression filter, so stream offsets are raw
+/// archive offsets and the reader can restart at any local file header. Valid after the first header.
+int gi_reader_is_plain_zip(gi_reader *reader);
 void gi_reader_close(gi_reader *reader);
 
 /// Frees the byte range on disk (APFS: F_PUNCHHOLE). offset/length are rounded inwards to
@@ -60,3 +70,9 @@ const char *gi_libarchive_version(void);
 }
 #endif
 #endif
+
+int gi_inflate_raw(const void *,uint32_t,void *,uint32_t);
+
+uint32_t gi_deflate_raw(const void *,uint32_t,void *,uint32_t);
+
+int gi_inflate_resource(const void *,uint32_t,void *,uint32_t);

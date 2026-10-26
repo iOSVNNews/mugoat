@@ -1,7 +1,7 @@
 name: PlayGTA5Native
 options:
   deploymentTarget:
-    iOS: "16.4"
+    iOS: "16.0"
 settings:
   base:
     # Your Apple team only matters for signing on a Mac (scripts/build_ipa.sh
@@ -29,6 +29,24 @@ settings:
       - $(SRCROOT)/Tools/simde
       - $(SRCROOT)/App/GameInstaller
       - $(SRCROOT)/Vendor/libarchive.xcframework/ios-arm64/Headers
+      - $(SRCROOT)/Tools/opus-1.5.2/include
+      - $(SRCROOT)/Vendor/blink
+    # Native libopus for the game's audio (Scripts/build_opus.py builds one per SDK).
+    LIBRARY_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/Tools/opus-lib/$(PLATFORM_NAME)
+      - $(SRCROOT)/Tools/blink-lib/$(PLATFORM_NAME)
+    OTHER_LDFLAGS:
+      - $(inherited)
+      - -lopus
+      - -lblink
+    # MetalFX (Settings › Sharper upscaling) exists in the iPhone SDK only.
+    "OTHER_LDFLAGS[sdk=iphoneos*]":
+      - $(inherited)
+      - -lopus
+      - -lblink
+      - -weak_framework
+      - MetalFX
     OTHER_CFLAGS:
       - $(inherited)
       - -include
@@ -42,21 +60,20 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: App
-        excludes:
-          - Info.plist
+      - App
       - Source
       - path: Generated
         compilerFlags: -w
         excludes:
           - "*.h"
-          - "game_0.c"
-      - path: Generated/game_0.c
-        compilerFlags: -w -O0
+          - "*.tsv"
       - path: Tools/wabt-1.0.42/share/wabt/wasm2c/wasm-rt-impl.c
       - path: Tools/wabt-1.0.42/share/wabt/wasm2c/wasm-rt-mem-impl.c
       - path: Tools/wabt-1.0.42/share/wabt/wasm2c/wasm-rt-exceptions-impl.c
       - path: Resources
+        buildPhase: resources
+      - path: TurboSounds
+        type: folder
         buildPhase: resources
       - path: GeneratedResources
         buildPhase: resources
@@ -76,7 +93,7 @@ targets:
       - sdk: libbz2.tbd
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: vn.iosvn.mugoat
+        PRODUCT_BUNDLE_IDENTIFIER: vn.gta.newgen
         PRODUCT_NAME: PlayGTA5Native
         TARGETED_DEVICE_FAMILY: "1,2"
         # Paid Apple developer accounts can use App/Full.entitlements (more
@@ -85,17 +102,20 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Mugoat
-        CFBundleShortVersionString: "1.0.0"
+        CFBundleDisplayName: Mugoat NewGen
+        CFBundleDevelopmentRegion: en
+        CFBundleShortVersionString: "1.4.4"
         # Your game-file server may be a plain-http address on your tailnet.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         # Filled in by the cloud build so you don't have to type it.
         PGDefaultAssetServer: ""
+        # The Lite build for iPhones with little memory (build_ipa.sh --lite).
+        PGLiteMode: false
         # The app folder (logs) is visible in the Files app.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        CFBundleVersion: "1"
+        CFBundleVersion: "1016"
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         # Lets the game present above 60 FPS on ProMotion iPhones when the frame rate is unlocked.

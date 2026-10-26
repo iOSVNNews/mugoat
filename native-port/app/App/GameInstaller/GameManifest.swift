@@ -59,7 +59,11 @@ struct GameRootMatcher {
     let manifest: GameManifest
     private(set) var prefix: [Substring]?
 
-    init(manifest: GameManifest) { self.manifest = manifest }
+    /// `prefix`: the game folder found by an earlier, interrupted run ("" = archive root), if any.
+    init(manifest: GameManifest, prefix: String? = nil) {
+        self.manifest = manifest
+        if let prefix { self.prefix = prefix.isEmpty ? [] : (GameManifest.components(of: prefix) ?? []) }
+    }
 
     var prefixString: String { prefix.map { $0.isEmpty ? "" : $0.joined(separator: "/") + "/" } ?? "" }
 

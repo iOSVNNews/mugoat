@@ -1,60 +1,54 @@
 import Foundation
 import UIKit
 
-/// Sends the app's logs to the developer (5★ Port Builder site, which forwards them on Telegram).
+/// Local sharing guidance. No remote log or save upload endpoint in this fork.
 enum LogUploader {
-    static let endpoint = URL(string: "https://fivestarport.vercel.app/api/log")!
-    /// The site accepts up to 4 MB, so each log is trimmed to its last 1.8 MB.
+    /// The site accepts up to 4 MB, so each log is trimmed to 1.8 MB: its start (device, settings,
+    /// game files) and its end (where it stopped or crashed).
     private static let perLog = 1_800_000
+    private static let head = 256_000
 
-    static func send(note: String, done: @escaping ((String, String)) -> Void) {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        var body = Data()
-        for (title, name) in [("PREVIOUS RUN", "native-port-previous.log"), ("THIS RUN", "native-port.log")] {
-            guard let data = try? Data(contentsOf: documents.appendingPathComponent(name)), !data.isEmpty else { continue }
-            body.append("===== \(title) (\(name)) =====\n".data(using: .utf8)!)
-            body.append(data.count > perLog ? data.suffix(perLog) : data)
-            body.append("\n".data(using: .utf8)!)
-        }
-        guard !body.isEmpty else { DispatchQueue.main.async { done(("No log yet", "Start the game once, then try again.")) }; return }
-        var request = URLRequest(url: endpoint, timeoutInterval: 60)
-        request.httpMethod = "POST"
-        request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("\(GameSettings.shared.tier.model) · iOS \(UIDevice.current.systemVersion) · \(GameSettings.shared.tier.memoryLimitMB) MB limit", forHTTPHeaderField: "X-Device")
-        request.setValue(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?", forHTTPHeaderField: "X-App-Version")
-        request.setValue(String(note.prefix(400)).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "", forHTTPHeaderField: "X-Note")
-        URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let reply = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            let result: (String, String)
-            if status == 200 {
-                result = ("Log sent, thank you!", "Reference: \(reply?["id"] as? String ?? "-"). Mention it if you also ask for help in the community.")
-            } else if error != nil {
-                result = ("Couldn't send the log", "No internet connection? Try again, or use Share log instead.")
-            } else {
-                result = ("Couldn't send the log", (reply?["error"] as? String) ?? "Try again later, or use Share log instead.")
-            }
-            DispatchQueue.main.async { done(result) }
-        }.resume()
+    static func trimmed(_ data: Data, to limit: Int = perLog) -> Data {
+        guard data.count > limit else { return data }
+        var result = Data(data.prefix(head))
+        result.append("\n… \(data.count - limit) bytes cut …\n".data(using: .utf8)!)
+        result.append(data.suffix(limit - head))
+        return result
     }
+
+    /// The newest Story mode save (SGTA5…, about 0.5 MB), so the developer can load the game where it happened
+    /// (Harness/gta.py save-from-log). Mission replay restore points (MISREP) and backups are left out.
+    static func latestSave() -> URL? {
+        let folder = URL(fileURLWithPath: EnginePaths.filesRoot().path).appendingPathComponent("userdata/Documents/Rockstar Games/GTA V/Default")
+        let saves = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return saves.filter { $0.lastPathComponent.hasPrefix("SGTA5") && $0.pathExtension.isEmpty }
+            .max { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                 < ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+    }
+
+    static func send(note: String, includeSave: Bool = false, done: @escaping ((String, String)) -> Void) {
+        DispatchQueue.main.async { done(("Chia sẻ nhật ký", "Dùng mục Chia sẻ nhật ký để lưu hoặc gửi cho nhóm tester. Bản này không tự gửi log hay save đến dịch vụ bên ngoài.")) }
+    }
+
 }
 
 /// "Send log to the developer": its own screen so the buttons stay visible above the keyboard in landscape.
 final class SendLogViewController: UIViewController {
     private let note = UITextView()
     private let status = UILabel()
+    private let includeSave = UISwitch()
     var finished: ((String, String) -> Void)?
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Send log to the developer"
+        title = AppLanguage.choose("Send log to the developer")
         view.backgroundColor = .systemGroupedBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Send", primaryAction: UIAction { [weak self] _ in self?.send() })
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: AppLanguage.choose("Send"), primaryAction: UIAction { [weak self] _ in self?.send() })
         navigationItem.rightBarButtonItem?.style = .done
 
         let info = UILabel()
-        info.text = "Sends this run's game log and the previous one: your iPhone model, iOS version, app settings and what the game printed. No personal data, photos or contacts."
+        info.text = AppLanguage.choose("Sends this run's game log and the previous one: your iPhone model, iOS version, app settings and what the game printed. No personal data, photos or contacts.")
         info.numberOfLines = 0
         info.font = .preferredFont(forTextStyle: .footnote)
         info.textColor = .secondaryLabel
@@ -62,9 +56,9 @@ final class SendLogViewController: UIViewController {
         note.layer.cornerRadius = 10
         note.backgroundColor = .secondarySystemGroupedBackground
         note.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
-        note.accessibilityLabel = "What happened? (optional)"
+        note.accessibilityLabel = AppLanguage.choose("What happened? (optional)")
         let placeholder = UILabel()
-        placeholder.text = "What happened? (optional)"
+        placeholder.text = AppLanguage.choose("What happened? (optional)")
         placeholder.textColor = .placeholderText
         placeholder.font = note.font
         placeholder.tag = 7
@@ -77,7 +71,17 @@ final class SendLogViewController: UIViewController {
         }
         status.font = .preferredFont(forTextStyle: .footnote)
         status.textColor = .secondaryLabel
-        let stack = UIStackView(arrangedSubviews: [info, note, status])
+        // The save lets the developer load the game where it happened; it holds game progress only.
+        let saveLabel = UILabel()
+        saveLabel.text = AppLanguage.choose("Include my latest save (game progress only, about 0.5 MB), so the developer can load the game where it happened")
+        saveLabel.numberOfLines = 0
+        saveLabel.font = .preferredFont(forTextStyle: .footnote)
+        includeSave.isOn = LogUploader.latestSave() != nil
+        includeSave.isEnabled = includeSave.isOn
+        let saveRow = UIStackView(arrangedSubviews: [saveLabel, includeSave])
+        saveRow.spacing = 12
+        saveRow.alignment = .center
+        let stack = UIStackView(arrangedSubviews: [info, note, saveRow, status])
         stack.axis = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -98,8 +102,8 @@ final class SendLogViewController: UIViewController {
     private func send() {
         navigationItem.rightBarButtonItem?.isEnabled = false
         note.resignFirstResponder()
-        status.text = "Sending…"
-        LogUploader.send(note: note.text ?? "") { [weak self] result in
+        status.text = AppLanguage.choose("Sending…")
+        LogUploader.send(note: note.text ?? "", includeSave: includeSave.isOn) { [weak self] result in
             guard let self else { return }
             let done = self.finished
             self.dismiss(animated: true) { done?(result.0, result.1) }

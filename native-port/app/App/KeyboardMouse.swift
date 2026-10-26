@@ -71,6 +71,7 @@ final class KeyboardMouse {
     private func set(_ key: UInt8, _ down: Bool) {
         if down { held.insert(key) } else { held.remove(key) }
         PGSetKey(key, down)
+        PGAsiSetKey(Int32(key), down)  // script mods (.asi) read the same Windows keys
     }
     private func setButton(_ bit: Int32, _ pressed: Bool) {
         guard enabled else { return }

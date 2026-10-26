@@ -3,11 +3,14 @@ import Foundation
 /// Feeds archive bytes to libarchive, one block at a time, strictly front to back.
 protocol ArchiveByteSource: AnyObject {
     /// Returns the next block (length 0 = end of archive), or nil on failure/cancel.
-    /// The block stays valid until the next call.
+    /// The block stays valid until the call AFTER the next one (sources alternate two buffers, so
+    /// the installer can still look at the previous block to find a zip header's exact offset).
     func nextBlock() -> (UnsafeRawPointer, Int)?
     /// Why nextBlock returned nil.
     var failure: InstallError? { get }
-    /// Archive bytes handed to libarchive so far.
+    /// Set when a resume turned out to be impossible (server ignores Range, file changed...).
+    var resumeRejection: ResumeRejected? { get }
+    /// Archive bytes handed to libarchive so far in this run.
     var bytesConsumed: Int64 { get }
     /// Wakes up a waiting nextBlock and makes it fail.
     func cancel()
@@ -15,15 +18,17 @@ protocol ArchiveByteSource: AnyObject {
     func finish(success: Bool)
 }
 
-/// Reads one local archive or the parts of a multi-part set as one stream. When allowed, frees
-/// what was read (F_PUNCHHOLE) and deletes finished parts, so disk use stays flat.
+/// Reads one local archive or the parts of a multi-part set as one stream, optionally starting at
+/// an offset (resume). When allowed, frees what was read (F_PUNCHHOLE) and deletes finished parts,
+/// but never past `punchLimit`: the resume point saved on disk must still be readable.
 final class LocalFileSource: ArchiveByteSource {
     let parts: [URL]
     let modify: Bool
     let log: (String) -> Void
     private let blockSize = 4 << 20
     private let punchEvery: Int64 = 64 << 20
-    private let buffer: UnsafeMutableRawPointer
+    private let buffers: [UnsafeMutableRawPointer]
+    private var flip = 0
     private var index = -1
     private var fd: Int32 = -1
     private var offsetInPart: Int64 = 0
@@ -34,30 +39,55 @@ final class LocalFileSource: ArchiveByteSource {
     private var cancelled = false
     private var consumed: Int64 = 0
     private(set) var failure: InstallError?
+    var resumeRejection: ResumeRejected? { nil }
     /// Sum of the parts' sizes.
     let totalBytes: Int64
+    /// Size of each part, and where each starts in the whole stream.
+    let partSizes: [Int64]
+    private let partStarts: [Int64]
+    /// Where reading starts (resume), as an offset into the whole stream.
+    let startOffset: Int64
     /// Bytes freed by punching holes / deleting parts.
     private(set) var freedBytes: Int64 = 0
+    /// Bytes before this stream offset may be freed. Raised by the installer after it saved a resume
+    /// point at least this far. Int64.max = free everything as soon as it was read.
+    private(set) var punchLimit: Int64 = 0
+    private var finishedParts: [Int] = []
 
-    init(parts: [URL], modify: Bool, log: @escaping (String) -> Void) throws {
+    /// `knownSizes`: sizes of parts that may already be gone (deleted by an earlier, interrupted run
+    /// after it was read); only parts entirely before `startOffset` may be missing.
+    init(parts: [URL], modify: Bool, startOffset: Int64 = 0, knownSizes: [Int64?] = [], log: @escaping (String) -> Void) throws {
         self.parts = parts
         self.modify = modify
         self.log = log
+        var sizes: [Int64] = []
         var total: Int64 = 0
-        for part in parts {
+        for (i, part) in parts.enumerated() {
             var st = stat()
-            guard stat(part.path, &st) == 0 else {
+            if stat(part.path, &st) == 0 {
+                sizes.append(Int64(st.st_size))
+            } else if i < knownSizes.count, let known = knownSizes[i], total + known <= startOffset {
+                sizes.append(known)
+            } else {
                 throw InstallError(.sourceUnreadable, "The archive \"\(part.lastPathComponent)\" could not be opened.", detail: String(cString: strerror(errno)))
             }
-            total += Int64(st.st_size)
+            total += sizes[i]
         }
+        partSizes = sizes
+        var starts: [Int64] = [], at: Int64 = 0
+        for size in sizes { starts.append(at); at += size }
+        partStarts = starts
         totalBytes = total
-        buffer = UnsafeMutableRawPointer.allocate(byteCount: blockSize, alignment: 16)
+        self.startOffset = min(startOffset, total)
+        buffers = [UnsafeMutableRawPointer.allocate(byteCount: blockSize, alignment: 16),
+                   UnsafeMutableRawPointer.allocate(byteCount: blockSize, alignment: 16)]
+        // Resume: begin with the part that holds startOffset.
+        if startOffset > 0, let i = starts.lastIndex(where: { $0 <= self.startOffset }) { index = i - 1 }
     }
 
     deinit {
         if fd >= 0 { close(fd) }
-        buffer.deallocate()
+        buffers.forEach { $0.deallocate() }
     }
 
     var bytesConsumed: Int64 { lock.lock(); defer { lock.unlock() }; return consumed }
@@ -74,9 +104,27 @@ final class LocalFileSource: ArchiveByteSource {
         return total
     }
 
+    /// Unpacker thread only (the same thread that calls nextBlock).
+    func setPunchLimit(_ limit: Int64) {
+        guard modify, limit > punchLimit else { return }
+        punchLimit = limit
+        deleteFinishedParts()
+    }
+
+    /// Finished parts that lie entirely before the punch limit can go now.
+    private func deleteFinishedParts() {
+        finishedParts.removeAll { i in
+            guard partStarts[i] + partSizes[i] <= punchLimit else { return false }
+            if unlink(parts[i].path) == 0 { freedBytes += partSizes[i]; log("Deleted finished part \(parts[i].lastPathComponent)") }
+            return true
+        }
+    }
+
     func nextBlock() -> (UnsafeRawPointer, Int)? {
         lock.lock(); let stop = cancelled; lock.unlock()
         if stop { failure = InstallError(.cancelled, "The install was cancelled."); return nil }
+        flip ^= 1
+        let buffer = buffers[flip]
         while true {
             if fd < 0 {
                 if !openNext() { return failure == nil ? (UnsafeRawPointer(buffer), 0) : nil }
@@ -89,8 +137,12 @@ final class LocalFileSource: ArchiveByteSource {
             if n == 0 { closeCurrent(finished: true); continue }
             offsetInPart += Int64(n)
             lock.lock(); consumed += Int64(n); lock.unlock()
-            // The bytes are in memory now; libarchive never seeks back, so the disk copy can go.
-            if modify && punchWorks && offsetInPart - punchedTo >= punchEvery { punch() }
+            // The bytes are in memory now and libarchive never seeks back, so the disk copy can go,
+            // up to the resume point saved on disk.
+            if modify && punchWorks {
+                let target = min(offsetInPart, punchLimit == .max ? .max : punchLimit - partStarts[index])
+                if target - punchedTo >= punchEvery { punch(to: target) }
+            }
             return (UnsafeRawPointer(buffer), n)
         }
     }
@@ -109,15 +161,25 @@ final class LocalFileSource: ArchiveByteSource {
         if fstatfs(fd, &sfs) == 0 { fsBlock = Int64(max(sfs.f_bsize, 512)) }
         offsetInPart = 0
         punchedTo = 0
+        let skip = startOffset - partStarts[index]
+        if skip > 0 {
+            // Resume: start at the saved offset. The part before it may already be freed.
+            guard lseek(fd, off_t(skip), SEEK_SET) == off_t(skip) else {
+                failure = InstallError(.sourceUnreadable, "The archive \"\(parts[index].lastPathComponent)\" could not be read at the resume point.", detail: String(cString: strerror(errno)))
+                return false
+            }
+            offsetInPart = skip
+            punchedTo = skip / fsBlock * fsBlock
+        }
         if parts.count > 1 { log("Reading part \(index + 1) of \(parts.count): \(parts[index].lastPathComponent)") }
         return true
     }
 
-    private func punch() {
-        let result = gi_punch_hole(fd, punchedTo, offsetInPart - punchedTo, fsBlock)
+    private func punch(to target: Int64) {
+        let result = gi_punch_hole(fd, punchedTo, target - punchedTo, fsBlock)
         if result == 0 {
             // Rounded down to whole blocks; the remainder is punched next time.
-            let end = offsetInPart / fsBlock * fsBlock
+            let end = target / fsBlock * fsBlock
             freedBytes += end - punchedTo
             punchedTo = end
         } else {
@@ -130,12 +192,11 @@ final class LocalFileSource: ArchiveByteSource {
         guard fd >= 0 else { return }
         close(fd)
         fd = -1
-        // A finished part of a multi-part set is no longer needed at all.
+        // A finished part of a multi-part set is no longer needed at all (once the saved resume
+        // point is past it).
         if finished && modify && parts.count > 1 && index < parts.count - 1 {
-            if unlink(parts[index].path) == 0 {
-                freedBytes += offsetInPart - punchedTo
-                log("Deleted finished part \(parts[index].lastPathComponent)")
-            }
+            finishedParts.append(index)
+            deleteFinishedParts()
         }
     }
 
