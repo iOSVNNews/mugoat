@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import urllib.request
 from pathlib import Path
 
@@ -27,12 +28,29 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--sdk', action='append', choices=['iphoneos', 'iphonesimulator'])
 sdks = parser.parse_args().sdk or ['iphoneos']
 
+def download_with_retry(url, destination, expected_sha256, max_retries=5):
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Apple Silicon) AppleWebKit/537.36'}
+    req = urllib.request.Request(url, headers=headers)
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f'Downloading opus from {url} (attempt {attempt}/{max_retries})...')
+            with urllib.request.urlopen(req, timeout=60) as response:
+                data = response.read()
+            if hashlib.sha256(data).hexdigest() == expected_sha256:
+                destination.write_bytes(data)
+                return
+            print(f'Attempt {attempt}: checksum mismatch, retrying...')
+        except Exception as e:
+            print(f'Attempt {attempt} failed: {e}')
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+    sys.exit('Failed to download libopus after multiple attempts.')
+
 if not (source / 'CMakeLists.txt').exists():
     archive = root / f'Tools/opus-{VERSION}.tar.gz'
     archive.parent.mkdir(parents=True, exist_ok=True)
     if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != SHA256:
-        with urllib.request.urlopen(URL) as response:
-            archive.write_bytes(response.read())
+        download_with_retry(URL, archive, SHA256)
     if hashlib.sha256(archive.read_bytes()).hexdigest() != SHA256:
         sys.exit('libopus archive checksum mismatch.')
     sys.path.insert(0, str(Path(__file__).parent))

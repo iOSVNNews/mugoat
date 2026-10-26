@@ -29,8 +29,17 @@ def run(*args):
     subprocess.run(args, cwd=root, check=True)
 
 def download(url, destination):
-    with urllib.request.urlopen(url) as response:
-        destination.write_bytes(response.read())
+    import time
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Apple Silicon) AppleWebKit/537.36'}
+    req = urllib.request.Request(url, headers=headers)
+    for attempt in range(1, 6):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as response:
+                destination.write_bytes(response.read())
+            return
+        except Exception as e:
+            if attempt == 5: raise
+            time.sleep(2 * attempt)
 
 wabt = root / 'Tools/wabt-1.0.42'
 if not wabt.exists():
