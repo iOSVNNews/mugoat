@@ -328,7 +328,7 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
         var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if cleanModel == "mbs1k" { cleanModel = "mbslk" }
         guard !cleanModel.isEmpty else { return }
-        let started = cleanModel.withCString { PGSpawnVehicle($0) }
+        let started = cleanModel.withCString { MugoatSpawnVehicleNamed($0) }
         if started {
             showAlert(L10n.text("Đã gọi xe"), String(format: L10n.text("Đang nạp model '%@'. Xe sẽ xuất hiện ngay trước mặt nhân vật!"), cleanModel))
         } else {

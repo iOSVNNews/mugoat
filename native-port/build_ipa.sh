@@ -3,7 +3,8 @@
 # Usage: ./build_ipa.sh https://my-pc.tailnet-name.ts.net [--paid]   (files from your server)
 #        ./build_ipa.sh --mirror /path/to/game-folder [--paid]     (files already on this machine:
 #                                                                    the folder with data/manifest.json and b/)
-#   --paid  request the extra-memory entitlements (paid Apple developer account)
+#   --lite  the Lite build for iPhones with little memory (about 4 GB of RAM); see PGLiteMode
+#   Both IPAs are always made: Mugoat-AppleID-Free.ipa and Mugoat-Cert-Paid.ipa (extra memory).
 # Needs: an Apple Silicon Mac (or the GitHub Actions workflow), Xcode, xcodegen.
 set -euo pipefail
 SERVER=""
@@ -11,7 +12,13 @@ MIRROR=""
 if [ "${1:-}" = "--mirror" ]; then MIRROR="$(cd "${2:?Usage: ./build_ipa.sh --mirror /path/to/game-folder [--paid]}" && pwd)"; shift 2
 else SERVER="${1:?Usage: ./build_ipa.sh https://your-server [--paid]  or  ./build_ipa.sh --mirror /path [--paid]}"; shift; fi
 ENTITLEMENTS=App/Free.entitlements
-[ "${1:-}" = "--paid" ] && ENTITLEMENTS=App/Full.entitlements
+LITE=false
+for option in "$@"; do
+  case "$option" in
+    --paid) ENTITLEMENTS=App/Full.entitlements ;;
+    --lite) LITE=true ;;
+  esac
+done
 cd "$(dirname "$0")/app"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu)}"
 # The system Python runs natively on Apple Silicon (a Rosetta Python would
@@ -24,7 +31,7 @@ if [ -n "$SERVER" ]; then
 fi
 "$PY" Scripts/check_game_files.py --mirror "$MIRROR"
 mkdir -p Build/Online
-IPHONEOS_DEPLOYMENT_TARGET=15.0 cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
+IPHONEOS_DEPLOYMENT_TARGET=16.0 cargo build --manifest-path ../online-bridge/Cargo.toml --release --lib --target aarch64-apple-ios
 cp ../online-bridge/target/aarch64-apple-ios/release/libmugoat_online.a Build/Online/
 test -s Build/Online/libmugoat_online.a
 mkdir -p Resources
@@ -37,6 +44,13 @@ else
 fi
 # The app opens with your server already filled in (without one, it asks where your files are).
 /usr/libexec/PlistBuddy -c "Set :PGDefaultAssetServer $SERVER" App/Info.plist
+/usr/libexec/PlistBuddy -c "Set :PGLiteMode $LITE" App/Info.plist
+
+# Fail on host Objective-C syntax errors before compiling the large generated engine (from R007).
+xcrun --sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 -std=gnu11 -DWASM_RT_USE_MMAP=0 -DWASM_RT_MEMCHECK_BOUNDS_CHECK=1 \
+  -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" -I Source -I Generated \
+  -I Tools/wabt-1.0.42/include -I Tools/wabt-1.0.42/share/wabt/wasm2c \
+  Source/NativeAssets.m Source/VisualEffects.m
 
 xcodebuild -project PlayGTA5Native.xcodeproj -scheme PlayGTA5Native \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \

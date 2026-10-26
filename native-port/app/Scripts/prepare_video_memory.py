@@ -5,9 +5,10 @@ record) and derives the texture streaming budget from it; the browser build repo
 everywhere. pg_video_memory replaces the value with a budget from the app's memory limit.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-FUNCTION = '9975'
+FUNCTION = str(fn('rage::grcResourceCache::UpdateTotalAvailableMemory()'))
 MARK = 'pg_video_memory('
 OLD = '(u64)checked_add_u64(var_j1, 48u));\n  var_l0 = var_j1;\n'
 NEW = '(u64)checked_add_u64(var_j1, 48u));\n  var_j1 = pg_video_memory(var_j1);\n  var_l0 = var_j1;\n'

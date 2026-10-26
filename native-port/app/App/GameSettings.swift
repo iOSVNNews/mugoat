@@ -143,7 +143,7 @@ final class GameSettings {
     }
     var engineMemoryMB: Int {
         get { defaults.integer(forKey: "engineMemoryMB") }
-        set { defaults.set(newValue <= 0 ? 0 : min(max(newValue, 3072), 16384), forKey: "engineMemoryMB") }
+        set { defaults.set(newValue <= 0 ? 0 : min(max(newValue, 1024), 16384), forKey: "engineMemoryMB") }
     }
     var sixtyFPS: Bool { frameRateCap != 30 }
     /// Frame rate cap: 30, 60, or 0 for unlocked (up to the screen's refresh rate, 120 on ProMotion).

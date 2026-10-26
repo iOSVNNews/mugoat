@@ -488,6 +488,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         bootedPreset = GameSettings.shared.graphicsPreset
         appendLog("Graphics: " + GraphicsConfiguration.apply(GameSettings.shared, screen: view.bounds.size))
         appendLog("Device: " + GameSettings.shared.tier.summary)
+        appendLog(PerformanceSettings.summary)
         GameSettings.shared.markBootStarted()
         launchButton.setTitle(L10n.text("Đang tải…"), for: .disabled); launchButton.setNeedsUpdateConfiguration()
         appendLog("Native touch controls support held buttons, sprint and weapon selection.")
@@ -1095,6 +1096,9 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let avgMS = d[1] > 0 ? Double(d[6]) / Double(d[1]) / 1000 : 0
         appendLog(String(format: "Health: device RAM %d MB · app %d MB used, iOS headroom %d MB · guard held back streaming %llu× · reads %llu (%.1f MB, avg %.1f ms, slow %llu, errors %llu) · %.0f FPS",
                          GameSettings.shared.tier.physicalMemoryMB, used, free, d[0], d[1], Double(d[2]) / 1_048_576, avgMS, d[5], d[3], PGRenderedFramesPerSecond()))
+        // R007 memory guard: evictions it asked for and the distance-streaming state (bounded, every 10 s).
+        appendLog(String(format: "Health (R007 guard): asked to evict %llu× in total", PGMemoryBudgetEvictions()))
+        PGLogStreamingPolicy()
     }
 
     @objc private func leftApp() {
@@ -1235,7 +1239,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             showCheatToast(L10n.text("Cần vào game trước khi triệu hồi xe"))
             return
         }
-        let started = clean.withCString { PGSpawnVehicle($0) }
+        let started = clean.withCString { MugoatSpawnVehicleNamed($0) }
         if started {
             showCheatToast(String(format: L10n.text("Đang triệu hồi: %@"), clean))
             appendLog("Vehicle spawn requested: \(clean)")

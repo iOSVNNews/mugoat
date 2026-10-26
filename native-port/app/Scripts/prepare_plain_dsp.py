@@ -11,75 +11,77 @@ load (their synchronisation uses wasm atomics, which stay atomic). Their ordinar
 stores become plain memcpy accesses, as the browser's compiler treats them.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-# Function numbers (w2c_game_fN) in the pinned game.wasm, from its name section.
-FUNCTIONS = [
-    6462,  # rage::audBiquadFilterEffect::Process(rage::audDspEffectBuffer&)
-    6463,  # rage::audBiquadFilterEffect::ProcessInterleaved_4Pole(float vector[4],
-    6464,  # rage::audBiquadFilterEffect::ProcessInterleaved_2Pole(float vector[4],
-    6466,  # rage::audDelayEffect::Process(rage::audDspEffectBuffer&)
-    6474,  # rage::audDelayEffect4::Process(rage::audDspEffectBuffer&)
-    6479,  # rage::audEarlyReflectionEffect::Process(rage::audDspEffectBuffer&)
-    6480,  # rage::audEarlyReflectionEffect::ProcessInterleaved(float const*, float
-    6487,  # rage::audReverbEffect4::Process(rage::audDspEffectBuffer&)
-    6488,  # rage::audReverbEffect4::ProcessInterleaved(float const*, float*, unsig
-    6493,  # rage::audUnderwaterEffect::Process(rage::audDspEffectBuffer&)
-    6494,  # rage::audUnderwaterEffect::ProcessInterleaved(float const*, float*, un
-    6498,  # rage::audVariableDelayEffect::Process(rage::audDspEffectBuffer&)
-    7150,  # rage::synthCore::GenerateFrame(float const**, rage::atRangeArray<unsig
-    7164,  # rage::synthCoreDspEffect::Process(rage::audDspEffectBuffer&)
-    7266,  # rage::audMixerDevice::MixBuffers()
-    7271,  # void rage::InterleaveAndMix_1to4<256u>(float vector[4], float vector[4
-    7299,  # rage::audRateConvertorLinear::Process(float, float*, short const*, uns
-    7341,  # rage::audMixerSubmix::ConvertBufferToFormat(rage::audDspEffectBuffer&,
-    90152,  # silk_bwexpander_32
-    90153,  # silk_LPC_inverse_pred_gain_c
-    90154,  # silk_NLSF2A
-    90155,  # silk_bwexpander
-    90156,  # silk_LPC_analysis_filter
-    90157,  # silk_sum_sqr_shift
-    90158,  # silk_PLC
-    90159,  # silk_reset_decoder
-    90160,  # silk_resampler_private_up2_HQ
-    90161,  # silk_resampler_private_IIR_FIR
-    90162,  # silk_resampler_private_down_FIR
-    90163,  # silk_resampler
-    90164,  # ec_dec_init
-    90165,  # ec_decode
-    90166,  # ec_dec_update
-    90167,  # ec_dec_bit_logp
-    90168,  # ec_dec_icdf
-    90169,  # ec_dec_uint
-    90170,  # ec_dec_bits
-    90171,  # silk_stereo_decode_pred
-    90172,  # silk_stereo_decode_mid_only
-    90173,  # silk_NLSF_unpack
-    90174,  # silk_decode_indices
-    90178,  # silk_decode_pulses
-    90179,  # silk_decode_frame
-    90180,  # silk_Get_Decoder_Size
-    90181,  # silk_ResetDecoder
-    90182,  # comb_filter
-    90184,  # unquant_energy_finalise
-    90185,  # exp_rotation
-    90186,  # renormalise_vector
-    90188,  # denormalise_bands
-    90189,  # quant_band
-    90191,  # quant_partition
-    90193,  # _celt_lpc
-    90194,  # _celt_autocorr
-    90195,  # celt_pitch_xcorr_c
-    90196,  # clt_mdct_backward_c
-    90197,  # celt_decoder_get_size
-    90199,  # celt_decode_with_ec_dred
-    90200,  # deemphasis
-    90202,  # celt_synthesis
-    90203,  # celt_decode_with_ec
-    90205,  # opus_decode_frame
-    90808,  # lrint
-    90809,  # lrintf
+# The engine functions, by their name in game.wasm's name section (Scripts/engine_names.py).
+NAMES = [
+    'rage::audBiquadFilterEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::audBiquadFilterEffect::ProcessInterleaved_4Pole(float vector[4], float vector[4], float vector[4]&, float vector[4]&, float vector[4]&, float vector[4]&, float const*, float*, unsigned int)',
+    'rage::audBiquadFilterEffect::ProcessInterleaved_2Pole(float vector[4], float vector[4], float vector[4]&, float vector[4]&, float const*, float*, unsigned int)',
+    'rage::audDelayEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::audDelayEffect4::Process(rage::audDspEffectBuffer&)',
+    'rage::audEarlyReflectionEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::audEarlyReflectionEffect::ProcessInterleaved(float const*, float*, unsigned int)',
+    'rage::audReverbEffect4::Process(rage::audDspEffectBuffer&)',
+    'rage::audReverbEffect4::ProcessInterleaved(float const*, float*, unsigned int)',
+    'rage::audUnderwaterEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::audUnderwaterEffect::ProcessInterleaved(float const*, float*, unsigned int)',
+    'rage::audVariableDelayEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::synthCore::GenerateFrame(float const**, rage::atRangeArray<unsigned short, 4> const&)',
+    'rage::synthCoreDspEffect::Process(rage::audDspEffectBuffer&)',
+    'rage::audMixerDevice::MixBuffers()',
+    'void rage::InterleaveAndMix_1to4<256u>(float vector[4], float vector[4], float const*, float*, float*, float*, float*)',
+    'rage::audRateConvertorLinear::Process(float, float*, short const*, unsigned int, unsigned int, float)',
+    'rage::audMixerSubmix::ConvertBufferToFormat(rage::audDspEffectBuffer&, rage::audMixBufferFormat)',
+    'silk_bwexpander_32',
+    'silk_LPC_inverse_pred_gain_c',
+    'silk_NLSF2A',
+    'silk_bwexpander',
+    'silk_LPC_analysis_filter',
+    'silk_sum_sqr_shift',
+    'silk_PLC',
+    'silk_reset_decoder',
+    'silk_resampler_private_up2_HQ',
+    'silk_resampler_private_IIR_FIR',
+    'silk_resampler_private_down_FIR',
+    'silk_resampler',
+    'ec_dec_init',
+    'ec_decode',
+    'ec_dec_update',
+    'ec_dec_bit_logp',
+    'ec_dec_icdf',
+    'ec_dec_uint',
+    'ec_dec_bits',
+    'silk_stereo_decode_pred',
+    'silk_stereo_decode_mid_only',
+    'silk_NLSF_unpack',
+    'silk_decode_indices',
+    'silk_decode_pulses',
+    'silk_decode_frame',
+    'silk_Get_Decoder_Size',
+    'silk_ResetDecoder',
+    'comb_filter',
+    'unquant_energy_finalise',
+    'exp_rotation',
+    'renormalise_vector',
+    'denormalise_bands',
+    'quant_band',
+    'quant_partition',
+    '_celt_lpc',
+    '_celt_autocorr',
+    'celt_pitch_xcorr_c',
+    'clt_mdct_backward_c',
+    'celt_decoder_get_size',
+    'celt_decode_with_ec_dred',
+    'deemphasis',
+    'celt_synthesis',
+    'celt_decode_with_ec',
+    'opus_decode_frame',
+    'lrint',
+    'lrintf',
 ]
+FUNCTIONS = [fn(name) for name in NAMES]
 LOAD = re.compile(r'\b((?:i32|i64|f32|f64)_load(?:8_s|8_u|16_s|16_u|32_s|32_u)?|v128_load)_shared\(')
 STORE = re.compile(r'\b((?:i32|i64|f32|f64)_store(?:8|16|32)?|v128_store)_shared\(')
 HEADER = '''// Included right after the file's game-impl header (which has no include guard).

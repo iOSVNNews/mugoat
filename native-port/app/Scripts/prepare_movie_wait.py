@@ -1,27 +1,33 @@
 """Give the pinned engine's video loading a time limit.
 
-CMovie::WaitTillLoaded is inlined in five CMovieMgr functions: it sleeps 1 ms at a time until the
-video is loaded or marked as failed (bit 32 of the flags at +96), with no limit. The game files have
-no .bik videos, and a load that never answered froze the game whenever a TV came on or changed
-show. Each of those sleeps goes through pg_movie_wait instead, which marks the video as failed
+CMovie::WaitTillLoaded is inlined in five CMovieMgr functions and in the pause menu's open and close:
+it sleeps 1 ms at a time until the video is loaded or marked as failed (bit 32 of the flags at +96),
+with no limit. The game files have no .bik videos, and a load that never answered froze the game
+whenever a TV came on or changed show, or when the pause menu opened while a TV had a video waiting
+(GTA-22). Each of those sleeps goes through pg_movie_wait instead, which marks the video as failed
 after a short wait.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-FUNCTIONS = {
-    '80969': 'CMovieMgr::UpdateFrame',
-    '81493': 'CMovie::Play',
-    '80987': 'CMovieMgr::Delete',
-    '81494': 'CMovieMgr::Stop',
-    '81507': 'CMovieMgr::GetTime',
-}
+FUNCTIONS = {str(fn(name)): name for name in [
+    'CMovieMgr::UpdateFrame()',
+    'CMovieMgr::CMovie::Play()',
+    'CMovieMgr::Delete(unsigned int)',
+    'CMovieMgr::Stop(unsigned int)',
+    'CMovieMgr::GetTime(unsigned int)',
+    # The pause menu waits the same way for every video before it pauses them (GTA-22).
+    'CPauseMenu::Open(unsigned int, bool, eMenuScreen, bool)',
+    'CPauseMenu::SetupCodeForUnPause()',
+]}
+SLEEP = str(fn('rage::sysIpcSleep(unsigned int)'))
 # The failure-flag test followed by sysIpcSleep(1), as WABT writes it.
 loop = re.compile(
     r'(?P<i>[ ]+)var_j0 = (?P<movie>var_[lp]\d+);\n'
     r'(?P=i)var_i0 = i32_load8_u_shared\(wasm_rt_local_memory_base, wasm_rt_local_memory_size, instance->w2c_env_memory, \(u64\)checked_add_u64\(var_j0, 96u\)\);\n'
     r'(?P=i)var_i1 = 32u;\n(?P=i)var_i0 &= var_i1;\n(?P=i)if \(var_i0\) \{goto var_B\d+;\}\n'
-    r'(?P=i)(?:var_i0 = 1u;\n(?P=i)w2c_game_f135\(instance, var_i0\);|pg_movie_wait\(instance, (?P=movie)\);)\n')
+    r'(?P=i)(?:var_i0 = 1u;\n(?P=i)w2c_game_f' + SLEEP + r'\(instance, var_i0\);|pg_movie_wait\(instance, (?P=movie)\);)\n')
 def patch(match):
     i, movie = match['i'], match['movie']
     if 'pg_movie_wait' in match.group(0): return match.group(0)

@@ -114,10 +114,12 @@ enum GraphicsConfiguration {
 
     /// Pass the chosen settings to the engine. Call before PGStartEngine.
     static func apply(_ settings: GameSettings, screen: CGSize) -> String {
-        PGSetEngineMemoryMB(Int32(settings.engineMemoryMB))
+        // Settings › RAM for the game: since the R007 engine, a cap on what the game may use (0 automatic).
+        PGSetMemoryCap(Int32(settings.engineMemoryMB))
+        PerformanceSettings.applyBeforeBoot()
         let preset = settings.graphicsPreset
         let (width, height) = size(for: preset, renderHeight: settings.renderHeight, screen: screen, matchScreenShape: settings.matchScreenShape)
-        let options = preset.engineOptions
+        let options = preset.engineOptions + PerformanceSettings.engineOptions
         var pointers = options.map { strdup($0) }
         defer { pointers.forEach { free($0) } }
         pointers.withUnsafeMutableBufferPointer { buffer in

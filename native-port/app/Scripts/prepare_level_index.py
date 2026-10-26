@@ -6,9 +6,10 @@ and the rest of free roam) on the GTA V level; on env_test it places the player 
 Sandbox on the test map had no phone. pg_script_level_index can answer the GTA V index there.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-FUNCTION = '53281'
+FUNCTION = str(fn('misc_commands::SetupScriptCommands()::scrWrapped_GET_INDEX_OF_CURRENT_LEVEL::Call(rage::scrThread::Info&)'))
 MARK = 'pg_script_level_index('
 OLD = '  var_B0:;\n  i32_store_shared('
 NEW = '  var_B0:;\n  var_i1 = pg_script_level_index(var_i1);\n  i32_store_shared('

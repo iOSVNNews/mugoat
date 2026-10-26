@@ -6,12 +6,19 @@ fixup, address 0x2fff8000 is neither virtual nor physical"). Players hit it on t
 Vinewood Hills (ch2_07_fence_03, ch2_07d_fencing_02), always with the same address: the start of
 a chunk the resource itself had just been placed in, so the pointer was being fixed up a second
 time. pg_fixup_already_placed answers delta 0 for an address inside one of the resource's placed
-chunks (it is already right) and logs it; any other address still stops the game as before.
+chunks (it is already right) and logs it. Any other address is nulled and logged instead of
+stopping the game (pg_fixup_miss in EngineHost.c): a missing detail beats a crash.
 """
 from pathlib import Path
+from engine_names import fn
 import re
 root = Path(__file__).resolve().parents[1]
-FUNCTION = '2092'
+FUNCTION = str(fn('rage::datResource::GetFixup(void*) const'))
+PGBASE = fn('rage::pgBase::pgBase()')
+REGENERATE = fn('rage::pgBase::RegenerateMap(rage::datResourceMap&) const')
+PLACE_DEBUG = fn('rage::pgBaseMetaDataDebugNameType::Place(rage::pgBaseMetaData*, rage::datResource&)')
+TEXTURE_ARRAY = fn('rage::atArray<rage::datOwner<rage::grcTexture>, 0, unsigned short>::atArray(rage::datResource&, bool)')
+TEXTURE_CTOR = fn('rage::grcTextureDX11::grcTextureDX11(rage::datResource&)')
 MARK = 'pg_fixup_miss('
 OLD = '  var_B3:;\n  var_j0 = var_p0;\n'
 V1 = '  if (pg_fixup_already_placed(instance, var_p0, var_p1)) { var_j0 = 0ull; goto var_B2; }\n'
@@ -43,9 +50,9 @@ if not done: raise RuntimeError(f'Pinned function f{FUNCTION} not found')
 # with) and pgBaseMetaDataDebugNameType::Place (f2107, debug metadata). The fences' bad value
 # 0xffff7fffffff7fff arrives through pgBase.
 INLINED = {
-    '2080': ('u64 w2c_game_f2080(w2c_game* instance, u64 var_p0) {', '  var_B6:;\n  var_j1 = var_l3;\n',
+    str(PGBASE): (f'u64 w2c_game_f{PGBASE}(w2c_game* instance, u64 var_p0) {{', '  var_B6:;\n  var_j1 = var_l3;\n',
              '  var_B6:;\n  { u64 pg_delta; if (pg_fixup_miss(instance, var_l3, var_l4, &pg_delta)) { var_j1 = pg_delta; goto var_B5; } }\n  var_j1 = var_l3;\n'),
-    '2107': ('void w2c_game_f2107(w2c_game* instance, u64 var_p0, u64 var_p1, u64 var_p2) {', '    var_B4:;\n    var_j1 = var_p2;\n',
+    str(PLACE_DEBUG): (f'void w2c_game_f{PLACE_DEBUG}(w2c_game* instance, u64 var_p0, u64 var_p1, u64 var_p2) {{', '    var_B4:;\n    var_j1 = var_p2;\n',
              '    var_B4:;\n    { u64 pg_delta; if (pg_fixup_miss(instance, var_p2, var_l4, &pg_delta)) { var_j1 = pg_delta; goto var_B3; } }\n    var_j1 = var_p2;\n'),
 }
 for path in sorted((root / 'Generated').glob('game_*.c')):
@@ -71,10 +78,10 @@ for path in sorted((root / 'Generated').glob('game_*.c')):
 # and 2 for an entry whose file pointer is in the physical (GPU data) segment: the Vinewood Hills
 # fences' embedded texture dictionaries point a texture there, at pixel data, and constructing a
 # texture from it read garbage and crashed. Such an entry becomes null (the texture is missing).
-TEXTURE_HEAD = 'void w2c_game_f5710(w2c_game* instance, u64 var_p0, u64 var_p1) {'
-TEXTURE_OLD = '      w2c_game_f9531(instance, var_j0, var_j1);\n'
-TEXTURE_NEW = '      { u32 pg_t = pg_texture_already_placed(instance, var_p0, var_l4, var_j0); if (pg_t == 2) var_p1 = 0; else if (!pg_t) w2c_game_f9531(instance, var_j0, var_j1); }\n'
-TEXTURE_V1 = '      if (!pg_texture_already_placed(instance, var_p0, var_l4, var_j0)) w2c_game_f9531(instance, var_j0, var_j1);\n'
+TEXTURE_HEAD = f'void w2c_game_f{TEXTURE_ARRAY}(w2c_game* instance, u64 var_p0, u64 var_p1) {{'
+TEXTURE_OLD = f'      w2c_game_f{TEXTURE_CTOR}(instance, var_j0, var_j1);\n'
+TEXTURE_NEW = f'      {{ u32 pg_t = pg_texture_already_placed(instance, var_p0, var_l4, var_j0); if (pg_t == 2) var_p1 = 0; else if (!pg_t) w2c_game_f{TEXTURE_CTOR}(instance, var_j0, var_j1); }}\n'
+TEXTURE_V1 = f'      if (!pg_texture_already_placed(instance, var_p0, var_l4, var_j0)) w2c_game_f{TEXTURE_CTOR}(instance, var_j0, var_j1);\n'
 for path in sorted((root / 'Generated').glob('game_*.c')):
     s = path.read_text()
     if TEXTURE_HEAD not in s: continue
@@ -83,7 +90,7 @@ for path in sorted((root / 'Generated').glob('game_*.c')):
         s = s[:start] + body.replace(TEXTURE_V1, TEXTURE_NEW, 1) + s[end:]
         path.write_text(s)
     elif 'pg_texture_already_placed(' not in body:
-        if body.count(TEXTURE_OLD) != 1: raise RuntimeError('Pinned f5710 (texture array placement) changed')
+        if body.count(TEXTURE_OLD) != 1: raise RuntimeError(f'Pinned f{TEXTURE_ARRAY} (texture array placement) changed')
         s = s[:start] + body.replace(TEXTURE_OLD, TEXTURE_NEW, 1) + s[end:]
         first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
         s = s[:first.end()] + '\nextern u32 pg_texture_already_placed(w2c_game *instance, u64 array, u64 index, u64 address);' + s[first.end():]
@@ -98,7 +105,7 @@ for path in sorted((root / 'Generated').glob('game_*.c')):
 # what the file reserved before the counts are overwritten; entries past it go to a side table
 # (pg_page_map_store) instead of memory. pgBase::RegenerateMap (f2082), which the engine uses to
 # free a resource, sees them through pg_page_map_swap: they are put in place for the call only.
-PAGEMAP_HEAD = 'u64 w2c_game_f2080(w2c_game* instance, u64 var_p0) {'
+PAGEMAP_HEAD = f'u64 w2c_game_f{PGBASE}(w2c_game* instance, u64 var_p0) {{'
 PAGEMAP_LABEL = '  var_B7:;\n'
 PAGEMAP_LABEL_NEW = '  var_B7:;\n  u32 pg_reserved = pg_page_map_reserved(instance, var_l1);\n'
 PAGEMAP_SUM = '  var_i0 = var_l10;\n  var_i1 = var_l11;\n  var_i0 += var_i1;\n  var_l10 = var_i0;\n'
@@ -108,7 +115,7 @@ for path in sorted((root / 'Generated').glob('game_*.c')):
     if PAGEMAP_HEAD not in s: continue
     start = s.index(PAGEMAP_HEAD); end = s.index('\n}\n', start); body = s[start:end]
     if 'pg_page_map_entries(' not in body:
-        if body.count(PAGEMAP_LABEL) != 1 or body.count(PAGEMAP_SUM) != 1: raise RuntimeError('Pinned f2080 (pgBase page map) changed')
+        if body.count(PAGEMAP_LABEL) != 1 or body.count(PAGEMAP_SUM) != 1: raise RuntimeError(f'Pinned f{PGBASE} (pgBase page map) changed')
         body = body.replace(PAGEMAP_LABEL, PAGEMAP_LABEL_NEW, 1).replace(PAGEMAP_SUM, PAGEMAP_SUM_NEW, 1)
         s = s[:start] + body + s[end:]
         first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
@@ -120,16 +127,16 @@ PAGEMAP_STORE = ('    var_j1 = var_l2;\n    var_j2 = var_l6;\n    var_j1 |= var_
 PAGEMAP_STORE_NEW = ('    var_j1 = var_l2;\n    var_j2 = var_l6;\n    var_j1 |= var_j2;\n'
                      '    if (!pg_page_map_store(instance, var_l4 - 16, var_l1, var_j1, pg_reserved))\n'
                      '    i64_store_shared(wasm_rt_local_memory_base, wasm_rt_local_memory_size, instance->w2c_env_memory, (u64)(var_j0), var_j1);\n')
-REGEN_HEAD = 'void w2c_game_f2082(w2c_game* instance, u64 var_p0, u64 var_p1) {'
+REGEN_HEAD = f'void w2c_game_f{REGENERATE}(w2c_game* instance, u64 var_p0, u64 var_p1) {{'
 for path in sorted((root / 'Generated').glob('game_*.c')):
     s = path.read_text()
     if PAGEMAP_HEAD not in s: continue
     start = s.index(PAGEMAP_HEAD); end = s.index('\n}\n', start); body = s[start:end]
     if 'pg_page_map_store(' not in body:
-        if body.count(PAGEMAP_STORE) != 1: raise RuntimeError('Pinned f2080 (page map store) changed')
+        if body.count(PAGEMAP_STORE) != 1: raise RuntimeError(f'Pinned f{PGBASE} (page map store) changed')
         s = s[:start] + body.replace(PAGEMAP_STORE, PAGEMAP_STORE_NEW, 1) + s[end:]
     if 'pg_regenerate_map_body(' not in s:
-        if s.count(REGEN_HEAD) != 1: raise RuntimeError('Pinned f2082 (pgBase::RegenerateMap) changed')
+        if s.count(REGEN_HEAD) != 1: raise RuntimeError(f'Pinned f{REGENERATE} (pgBase::RegenerateMap) changed')
         start = s.index(REGEN_HEAD); end = s.index('\n}\n', start) + 3
         s = (s[:start] + 'static void pg_regenerate_map_body(w2c_game* instance, u64 var_p0, u64 var_p1) {' + s[start + len(REGEN_HEAD):end]
              + REGEN_HEAD + '\n  pg_page_map_swap(instance, var_p0, 1);\n  pg_regenerate_map_body(instance, var_p0, var_p1);\n  pg_page_map_swap(instance, var_p0, 0);\n}\n' + s[end:])

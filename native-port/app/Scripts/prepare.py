@@ -57,9 +57,13 @@ run('xcrun', 'clang', '-Wno-deprecated-declarations', '-c', 'Scripts/sha256_shim
 run('xcrun', 'clang++', '-std=c++20', '-O1', '-I', str(wabt / 'include'),
     'Tools/wasm2c-main.cc', 'Tools/c-writer-patched.cc', 'Tools/sha256_shim.o',
     str(wabt / 'lib/libwabt.a'), '-o', 'Tools/wasm2c-native')
+# Mugoat: export the multiplayer natives without changing any function index (the pinned patches below
+# find their functions by name and index), then compile that module.
 run('python3', 'Scripts/prepare_online_exports.py', str(engine), '--out', 'Generated/online-game.wasm')
 run('Tools/wasm2c-native', '--enable-threads', '--no-debug-names', '--module-name=game',
     '--num-outputs=64', 'Generated/online-game.wasm', '-o', 'Generated/game.c')
+# Function names from the engine's name section: the patchers below find their functions by name.
+run('python3', 'Scripts/engine_names.py', '--wasm', str(engine))
 runtime = wabt / 'share/wabt/wasm2c/wasm-rt-impl.c'
 text = runtime.read_text()
 if 'pg_record_trap' not in text:
@@ -72,7 +76,25 @@ run('python3', 'Scripts/prepare_memory_pressure.py')
 shutil.copyfile(options.mirror / 'data/manifest.json', root / 'Resources/manifest.json')
 run('python3', 'Scripts/prepare_virtual_pad.py')
 run('python3', 'Scripts/prepare_movie_wait.py')
+run('python3', 'Scripts/prepare_tv_without_video.py')
+run('python3', 'Scripts/prepare_bink_queue.py')
+run('python3', 'Scripts/prepare_menu_shadow.py')
+run('python3', 'Scripts/prepare_missing_text.py')
+run('python3', 'Scripts/prepare_handler_frame.py')
+run('python3', 'Scripts/prepare_netlog_flush.py')
+run('python3', 'Scripts/prepare_input_exclusive.py')
+run('python3', 'Scripts/prepare_restore_flush.py')
+run('python3', 'Scripts/prepare_destroyed_phases.py')
+run('python3', 'Scripts/prepare_heap_sizes.py')
+run('python3', 'Scripts/prepare_dependency_guard.py')
+run('python3', 'Scripts/prepare_script_request_guard.py')
 run('python3', 'Scripts/prepare_missing_txd.py')
+run('python3', 'Scripts/prepare_missing_scaleform.py')
+run('python3', 'Scripts/prepare_mod_archives.py')
+run('python3', 'Scripts/prepare_large_resources.py')
+run('python3', 'Scripts/prepare_asi_natives.py')
+run('python3', 'Scripts/prepare_asi_script_tick.py')
+run('python3', 'Scripts/prepare_turbo.py')
 run('python3', 'Scripts/prepare_unchecked_memory.py')
 run('python3', 'Scripts/prepare_trap_context.py')
 run('python3', 'Scripts/prepare_scenario_blockers.py')
@@ -81,7 +103,16 @@ run('python3', 'Scripts/prepare_fixup_guard.py')
 run('python3', 'Scripts/prepare_format_strings.py')
 run('python3', 'Scripts/prepare_video_memory.py')
 run('python3', 'Scripts/prepare_plain_dsp.py')
-run('python3', 'Scripts/prepare_plain_shared.py')
+run('python3', 'Scripts/prepare_cash_stats.py')
+run('python3', 'Scripts/prepare_native_opus.py')
+run('python3', 'Scripts/prepare_render_list_guard.py')
+run('python3', 'Scripts/prepare_stale_texture_slots.py')
+run('python3', 'Scripts/prepare_control_trace.py')
+run('python3', 'Scripts/prepare_pause_ready.py')
+run('python3', 'Scripts/prepare_streaming_health.py')
+run('python3', 'Scripts/prepare_heap_return.py')
+run('python3', 'Scripts/prepare_memory_file_create.py')
+run('python3', 'Scripts/prepare_longjmp.py')
 # Mugoat's multiplayer hooks go in last, after the pinned engine fixes above.
 run('python3', 'Scripts/prepare_online_c.py')
 # The BC texture decoder header (MIT): phones without BC texture support get decoded textures.
@@ -102,6 +133,8 @@ sdk_args = []
 for sdk in options.sdk or ['iphoneos']:
     sdk_args += ['--sdk', sdk]
 run('python3', 'Scripts/build_metal_shaders.py', str(shaders), *sdk_args)
+run('python3', 'Scripts/build_opus.py', *sdk_args)
+run('python3', 'Scripts/build_blink.py', *sdk_args)
 run('xcodegen', 'generate', '--spec', 'project.yml')
-(root / 'Generated/native-prepared-v1.txt').write_text('ios15.0-native-online-v4\n')
+(root / 'Generated/native-prepared-v1.txt').write_text('ios16.0-r007-native-online-v5\n')
 print('Prepared the native boot project. Open PlayGTA5Native.xcodeproj in Xcode.')

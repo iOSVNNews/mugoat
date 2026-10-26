@@ -17,7 +17,7 @@ final class SettingsViewController: UITableViewController {
     var openMods: (() -> Void)?
     var openSaves: (() -> Void)?
 
-    private enum Section: Int, CaseIterable { case cheat, mode, graphics, controls, gyro, files, device }
+    private enum Section: Int, CaseIterable { case cheat, mode, graphics, performance, controls, gyro, files, device }
     private let preloader = AssetPreloader.shared
     /// Rows shown in the Game files section, rebuilt from the preloader's phase.
     private enum FileRow { case status, start, pause, resume, cancel, remove }
@@ -89,6 +89,7 @@ final class SettingsViewController: UITableViewController {
         case .cheat: return isOnline ? 1 : 2
         case .mode: return GameMode.allCases.count
         case .graphics: return settings.tier.allowed.count + 4
+        case .performance: return 8
         case .controls: return 12
         case .gyro: return (settings.gyroAim == .off ? 1 : 3) + (settings.tiltSteer == .off ? 1 : 2)
         case .files: return fileRows.count
@@ -98,7 +99,7 @@ final class SettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         let cheatHeader = isOnline ? L10n.text("Quản lý Mod") : L10n.text("Menu Cheat & Mod")
-        return [cheatHeader, L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
+        return [cheatHeader, L10n.text("Chế độ chơi"), L10n.text("Đồ họa & FPS"), L10n.text("Mượt & giữ bản đồ (R007)"), L10n.text("Điều khiển"), L10n.text("Cảm biến"), L10n.text("Dữ liệu game"), L10n.text("Thiết bị & hỗ trợ")][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
@@ -121,6 +122,8 @@ final class SettingsViewController: UITableViewController {
             if settings.graphicsPreset != bootPreset && engineRunning { text += " Restart needed for \(settings.graphicsPreset.title)." }
             if settings.tier.risky(settings.graphicsPreset) { text += " Presets above the recommended one can run out of memory or overheat on this phone; if a launch fails, the game falls back automatically." }
             return text
+        case .performance:
+            return L10n.text("Các bản sửa giật và mất bản đồ (mặt đất, đường hóa xám sau khi chơi lâu) từ engine R007. Mặc định đã bật; chỉ tắt một mục khi nghi nó gây lỗi. Áp dụng ở lần vào game sau.")
         case .controls:
             return L10n.text("Controls act as a game controller, so the game's own aim assist and analog steering work. Assisted aim locks onto targets like on a console.")
         case .gyro:
@@ -211,6 +214,8 @@ final class SettingsViewController: UITableViewController {
                     cell.accessoryView = button
                 }
             }
+        case .performance:
+            performanceCell(indexPath.row, cell, &content)
         case .controls:
             cell.selectionStyle = .none
             switch indexPath.row {
@@ -622,21 +627,69 @@ final class SettingsViewController: UITableViewController {
         return control
     }
 
+
+    // MARK: R007 smoothness and map switches (PerformanceSettings, StreamingSettings)
+
+    private func performanceCell(_ row: Int, _ cell: UITableViewCell, _ content: inout UIListContentConfiguration) {
+        cell.selectionStyle = .none
+        func flag(_ title: String, _ detail: String, _ on: Bool, _ set: @escaping (Bool) -> Void) {
+            content.text = L10n.text(title); content.secondaryText = L10n.text(detail)
+            cell.accessoryView = toggle(on, label: L10n.text(title)) { [weak self] in set($0); self?.tableView.reloadData() }
+        }
+        func menu(_ title: String, _ detail: String, _ current: String, _ actions: [UIAction]) {
+            content.text = L10n.text(title); content.secondaryText = L10n.text(detail)
+            let button = UIButton(type: .system)
+            button.setTitle(current + " ▾", for: .normal)
+            button.showsMenuAsPrimaryAction = true
+            button.accessibilityLabel = L10n.text(title)
+            button.menu = UIMenu(children: actions)
+            button.sizeToFit()
+            cell.accessoryView = button
+        }
+        switch row {
+        case 0: flag("Tải texture thông minh", "Giữ mặt đất và đường không hóa xám sau khi chơi lâu. Tắt nếu game hết bộ nhớ.",
+                     PerformanceSettings.smarterTextureLoading) { PerformanceSettings.smarterTextureLoading = $0 }
+        case 1: flag("Giảm tải texture lớn", "Texture lớn nhất dùng 1/4 bộ nhớ trên iPhone đời trước 15 Pro, để thế giới kịp nạp.",
+                     PerformanceSettings.lighterBigTextures) { PerformanceSettings.lighterBigTextures = $0 }
+        case 2: flag("Ưu tiên nhân CPU mạnh", "Cho engine chạy trên nhân nhanh để FPS ổn định hơn. Tắt nếu iPhone quá nóng.",
+                     PerformanceSettings.fastEngineThreads) { PerformanceSettings.fastEngineThreads = $0 }
+        case 3: flag("Nén texture trong suốt", "Lá cây, hàng rào, khói, decal dùng ít bộ nhớ hơn (nén ASTC).",
+                     PerformanceSettings.compressedAlphaTextures) { PerformanceSettings.compressedAlphaTextures = $0 }
+        case 4: flag("Thu nhỏ heap phụ của engine", "Heap replay/debug 16/128 MB thay vì 196/220 MB, nhường RAM cho bản đồ. Thử nghiệm, mặc định tắt.",
+                     PerformanceSettings.smallerEngineHeaps) { PerformanceSettings.smallerEngineHeaps = $0 }
+        case 5: flag("Thu hồi RAM theo di chuyển", "Chỉ giải phóng bộ nhớ khi bạn đã đi xa, không xóa chỗ đang đứng (bản sửa mất map R006).",
+                     StreamingSettings.distanceStreaming) { StreamingSettings.distanceStreaming = $0 }
+        case 6:
+            let title: (Int) -> String = { $0 < 0 ? String(format: L10n.text("Tự động (%d MB)"), StreamingSettings.automaticReserveMB(physicalBytes: ProcessInfo.processInfo.physicalMemory)) : $0 == 0 ? L10n.text("Không dự trữ") : "\($0) MB" }
+            menu("RAM dự trữ khi thu hồi", "Phần RAM giữ trống để game không bị iOS đóng. Tăng nếu game tự thoát, giảm nếu bản đồ hay xám.",
+                 title(StreamingSettings.reserveProfileMB),
+                 StreamingSettings.reserveValues.map { mb in
+                     UIAction(title: title(mb), state: mb == StreamingSettings.reserveProfileMB ? .on : .off) { [weak self] _ in
+                         StreamingSettings.reserveProfileMB = mb; self?.tableView.reloadData() } })
+        default:
+            menu("Khoảng cách thu hồi", "Đi xa bao nhiêu mét thì game mới được giải phóng bộ nhớ của chỗ cũ.",
+                 "\(StreamingSettings.reclaimDistance) m",
+                 StreamingSettings.reclaimDistances.map { metres in
+                     UIAction(title: "\(metres) m", state: metres == StreamingSettings.reclaimDistance ? .on : .off) { [weak self] _ in
+                         StreamingSettings.reclaimDistance = metres; self?.tableView.reloadData() } })
+        }
+    }
+
     // MARK: RAM for the game
 
     private func ramTitle(_ mb: Int) -> String {
-        mb == 0 ? String(format: L10n.text("Toàn bộ RAM (%.1f GB)"), Double(settings.tier.physicalMemoryMB) / 1024)
+        mb == 0 ? L10n.text("Tự động (theo iOS)")
                 : String(format: "%.1f GB (%d MB)", Double(mb) / 1024, mb)
     }
     private func ramCell(_ cell: UITableViewCell, _ content: inout UIListContentConfiguration) {
         content.text = L10n.text("RAM cho game")
-        content.secondaryText = L10n.text("Mặc định dùng toàn bộ RAM máy. Nếu không vào được game (lỗi \"iOS could not reserve the engine memory\") hoặc game hay văng, chọn mức thấp hơn. Tối thiểu 3 GB. Áp dụng ở lần vào game sau.")
+        content.secondaryText = L10n.text("Lượng RAM tối đa game được dùng. Mặc định tự động theo mức iOS cho phép. Nếu game tự thoát khi chơi lâu, chọn mức thấp hơn. Áp dụng ở lần vào game sau.")
         let button = UIButton(type: .system)
         button.setTitle(ramTitle(settings.engineMemoryMB) + " ▾", for: .normal)
         button.showsMenuAsPrimaryAction = true
         button.accessibilityLabel = L10n.text("RAM cho game")
         let physical = settings.tier.physicalMemoryMB
-        let steps = [3072, 3584, 4096, 4608, 5120, 6144, 8192, 12288].filter { $0 < physical }
+        let steps = [1536, 2048, 2560, 3072, 3584, 4096, 5120, 6144].filter { $0 < physical }
         var actions = ([0] + steps).map { mb in
             UIAction(title: ramTitle(mb), state: mb == settings.engineMemoryMB ? .on : .off) { [weak self] _ in
                 self?.settings.engineMemoryMB = mb; self?.reloadFooters(); self?.tableView.reloadData()
@@ -650,7 +703,7 @@ final class SettingsViewController: UITableViewController {
     private func askRAM() {
         let physical = settings.tier.physicalMemoryMB
         let alert = UIAlertController(title: L10n.text("RAM cho game"),
-            message: String(format: L10n.text("Nhập số MB game được dùng (3072 – %d). Để trống hoặc 0 để dùng toàn bộ RAM."), max(3072, physical)),
+            message: String(format: L10n.text("Nhập số MB game được dùng (1024 – %d). Để trống hoặc 0 để tự động."), max(1024, physical)),
             preferredStyle: .alert)
         alert.addTextField { field in
             field.keyboardType = .numberPad
@@ -661,7 +714,7 @@ final class SettingsViewController: UITableViewController {
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self, weak alert] _ in
             guard let self else { return }
             let value = Int(alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
-            self.settings.engineMemoryMB = value <= 0 ? 0 : min(value, max(3072, physical))
+            self.settings.engineMemoryMB = value <= 0 ? 0 : min(value, max(1024, physical))
             self.reloadFooters(); self.tableView.reloadData()
         })
         present(alert, animated: true)

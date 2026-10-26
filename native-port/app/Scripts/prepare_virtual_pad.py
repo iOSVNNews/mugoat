@@ -6,13 +6,16 @@ engine sees an ordinary connected gamepad: controller layouts, assisted aim
 and analog driving all use their normal code paths.
 """
 from pathlib import Path
+from engine_names import fn
 root=Path(__file__).resolve().parents[1]
-p=root/'Generated/game_0.c'
+head='void w2c_game_f%d(w2c_game* instance, u64 var_p0) {'%fn('rage::ioPad::Update(bool)')
+p=next((path for path in sorted((root/'Generated').glob('game_*.c')) if head in path.read_text()),None)
+if p is None:raise RuntimeError('Pinned ioPad::Update not found')
 s=p.read_text()
-start=s.index('void w2c_game_f10454(w2c_game* instance, u64 var_p0) {')
-end=s.index('\nvoid w2c_game_f',start+10)
+start=s.index(head)
+end=s.index('\n}\n',start)+2
 f=s[start:end]
-old='  var_j0 = var_p0;\n  w2c_game_f10456(instance, var_j0);\n  FUNC_EPILOGUE;\n}'
+old='  var_j0 = var_p0;\n  w2c_game_f%d(instance, var_j0);\n  FUNC_EPILOGUE;\n}'%fn('rage::ioPad::UpdateDebug()')
 new='  pg_virtual_pad_apply(instance, var_p0);\n'+old
 previous='  pg_virtual_pad_apply(var_p0);\n'+old
 f=f.replace(previous,old)

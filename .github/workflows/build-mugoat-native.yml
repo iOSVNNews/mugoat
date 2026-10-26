@@ -54,9 +54,19 @@ jobs:
           if-no-files-found: error
   build:
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 180
+    env:
+      # R007 audit (docs-r007/IPA-performance-audit.md): the same source built with the runner's default
+      # Xcode 16.4 ran far slower than the original release built with Xcode 26.2 (17C52). Pin it.
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Verify the release toolchain (Xcode 26.2, iOS SDK 26.2)
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcodebuild -version | grep -Fx 'Xcode 26.2'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = '26.2'
       - name: Normalize source and check signing metadata
         run: |
           find native-port -type f \( -name '*.sh' -o -name '*.py' -o -name '*.entitlements' -o -name '*.plist' -o -name '*.yml' -o -name '*.c' -o -name '*.h' -o -name '*.mm' -o -name '*.swift' \) -exec sed -i '' 's/\r$//' {} +
@@ -71,7 +81,7 @@ jobs:
             native-port/app/GeneratedResources
             native-port/app/Build/MetalShaders
             native-port/app/Build/Release
-          key: mugoat-hybrid-ios150-v4-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'src/mp.rs') }}
+          key: mugoat-r007-ios160-v5-${{ hashFiles('native-port/app/Scripts/**', '!native-port/app/Scripts/verify_native_ipa.py', 'native-port/app/Source/**', 'native-port/app/ShaderTool/**', 'src/mp.rs') }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
@@ -145,6 +155,8 @@ jobs:
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-AppleID-Free.ipa Mugoat-AppleID-Free.enc
           node app/Scripts/ipa-artifact.cjs encrypt Mugoat-Cert-Paid.ipa Mugoat-Cert-Paid.enc
       - name: Publish Mugoat.ipa to Release v2.0
+        # Test branches (e.g. mugoat-r007-engine) only upload artifacts; the public release is updated from main.
+        if: github.ref == 'refs/heads/main'
         working-directory: native-port
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
