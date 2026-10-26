@@ -143,7 +143,7 @@ final class SettingsViewController: UITableViewController {
         case .cheat:
             if isOnline {
                 content.text = L10n.text("Quản lý Mod riêng biệt")
-                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/mods")
+                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/Mods")
                 cell.accessoryType = .disclosureIndicator
                 cell.selectionStyle = .default
             } else if indexPath.row == 0 {
@@ -153,7 +153,7 @@ final class SettingsViewController: UITableViewController {
                 cell.selectionStyle = .default
             } else {
                 content.text = L10n.text("Quản lý Mod riêng biệt")
-                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/mods")
+                content.secondaryText = L10n.text("Xem danh sách tệp mod, giải nén zip và quản lý thư mục Mugoat/Mods")
                 cell.accessoryType = .disclosureIndicator
                 cell.selectionStyle = .default
             }

@@ -2257,7 +2257,7 @@ static void pg_test_cheat(w2c_game *instance) {
 // Loads every .asi in the Mods folder once the player exists, then runs their scripts each frame.
 static void pg_asi_frame(w2c_game *instance) {
   static int state;  // 0 not loaded yet, 1 running, -1 no script mods
-  if (state < 0 || (PGGameStatus() & 16)) return;
+  if (state < 0 || (PGGameStatus() & 16) || MugoatOnlineEnabled()) return;
   pg_asi_game = instance;
   uint64_t previous = pg_asi_enter_script(instance);
   if (!state) {

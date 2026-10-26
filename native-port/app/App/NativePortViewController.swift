@@ -70,6 +70,7 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
     private var metrics: [String: String] = [:]
     private var logFile: URL?
     private let touchControls = TouchControlsView(frame: .zero)
+    private let modKeys = ModKeysView(frame: .zero)
     private let gyro = GyroInput()
     private var engineStarted = false
     /// The engine stopped with an error: it can only start again in a new app process.
@@ -234,6 +235,28 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
             touchControls.topAnchor.constraint(equalTo: view.topAnchor),
             touchControls.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        modKeys.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(modKeys)
+        modKeys.activeChanged = { [weak self] active in self?.touchControls.modsActive = active }
+        modKeys.anchor = { [weak self] in
+            guard let self, let frame = self.touchControls.modsButtonFrame else { return nil }
+            return self.touchControls.convert(frame, to: self.modKeys)
+        }
+        touchControls.openMods = { [weak self] in
+            guard let self else { return }
+            if self.modKeys.active {
+                self.modKeys.toggleTray()
+            } else if self.presentedViewController == nil {
+                self.showModManager()
+            }
+        }
+        NSLayoutConstraint.activate([
+            modKeys.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            modKeys.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            modKeys.topAnchor.constraint(equalTo: view.topAnchor),
+            modKeys.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.checkModTextRequest() }
         NSLayoutConstraint.activate([
             fpsLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             fpsLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
@@ -563,68 +586,21 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         var effectiveManifest = path
         if let data = localData {
             PGSetLocalGameFolder(data.path)
-            let modsDir = ModManagerViewController.modsDirectory
-            let runtimeDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mod_runtime")
-            var dlcData: Data? = nil
-            let looseCandidates = [
-                data.appendingPathComponent("common/data/dlcList.xml"),
-                data.appendingPathComponent("common/data/dlclist.xml")
-            ]
-            for candidate in looseCandidates {
-                if FileManager.default.fileExists(atPath: candidate.path),
-                   let d = try? Data(contentsOf: candidate) {
-                    dlcData = d
-                    break
-                }
-            }
-            if dlcData == nil {
-                // Read dlclist.xml directly from update/update.rpf archive if present
-                let updateRpfURL = data.appendingPathComponent("update/update.rpf")
-                if FileManager.default.fileExists(atPath: updateRpfURL.path),
-                   let updateArchive = try? RPFArchive(url: updateRpfURL) {
-                    if let entry = updateArchive.entries.first(where: {
-                        let p = $0.path.lowercased()
-                        return p.hasSuffix("common/data/dlclist.xml") || p == "dlclist.xml"
-                    }) {
-                        dlcData = try? updateArchive.metadata(entry)
-                    }
-                }
-            }
-            if dlcData == nil {
-                // Baseline dlclist.xml template so Add-on mods can always be registered into paths
-                let baseline = """
-                <?xml version="1.0" encoding="utf-8"?>
-                <Paths>
-                  <Item>platform:\\dlcPacks\\mppatchesng\\</Item>
-                  <Item>platform:\\dlcPacks\\mpchristmas2\\</Item>
-                  <Item>platform:\\dlcPacks\\mpheist\\</Item>
-                  <Item>platform:\\dlcPacks\\patchday1ng\\</Item>
-                  <Item>platform:\\dlcPacks\\patchday2ng\\</Item>
-                  <Item>platform:\\dlcPacks\\patchday3ng\\</Item>
-                </Paths>
-                """
-                dlcData = baseline.data(using: .utf8)
-            }
+            _ = ModManagerViewController.modsDirectory
+            ModInstaller.gameRunning = true
 
-            if let dlcData {
-                do {
-                    let baseManifestURL = URL(fileURLWithPath: path)
-                    let (overlayManifestURL, catalog) = try ModRuntime.prepare(
-                        baseManifest: baseManifestURL,
-                        mods: modsDir,
-                        runtime: runtimeDir,
-                        dlcList: dlcData
-                    )
-                    effectiveManifest = overlayManifestURL.path
-                    if !catalog.packs.isEmpty {
-                        appendLog("ModRuntime: Đã nạp \(catalog.packs.count) gói DLC mod (\(catalog.vehicleModels.count) xe: \(catalog.vehicleModels.joined(separator: ", "))).")
-                    }
-                    if !catalog.problems.isEmpty {
-                        appendLog("ModRuntime Lưu ý: " + catalog.problems.joined(separator: " | "))
-                    }
-                } catch {
-                    appendLog("ModRuntime Lỗi: \(error.localizedDescription)")
-                }
+            if !MugoatOnlineEnabled() {
+                ModInstaller.placeWaitingFiles()
+                ModInstaller.applyPending()
+                do { try BundledMenyoo.prepare() } catch { appendLog("Built-in Menyoo: \(error.localizedDescription)") }
+                do { try SkinInstaller.updateMenyooList() } catch { appendLog("Menyoo addon skin list: \(error.localizedDescription)") }
+                ModVehicleSupport.prepare(manifestPath: path, log: appendLog)
+                ModVehicleSupport.prepareLargeResources(log: appendLog)
+                SoundAssignments.resolveDuplicatePacks(log: appendLog)
+                SoundAssignments.configure()
+                appendLog("R007 Mod Engine: Đã chuẩn bị thư mục Mods (Menyoo \(BundledMenyoo.enabled ? "bật" : "tắt")).")
+            } else {
+                appendLog("Mugoat Online: Script mods và cheats bị chặn trong phòng chơi trực tuyến.")
             }
         } else {
             PGSetAssetServer(GameSettings.shared.assetServer)
@@ -1139,6 +1115,13 @@ final class NativePortViewController: UIViewController, MTKViewDelegate {
         let navigation = UINavigationController(rootViewController: controller)
         Theme.styleNavigation(navigation)
         present(navigation, animated: true)
+    }
+
+    private func checkModTextRequest() {
+        var title = [CChar](repeating: 0, count: 160), text = [CChar](repeating: 0, count: 1024), maxLength: Int32 = 0
+        guard PGAsiTextRequest(&title, title.count, &text, text.count, &maxLength) else { return }
+        modKeys.startTextRequest(title: String(cString: title), text: String(cString: text), maxLength: Int(maxLength))
+        appendLog("Mods: a script asks for text: \(String(cString: title))")
     }
 
     private func showModManager() {

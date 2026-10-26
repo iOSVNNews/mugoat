@@ -35,7 +35,7 @@ enum ControlStyle {
         "detonate": "burst.fill", "zoom_in": "plus.magnifyingglass", "zoom_out": "minus.magnifyingglass",
         "weapon_prev": "chevron.left", "weapon_next": "chevron.right", "throttle_up": "chevron.up.2",
         "throttle_down": "chevron.down.2", "yaw_left": "rotate.left.fill", "yaw_right": "rotate.right.fill",
-        "cheat": "bolt.fill", "speaker": "speaker.wave.2.fill", "speaker_muted": "speaker.slash.fill",
+        "cheat": "bolt.fill", "mods": "puzzlepiece.extension.fill", "speaker": "speaker.wave.2.fill", "speaker_muted": "speaker.slash.fill",
         "mic": "mic.fill", "mic_muted": "mic.slash.fill", "buy_weapon": "cart.fill",
         "tow_hook": "car.side.rear.tow.hitch.fill", "tow_arm_up": "arrow.up.to.line", "tow_arm_down": "arrow.down.to.line", "roof": "convertible.side.arrowtriangle.up.arrowtriangle.down.fill",
         "steer_left": "arrowtriangle.left.fill", "steer_right": "arrowtriangle.right.fill",
@@ -43,6 +43,7 @@ enum ControlStyle {
         "missile": "flame.fill"]
     /// iOS 15-17 have no tow hitch or convertible symbols (they came in iOS 18).
     static let olderSymbol: [String: String] = [
+        "mods": "puzzlepiece.fill",
         "tow_hook": "truck.pickup.side.fill", "roof": "car.side.arrowtriangle.up.arrowtriangle.down.fill"]
     /// Model name hashes (joaat) from the game's vehicles.meta: tow trucks, whose hook releases
     /// with INPUT_VEH_GRAPPLING_HOOK, and cars with an animated convertible roof (animConvRoofDictName).
@@ -348,6 +349,12 @@ final class TouchControlsView: UIView {
     private let pause = ControlButton("pause", icon: "pause", label: "Pause menu")
     private let settings = ControlButton("settings", icon: "settings", label: L10n.text("Settings"))
     private let cheat = ControlButton("cheat", icon: "cheat", label: L10n.text("Lệnh cheat"))
+    /// Script mods (GTA-69): shown while one runs; opens the mod tray (ModKeysView).
+    private let mods = ControlButton("mods", icon: "mods", label: "Plugin")
+    var modsActive = false { didSet { if modsActive != oldValue { updateVisibility(); setNeedsLayout() } } }
+    var openMods: (() -> Void)?
+    /// Where the Mods control is, for the tray that opens from it.
+    var modsButtonFrame: CGRect? { mods.isHidden || mods.superview == nil ? nil : mods.frame }
     private let speaker = ControlButton("speaker", icon: "speaker", label: "Loa Voice Chat")
     private let mic = ControlButton("mic", icon: "mic", label: "Micro Voice Chat")
     private let buyWeapon = ControlButton("buyWeapon", icon: "buy_weapon", label: "Tương tác: mua súng · cảnh sát bắt · bác sĩ chữa")
@@ -371,7 +378,7 @@ final class TouchControlsView: UIView {
     private var allButtons: [ControlButton] {
         [fire, aim, leftFire, leftAim, jump, enter, weapons, reload, cover, crouch, switcher, special, interact, detonate, zoomIn, zoomOut,
          weaponPrev, weaponNext, gas, brake, handbrake, steerLeft, steerRight, driveBy, horn, lookBack,
-         vehicleWeapon, towHook, towArmUp, towArmDown, roof, dive, surface, airFire, gear, throttleUp, throttleDown, yawLeft, yawRight, camera, phone, pause, settings, cheat,
+         vehicleWeapon, towHook, towArmUp, towArmDown, roof, dive, surface, airFire, gear, throttleUp, throttleDown, yawLeft, yawRight, camera, phone, pause, settings, cheat, mods,
          speaker, mic, buyWeapon, lights, radio,
          up, down, left, right, accept, back, phoneOption, taxiHurry, taxiStop, tabLeft, tabRight]
     }
@@ -446,7 +453,8 @@ final class TouchControlsView: UIView {
         let steering: [ControlButton] = GameSettings.shared.steeringButtons ? [steerLeft, steerRight] : []
         let online = MugoatOnlineEnabled()
         let isSandbox = (GameSettings.shared.gameMode == .sandbox)
-        let onlineButtons: [ControlButton] = online ? [speaker, mic, buyWeapon] : (isSandbox ? [] : [cheat])
+        let scriptModsButtons: [ControlButton] = (modsActive && !online) ? [mods] : []
+        let onlineButtons: [ControlButton] = online ? [speaker, mic, buyWeapon] : (isSandbox ? scriptModsButtons : [cheat] + scriptModsButtons)
         let utility: [ControlButton] = context.driving ? [radio, lights, camera, phone, pause, settings] + onlineButtons : [camera, phone, pause, settings] + onlineButtons
         if context == .menu { return [pause, settings] + onlineButtons + [up, down, left, right, accept, back, tabLeft, tabRight] }
         if phoneDock { return [camera, phone, pause, settings] + onlineButtons + [up, down, left, right, accept, back, phoneOption] }
@@ -564,7 +572,7 @@ final class TouchControlsView: UIView {
         moveStick.baseDiameter = 120 * scale; moveStick.travel = 48 * scale
 
         // Utility bar, top centre: rare actions in the hard-to-reach zone.
-        let order = [radio, lights, camera, phone, pause, settings, cheat, speaker, mic, buyWeapon]
+        let order = [radio, lights, camera, phone, pause, settings, cheat, mods, speaker, mic, buyWeapon]
         let bar = order.filter { visible.contains($0) }
         for (i, button) in bar.enumerated() {
             let offset = (CGFloat(i) - CGFloat(bar.count - 1) / 2) * 54 * scale / safe.width
@@ -822,6 +830,8 @@ final class TouchControlsView: UIView {
             DispatchQueue.main.async { self.openSettings?() }
         case cheat:
             DispatchQueue.main.async { self.openCheat?() }
+        case mods:
+            DispatchQueue.main.async { self.openMods?() }
         case speaker:
             let enabled = !MugoatVoiceIsSpeakerEnabled()
             MugoatVoiceSetSpeakerEnabled(enabled)

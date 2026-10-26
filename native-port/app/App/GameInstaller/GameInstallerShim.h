@@ -57,6 +57,8 @@ int gi_punch_hole(int fd, int64_t offset, int64_t length, int64_t block);
 /// Returns number of files extracted on success, or -1 on error.
 int gi_extract_archive(const char *archive_path, const char *destination_folder);
 int gi_inflate_raw(const void *input, uint32_t input_size, void *output, uint32_t output_size);
+uint32_t gi_deflate_raw(const void *input, uint32_t input_size, void *output, uint32_t output_size);
+int gi_inflate_resource(const void *input, uint32_t input_size, void *output, uint32_t output_size);
 
 /// libarchive version string, for logs.
 const char *gi_libarchive_version(void);
