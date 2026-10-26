@@ -22,6 +22,13 @@ GUARD_DECLARATION = (
     'extern u32 pg_script_hash_blocked(u32 hash);'
 )
 
+# Also ensure declarations are in game-impl.h for all files
+impl_path = root / 'Generated/game-impl.h'
+if impl_path.exists():
+    impl_text = impl_path.read_text()
+    if 'pg_script_request_allowed' not in impl_text:
+        impl_path.write_text(impl_text + '\n' + GUARD_DECLARATION + '\n')
+
 WRAPS = [
     (fn('script_commands::SetupScriptCommands()::scrWrapped_REQUEST_SCRIPT::Call(rage::scrThread::Info&)'), 'name', 'request'),
     (fn('script_commands::SetupScriptCommands()::scrWrapped_REQUEST_SCRIPT_WITH_NAME_HASH::Call(rage::scrThread::Info&)'), 'hash', 'request_hash'),
@@ -61,8 +68,11 @@ for number, key, kind in WRAPS:
                f'{check}'
                f'  pg_guard_original_f{number}(instance, var_p0);\n}}\n')
     s = s[:start] + original + wrapper + s[end:]
-    if 'pg_script_request_allowed' not in s:
+    if GUARD_DECLARATION not in s:
         first = re.search(r'^#include "game-[a-z-]*impl\.h"$', s, re.M)
-        s = s[:first.end()] + '\n' + GUARD_DECLARATION + s[first.end():]
+        if first:
+            s = s[:first.end()] + '\n' + GUARD_DECLARATION + s[first.end():]
+        else:
+            s = GUARD_DECLARATION + '\n' + s
     path.write_text(s)
     print(f'script request guard: f{number} wrapped ({kind})')
