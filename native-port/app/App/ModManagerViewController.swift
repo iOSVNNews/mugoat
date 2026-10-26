@@ -485,8 +485,11 @@ final class ModManagerViewController: UITableViewController, UIDocumentPickerDel
             return
         }
 
-        let lines: [String] = plan.items.map { "• \($0.target)\($0.note.isEmpty ? "" : " (\($0.note))") } +
-                              plan.skipped.map { "✕ \($0.file) (\($0.reason))" }
+        let lines: [String] = plan.items.map { item in
+            let noteStr = item.note.isEmpty ? "" : " (\(item.note))"
+            return "• \(item.target)\(noteStr)"
+        } +
+        plan.skipped.map { "✕ \($0.file) (\($0.reason))" }
         let title = String(format: L10n.text("Cài đặt \"%@\"?"), plan.name)
         let message = lines.prefix(15).joined(separator: "\n") + (lines.count > 15 ? "\n...và \(lines.count - 15) mục khác" : "")
 
